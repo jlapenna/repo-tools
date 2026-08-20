@@ -2,16 +2,15 @@
 // Watch one GitHub Actions run until it completes: the single-run
 // "did this CI run pass?" watcher (adopted from sprinkles'
 // github-ci-monitor skill, where it started as scripts/monitor.cjs).
-// fleet-watch-prs answers the auto-merge lifecycle question ("did my PRs
+// repo-watch-prs answers the auto-merge lifecycle question ("did my PRs
 // land, and if not, what needs fixing?"); this answers the narrower one a
 // session has right after a push: pass or fail, with failed-job logs on
 // failure. Polls every 30s, printing only status changes.
 //
-// This is the fleet's single copy (packages/fleet-tools, agent-lcars#1328):
-// installed on PATH as `fleet-watch-run`, repo identity discovered from cwd
-// via `gh` -- no repo-specific hook needed.
+// This is the public package's single copy: installed on PATH as
+// `repo-watch-run`, with repository identity discovered from cwd via `gh`.
 //
-// Usage: fleet-watch-run [--workflow <name>] [--timeout <minutes>] <pr-number-or-branch>
+// Usage: repo-watch-run [--workflow <name>] [--timeout <minutes>] <pr-number-or-branch>
 //   --workflow <name>    only consider runs of this workflow (name or file
 //                        name, forwarded to `gh run list --workflow`);
 //                        without it the branch's newest run of any workflow
@@ -143,7 +142,7 @@ Run Completed! Conclusion: ${conclusion}`);
 
 function usage() {
   console.error(
-    'Usage: fleet-watch-run [--workflow <name>] [--timeout <minutes>] <pr-number-or-branch>',
+    'Usage: repo-watch-run [--workflow <name>] [--timeout <minutes>] <pr-number-or-branch>',
   );
   process.exit(1);
 }

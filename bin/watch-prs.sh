@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Watch armed PRs until every one merges or any one needs attention.
 #
-# The single-run monitor (fleet-watch-run) answers "did this CI run pass?";
+# The single-run monitor (repo-watch-run) answers "did this CI run pass?";
 # this script answers the auto-merge lifecycle question an agent session
 # actually has after `gh pr merge --auto`: "did my PRs land, and if not,
 # what do I need to fix?" It polls each PR and exits the moment anything
@@ -32,11 +32,10 @@
 # Requires: gh (authenticated). Poll cost is two `gh` calls per PR per
 # interval; the default 120s keeps that well inside rate limits.
 #
-# This is the fleet's single copy (packages/fleet-tools, agent-lcars#1328):
-# consumer repos hold no copies -- the package installs it on PATH as
-# `fleet-watch-prs` (workstations via a global pnpm install tracking main,
-# the runner image at image build). The script is fully repo-neutral (repo
-# identity is discovered from cwd), so no parameterization hook is needed.
+# This public package is the single implementation: consumer repositories hold
+# no copies, and the package installs it on PATH as `repo-watch-prs`. The
+# script is fully repo-neutral (repository identity is discovered from cwd),
+# so no parameterization hook is needed.
 
 set -euo pipefail
 
