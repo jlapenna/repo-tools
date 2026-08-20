@@ -5,6 +5,7 @@
   "description": "General repository-management commands for worktree safety and CI monitoring.",
   "license": "MIT",
   "bin": {
+    "repo-require-worktree": "bin/require-feature-worktree.sh",
     "repo-scan-live-processes": "bin/scan-live-processes.sh"
   },
   "files": [
