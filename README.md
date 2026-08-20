@@ -17,3 +17,4 @@ or Agent LCARS runtime behavior.
 - `repo-watch-run` — watch one workflow run for a pull request or branch.
 - `repo-safe-remove-worktree` — validate and safely remove a completed
   feature worktree.
+- `repo-nx` — run Nx with portable cache and linked-worktree safeguards.

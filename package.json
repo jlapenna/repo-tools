@@ -6,6 +6,7 @@
   "license": "MIT",
   "bin": {
     "repo-require-worktree": "bin/require-feature-worktree.sh",
+    "repo-nx": "bin/nx.sh",
     "repo-safe-remove-worktree": "bin/safe-remove-worktree.sh",
     "repo-watch-run": "bin/watch-run.cjs",
     "repo-watch-prs": "bin/watch-prs.sh",
