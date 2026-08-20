@@ -1,0 +1,13 @@
+{
+  "name": "@jlapenna/repo-tools",
+  "version": "0.0.0",
+  "private": false,
+  "description": "General repository-management commands for worktree safety and CI monitoring.",
+  "license": "MIT",
+  "bin": {
+    "repo-scan-live-processes": "bin/scan-live-processes.sh"
+  },
+  "files": [
+    "bin"
+  ]
+}
