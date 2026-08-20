@@ -15,3 +15,5 @@ or Agent LCARS runtime behavior.
 - `repo-watch-prs` — watch auto-merge lifecycle for pull requests in the
   current repository.
 - `repo-watch-run` — watch one workflow run for a pull request or branch.
+- `repo-safe-remove-worktree` — validate and safely remove a completed
+  feature worktree.
