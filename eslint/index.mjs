@@ -65,8 +65,7 @@ function fleetBaseline({ simpleImportSort, unusedImports }) {
       // so the syntax bans are unsatisfiable ceremony there. Import-order
       // and unused-symbol hygiene above still apply. Both repos already
       // exempted .cjs this way (one explicitly, one by never globbing it),
-      // which is what keeps the canonical-synced .cjs twins free of
-      // eslint-disable comments in either repo.
+      // avoiding unnecessary eslint-disable comments in consumer code.
       files: ["**/*.cjs"],
       rules: {
         "no-restricted-syntax": "off"
