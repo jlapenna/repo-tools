@@ -19,6 +19,9 @@ selection and repository-specific rules.
 
 - `repo-scan-live-processes <directory>` — list processes whose working
   directory is inside a repository or worktree.
+- `repo-check-dependencies` — validate a pnpm frozen lockfile and report
+  missing or invalid packages in the resolved dependency tree. Repository
+  policy (such as permitted workspace dependency names) remains local.
 - `repo-require-worktree [commits and pushes|pushes]` — reject authoring from
   a primary checkout or `main`, while allowing deletion-only pushes.
 - `repo-watch-prs` — watch auto-merge lifecycle for pull requests in the
