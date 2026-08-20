@@ -14,3 +14,4 @@ or Agent LCARS runtime behavior.
   a primary checkout or `main`, while allowing deletion-only pushes.
 - `repo-watch-prs` — watch auto-merge lifecycle for pull requests in the
   current repository.
+- `repo-watch-run` — watch one workflow run for a pull request or branch.
