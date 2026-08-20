@@ -12,3 +12,5 @@ or Agent LCARS runtime behavior.
   directory is inside a repository or worktree.
 - `repo-require-worktree [commits and pushes|pushes]` — reject authoring from
   a primary checkout or `main`, while allowing deletion-only pushes.
+- `repo-watch-prs` — watch auto-merge lifecycle for pull requests in the
+  current repository.
