@@ -6,6 +6,15 @@ The package owns worktree safety, process inspection, CI monitoring, and
 shared repository tooling. It must not contain agent identity, agent session,
 or Agent LCARS runtime behavior.
 
+## ESLint plugin and baseline
+
+`@jlapenna/repo-tools/eslint` is the single maintained implementation of the
+fleet's Nx-aware client/server and Server Action rules, plus its shared flat
+config baseline. A consumer registers `fleetEslintPlugin` under its own
+namespace and spreads `fleetBaseline({ simpleImportSort, unusedImports })`
+into its flat config. The consuming repository retains only its local config
+selection and repository-specific rules.
+
 ## Commands
 
 - `repo-scan-live-processes <directory>` — list processes whose working
