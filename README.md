@@ -27,3 +27,9 @@ selection and repository-specific rules.
 - `repo-safe-remove-worktree` — validate and safely remove a completed
   feature worktree.
 - `repo-nx` — run Nx with portable cache and linked-worktree safeguards.
+
+## Skills
+
+The Codex plugin exposes `worktree-hygiene`, the authoritative guidance for
+using these commands safely in a shared repository checkout. Repository-local
+documentation should link to this skill rather than mirror its body.
