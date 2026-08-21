@@ -33,6 +33,12 @@ selection and repository-specific rules.
 
 ## Skills
 
-The Codex plugin exposes `worktree-hygiene`, the authoritative guidance for
-using these commands safely in a shared repository checkout. Repository-local
-documentation should link to this skill rather than mirror its body.
+The Codex plugin exposes two authoritative skills:
+
+- `worktree-hygiene` covers safe creation, use, and teardown in shared
+  repository checkouts.
+- `github-ci-monitor` covers `repo-watch-run` and `repo-watch-prs`, including
+  protected auto-merge attention states.
+
+Repository-local documentation may retain its own protection policy and check
+names, but should link to these skills rather than mirror their bodies.
