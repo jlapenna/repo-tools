@@ -1,7 +1,7 @@
 {
   "name": "repo-tools",
-  "version": "1.0.0",
-  "description": "General repository-management commands and skills.",
+  "version": "1.1.0",
+  "description": "General repository-management commands and skills for safe worktrees and CI monitoring.",
   "author": {
     "name": "Joe LaPenna",
     "url": "https://github.com/jlapenna"
@@ -9,18 +9,19 @@
   "homepage": "https://github.com/jlapenna/repo-tools",
   "repository": "https://github.com/jlapenna/repo-tools",
   "license": "MIT",
-  "keywords": ["git", "worktree", "repository-management"],
+  "keywords": ["ci", "git", "github", "worktree", "repository-management"],
   "skills": "./skills/",
   "interface": {
     "displayName": "Repo Tools",
-    "shortDescription": "Safe worktree and repository-management guidance.",
-    "longDescription": "Loads the shared worktree-hygiene skill for general repository management.",
+    "shortDescription": "Safe worktree and CI-monitoring guidance.",
+    "longDescription": "Loads authoritative worktree-hygiene and GitHub CI-monitoring skills for general repository management.",
     "developerName": "Joe LaPenna",
     "category": "Productivity",
     "capabilities": ["Interactive", "Write"],
     "defaultPrompt": [
       "Create a safe worktree for this change.",
-      "Audit and remove this completed worktree."
+      "Audit and remove this completed worktree.",
+      "Watch this pull request through CI and protected auto-merge."
     ]
   }
 }
