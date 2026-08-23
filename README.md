@@ -6,6 +6,9 @@ The package owns worktree safety, process inspection, CI monitoring, and
 shared repository tooling. It must not contain agent identity, agent session,
 or Agent LCARS runtime behavior.
 
+Repository-agnostic guidance for deciding which tests and checks earn their
+cost is in [docs/testing-policy.md](docs/testing-policy.md).
+
 ## ESLint plugin and baseline
 
 `@jlapenna/repo-tools/eslint` is the single maintained implementation of the
