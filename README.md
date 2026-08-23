@@ -7,7 +7,7 @@ shared repository tooling. It must not contain agent identity, agent session,
 or Agent LCARS runtime behavior.
 
 Repository-agnostic guidance for deciding which tests and checks earn their
-cost is in [docs/testing-policy.md](docs/testing-policy.md).
+cost is in the [testing-policy skill reference](plugins/repo-tools/skills/testing-policy/references/testing-policy.md).
 
 ## ESLint plugin and baseline
 
@@ -42,6 +42,7 @@ The Codex plugin exposes two authoritative skills:
   repository checkouts.
 - `github-ci-monitor` covers `repo-watch-run` and `repo-watch-prs`, including
   protected auto-merge attention states.
+- `testing-policy` guides test, CI-check, and control-flag decisions.
 
 Repository-local documentation may retain its own protection policy and check
 names, but should link to these skills rather than mirror their bodies.

@@ -9,19 +9,20 @@
   "homepage": "https://github.com/jlapenna/repo-tools",
   "repository": "https://github.com/jlapenna/repo-tools",
   "license": "MIT",
-  "keywords": ["ci", "git", "github", "worktree", "repository-management"],
+  "keywords": ["ci", "git", "github", "testing", "worktree", "repository-management"],
   "skills": "./skills/",
   "interface": {
     "displayName": "Repo Tools",
-    "shortDescription": "Safe worktree and CI-monitoring guidance.",
-    "longDescription": "Loads authoritative worktree-hygiene and GitHub CI-monitoring skills for general repository management.",
+    "shortDescription": "Safe worktree, CI-monitoring, and testing-policy guidance.",
+    "longDescription": "Loads authoritative worktree-hygiene, GitHub CI-monitoring, and testing-policy skills for general repository management.",
     "developerName": "Joe LaPenna",
     "category": "Productivity",
     "capabilities": ["Interactive", "Write"],
     "defaultPrompt": [
       "Create a safe worktree for this change.",
       "Audit and remove this completed worktree.",
-      "Watch this pull request through CI and protected auto-merge."
+      "Watch this pull request through CI and protected auto-merge.",
+      "Decide whether this test or CI check protects an observable contract."
     ]
   }
 }
