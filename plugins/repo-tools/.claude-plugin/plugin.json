@@ -1,0 +1,13 @@
+{
+  "name": "repo-tools",
+  "version": "1.1.0",
+  "description": "General repository-management commands and skills for safe worktrees and CI monitoring.",
+  "author": {
+    "name": "Joe LaPenna",
+    "url": "https://github.com/jlapenna"
+  },
+  "homepage": "https://github.com/jlapenna/repo-tools",
+  "repository": "https://github.com/jlapenna/repo-tools",
+  "license": "MIT",
+  "keywords": ["ci", "git", "github", "testing", "worktree", "repository-management"]
+}

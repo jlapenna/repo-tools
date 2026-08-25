@@ -22,7 +22,7 @@
   ],
   "scripts": {
     "build": "node scripts/build-eslint.mjs",
-    "test": "bash bin/check-dependencies.test.sh && bash bin/safe-remove-worktree.test.sh && pnpm run build && node --test eslint/test/consumer-contract.test.mjs && vitest run eslint/test/rules"
+    "test": "bash bin/check-dependencies.test.sh && bash bin/safe-remove-worktree.test.sh && node --test plugins/manifests.test.mjs && pnpm run build && node --test eslint/test/consumer-contract.test.mjs && vitest run eslint/test/rules"
   },
   "dependencies": {
     "@nx/devkit": "23.1.1",
