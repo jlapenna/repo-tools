@@ -116,6 +116,11 @@ Before running `git worktree remove`, work through this checklist — a
    look stale (clean status, zero unique commits vs main) and still be
    actively serving a dev server or hosting another live session's shell
    right now. Re-run the scan immediately before removing, not just once.
+   Your *own* session does not count: if you were launched with cwd inside
+   the worktree, the scan lists your launcher shell, the `claude`/`codex`
+   binary, its MCP servers, and the shell running the scan itself — that
+   is not a reason to refuse, and the remover in step 5 tells the two
+   apart for you.
 3. **Check your own background tasks/watchers.** A `run_in_background`
    monitor or polling loop launched while your cwd was the worktree
    inherits that cwd — removing the worktree out from under it makes every
@@ -134,15 +139,26 @@ Before running `git worktree remove`, work through this checklist — a
    lock state; if it's dirty, don't delete — report the path, branch, and
    diff stat, and check whether it matches a still-open issue/PR before
    deciding.
-5. **Remove it:**
+5. **Remove it** — as the session's last action, after stepping out of the
+   directory you are about to delete:
    ```bash
+   cd <owning-checkout>
    repo-safe-remove-worktree <worktree-path>
    ```
    The helper resolves the target worktree's own Git common directory, so it
    is safe to invoke from a different repository; inspect the exact removal
-   command first with `--dry-run`. It refuses (with a clear reason) if it
-   finds a live process or uncommitted changes; pass `--force-anyway` only
-   after you've personally reviewed what it flagged. If plain removal reports "cannot remove a
+   command first with `--dry-run`. It classifies every process with cwd
+   under the worktree as either your **own session** (the outermost ancestor
+   of the helper, within the same process session, whose cwd is inside the
+   worktree, plus everything that ancestor spawned — ignored) or **foreign**
+   (listed, and the reason it refuses). It also refuses on uncommitted
+   changes. Pass `--force-anyway` only after you've personally reviewed what
+   it flagged. Never end a session with "run the remover after this session
+   closes" — that hand-off is not executed by anyone, and the worktrees
+   accumulate; your own processes being inside the worktree is exactly the
+   case the helper handles. After a successful removal the shell you ran it
+   from no longer has a cwd; the helper prints the `cd` to run before your
+   next command. If plain removal reports "cannot remove a
    locked working tree" from a harness-owned agent-session lock, confirm
    the locking PID is actually dead first, then `git worktree remove
    <path> --force --force` (twice) — never do this for a worktree you know
