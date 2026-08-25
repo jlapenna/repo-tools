@@ -32,6 +32,13 @@ selection and repository-specific rules.
 - `repo-watch-run` — watch one workflow run for a pull request or branch.
 - `repo-safe-remove-worktree` — validate and safely remove a completed
   feature worktree.
+- `repo-sweep-worktrees [--repo <checkout>] [--base <ref>] [--delete]` —
+  audit every linked worktree of a checkout and, with `--delete`, remove the
+  ones whose work has landed (ancestor of the base, or merged pull request
+  with content identical to its squash) that are clean and unoccupied;
+  dirty, live, open-PR, and unverified worktrees are reported and kept. Run
+  it from the primary checkout, on a schedule, as the backstop for sessions
+  that never completed their own teardown.
 - `repo-nx` — run Nx with portable cache and linked-worktree safeguards.
 
 ## Skills
