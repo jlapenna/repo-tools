@@ -33,6 +33,95 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 
+# Live-process check. Every process whose cwd is under the target is either
+# part of the caller's own session or foreign; only foreign occupants refuse.
+#
+# Own session = the outermost ancestor of this script — within the same
+# process session id, so a tmux server or init started elsewhere is never a
+# candidate — whose cwd is inside the target, plus every descendant of that
+# ancestor. Agent sessions (tmux launcher shell -> claude/codex -> MCP
+# servers -> tool shell) are launched with cwd inside their worktree; without
+# this distinction the guard always found the caller itself and refused every
+# documented teardown.
+report_live_processes() {
+  local target="$1"
+  local -A ppid_of=() sid_of=()
+  local pid_dir pid stat rest cur cwd link cmd label line
+  local own_root="" own_root_cmd="" own_hits=0 foreign_hits=0
+  local own_lines=() foreign_lines=()
+
+  for pid_dir in /proc/[0-9]*; do
+    pid="${pid_dir#/proc/}"
+    # A process can exit between the glob and the read; keep the redirect
+    # failure quiet (stderr must be redirected before the input redirect).
+    IFS= read -r stat 2>/dev/null < "$pid_dir/stat" || continue
+    rest="${stat##*) }"
+    # shellcheck disable=SC2086
+    set -- $rest # state ppid pgrp session ...
+    ppid_of[$pid]="${2:-}"
+    sid_of[$pid]="${4:-}"
+  done
+
+  local my_sid="${sid_of[$$]:-}"
+  cur="$$"
+  while [ -n "$cur" ] && [ "$cur" -gt 1 ]; do
+    [ "${sid_of[$cur]:-}" = "$my_sid" ] || break
+    cwd=$(readlink "/proc/$cur/cwd" 2>/dev/null) || cwd=""
+    case "$cwd" in
+      "$target" | "$target"/*) own_root="$cur" ;;
+    esac
+    cur="${ppid_of[$cur]:-}"
+  done
+  if [ -n "$own_root" ]; then
+    own_root_cmd=$(tr '\0' ' ' < "/proc/$own_root/cmdline" 2>/dev/null || echo "?")
+  fi
+
+  for pid_dir in /proc/[0-9]*; do
+    pid="${pid_dir#/proc/}"
+    link=$(readlink "$pid_dir/cwd" 2>/dev/null) || continue
+    case "$link" in
+      "$target" | "$target"/*) ;;
+      *) continue ;;
+    esac
+    cmd=$(tr '\0' ' ' < "$pid_dir/cmdline" 2>/dev/null || echo "?")
+    label=foreign
+    if [ -n "$own_root" ]; then
+      cur="$pid"
+      while [ -n "$cur" ] && [ "$cur" -gt 1 ]; do
+        if [ "$cur" = "$own_root" ]; then
+          label=own
+          break
+        fi
+        cur="${ppid_of[$cur]:-}"
+      done
+    fi
+    if [ "$label" = own ]; then
+      own_lines+=("$pid  $link  $cmd")
+      own_hits=$((own_hits + 1))
+    else
+      foreign_lines+=("$pid  $link  $cmd")
+      foreign_hits=$((foreign_hits + 1))
+    fi
+  done
+
+  echo "== live processes with cwd under $target =="
+  if [ -n "$own_root" ]; then
+    echo "  own session (ignored): $own_hits  (root pid $own_root: $own_root_cmd)"
+    if [ "${#own_lines[@]}" -gt 0 ]; then
+      for line in "${own_lines[@]}"; do echo "    $line"; done
+    fi
+  fi
+  echo "  foreign: $foreign_hits"
+  if [ "${#foreign_lines[@]}" -gt 0 ]; then
+    for line in "${foreign_lines[@]}"; do echo "    $line"; done
+  fi
+  if [ "$foreign_hits" -gt 0 ] && [ "$FORCE_ANYWAY" != true ]; then
+    echo "REFUSING: $foreign_hits foreign live process(es) found under this worktree." >&2
+    echo "If these are confirmed dead/unrelated, re-run with --force-anyway." >&2
+    exit 2
+  fi
+}
+
 if [ ! -d "$WT" ]; then
   echo "no such directory: $WT" >&2
   exit 1
@@ -121,23 +210,7 @@ if [ "$GIT_DIR" = "$GIT_COMMON_DIR" ]; then
 
   echo "== partially removed linked worktree: $WT_ABS ==" >&2
   echo "Its .git link is missing, so Git cannot safely report its status." >&2
-  echo "== live processes with cwd under $WT_ABS =="
-  hits=0
-  for pid_dir in /proc/[0-9]*; do
-    pid="${pid_dir#/proc/}"
-    link=$(readlink "$pid_dir/cwd" 2>/dev/null) || continue
-    case "$link" in
-      "$WT_ABS" | "$WT_ABS"/*) ;;
-      *) continue ;;
-    esac
-    cmd=$(tr '\0' ' ' < "$pid_dir/cmdline" 2>/dev/null || echo "?")
-    echo "  $pid  $link  $cmd"
-    hits=$((hits + 1))
-  done
-  if [ "$hits" -gt 0 ] && [ "$FORCE_ANYWAY" != true ]; then
-    echo "REFUSING: $hits live process(es) found under this worktree." >&2
-    exit 2
-  fi
+  report_live_processes "$WT_ABS"
   if [ "$FORCE_ANYWAY" != true ]; then
     echo "REFUSING: inspect this orphaned directory, then re-run with --force-anyway to repair its Git link and remove it." >&2
     exit 4
@@ -268,24 +341,7 @@ fi
 
 echo "== owning Git directory: $GIT_COMMON_DIR =="
 
-echo "== live processes with cwd under $WT_ABS =="
-hits=0
-for pid_dir in /proc/[0-9]*; do
-  pid="${pid_dir#/proc/}"
-  link=$(readlink "$pid_dir/cwd" 2>/dev/null) || continue
-  case "$link" in
-    "$WT_ABS" | "$WT_ABS"/*) ;;
-    *) continue ;;
-  esac
-  cmd=$(tr '\0' ' ' < "$pid_dir/cmdline" 2>/dev/null || echo "?")
-  echo "  $pid  $link  $cmd"
-  hits=$((hits + 1))
-done
-if [ "$hits" -gt 0 ] && [ "$FORCE_ANYWAY" != true ]; then
-  echo "REFUSING: $hits live process(es) found under this worktree." >&2
-  echo "If these are confirmed dead/unrelated, re-run with --force-anyway." >&2
-  exit 2
-fi
+report_live_processes "$WT_ABS"
 
 echo "== git status in worktree =="
 git -C "$WT_ABS" status --porcelain || true
@@ -318,3 +374,9 @@ fi
 echo "done."
 echo "If that reported a locked working tree from a pid you've confirmed is dead,"
 echo "re-run: git --git-dir=\"$GIT_COMMON_DIR\" worktree remove \"$WT_ABS\" --force --force"
+case "$PWD" in
+  "$WT_ABS" | "$WT_ABS"/*)
+    echo "NOTE: your shell's cwd was inside the removed worktree and no longer exists."
+    echo "Before the next command, run: cd $PRIMARY_WORKTREE"
+    ;;
+esac
