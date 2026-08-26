@@ -1,7 +1,7 @@
 {
   "name": "repo-tools",
-  "version": "1.1.0",
-  "description": "General repository-management commands and skills for safe worktrees and CI monitoring.",
+  "version": "1.2.0",
+  "description": "General repository-management commands and skills for safe worktrees, CI monitoring, and PR delivery.",
   "author": {
     "name": "Joe LaPenna",
     "url": "https://github.com/jlapenna"
@@ -13,8 +13,8 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "Repo Tools",
-    "shortDescription": "Safe worktree, CI-monitoring, and testing-policy guidance.",
-    "longDescription": "Loads authoritative worktree-hygiene, GitHub CI-monitoring, and testing-policy skills for general repository management.",
+    "shortDescription": "Safe worktree, CI-monitoring, testing-policy, and PR-delivery guidance.",
+    "longDescription": "Loads authoritative worktree-hygiene, GitHub CI-monitoring, testing-policy, and PR-delivery (land-pr) skills for general repository management.",
     "developerName": "Joe LaPenna",
     "category": "Productivity",
     "capabilities": ["Interactive", "Write"],
@@ -22,7 +22,8 @@
       "Create a safe worktree for this change.",
       "Audit and remove this completed worktree.",
       "Watch this pull request through CI and protected auto-merge.",
-      "Decide whether this test or CI check protects an observable contract."
+      "Decide whether this test or CI check protects an observable contract.",
+      "Land this pull request through review, merge, and cleanup."
     ]
   }
 }
