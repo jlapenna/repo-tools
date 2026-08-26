@@ -43,13 +43,16 @@ selection and repository-specific rules.
 
 ## Skills
 
-The Codex plugin exposes two authoritative skills:
+The Codex plugin exposes four authoritative skills:
 
 - `worktree-hygiene` covers safe creation, use, and teardown in shared
   repository checkouts.
 - `github-ci-monitor` covers `repo-watch-run` and `repo-watch-prs`, including
   protected auto-merge attention states.
 - `testing-policy` guides test, CI-check, and control-flag decisions.
+- `land-pr` carries a local change or existing pull request through the
+  complete delivery lifecycle: commit, push, PR, CI and review, protected
+  merge, post-merge verification, and worktree/branch cleanup.
 
 Repository-local documentation may retain its own protection policy and check
 names, but should link to these skills rather than mirror their bodies.
