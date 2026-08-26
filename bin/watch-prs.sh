@@ -24,7 +24,8 @@
 # the verdict positionally. Check names are sanitized to preserve that (see
 # sanitize_names below) — real names here contain spaces ("E2E Tests").
 # Reasons: dirty (needs rebase), behind (only with --strict — update
-# the branch), checks-failed:<names> (failed OR cancelled required checks),
+# the branch), auto-merge-unarmed (green PR needs an explicit merge
+# disposition), checks-failed:<names> (failed OR cancelled required checks),
 # unresolved-threads:<n> (green checks but dangling review threads — under
 # required_review_thread_resolution auto-merge waits forever; resolve them
 # per the repo's pr.md GraphQL recipe), closed-unmerged.
@@ -132,8 +133,8 @@ while true; do
   for pr in "${prs[@]}"; do
     [ "${merged[$pr]:-}" = "1" ] && continue
 
-    if ! status=$(gh pr view "$pr" --json state,mergeStateStatus \
-      --jq '.state + ":" + .mergeStateStatus' 2>/dev/null); then
+    if ! status=$(gh pr view "$pr" --json state,mergeStateStatus,autoMergeRequest \
+      --jq '[.state, .mergeStateStatus, (.autoMergeRequest != null)] | @tsv' 2>/dev/null); then
       # Transient gh/network error: report once, keep watching.
       all_merged=false
       [ "${last[$pr]:-}" != "gh-error" ] && log "PR #$pr: gh lookup failed (will retry)"
@@ -141,7 +142,7 @@ while true; do
       continue
     fi
 
-    state="${status%%:*}"
+    IFS=$'\t' read -r state merge_state auto_merge_armed <<<"$status"
 
     case "$state" in
       MERGED)
@@ -162,12 +163,12 @@ while true; do
       last[$pr]="$status"
     fi
 
-    case "$status" in
-      *DIRTY*)
+    case "$merge_state" in
+      DIRTY)
         echo "VERDICT ATTENTION $pr dirty"
         exit 2
         ;;
-      *BEHIND*)
+      BEHIND)
         # A non-strict ruleset permits this state. Opt into attention only
         # when the repository actually requires an up-to-date branch.
         if [ "$strict" = true ]; then
@@ -194,15 +195,25 @@ while true; do
       exit 2
     fi
 
+    pending=$(printf '%s' "$buckets" |
+      jq -r '[.[] | select(.bucket == "pending")] | length' 2>/dev/null || echo 1)
+
+    # A watcher is normally started after arming auto-merge, but verify that
+    # precondition instead of sleeping forever when a PR was opened by a human
+    # or an interactive agent. Green is not a merge disposition.
+    if [ "$pending" = "0" ] && [ "$auto_merge_armed" != "true" ]; then
+      log "PR #$pr: green checks but auto-merge is not armed"
+      echo "VERDICT ATTENTION $pr auto-merge-unarmed"
+      exit 2
+    fi
+
     # Green checks + BLOCKED + unresolved review threads = the silent
     # forever-wait required_review_thread_resolution creates: auto-merge
     # reports no error and no state change, so without this the watch
     # sleeps for good (this exact combination held three armed PRs on
     # 2026-08-11). Only fires once nothing is pending, so a review that
     # lands mid-CI doesn't exit the watch prematurely.
-    pending=$(printf '%s' "$buckets" |
-      jq -r '[.[] | select(.bucket == "pending")] | length' 2>/dev/null || echo 1)
-    if [ "$pending" = "0" ] && [ "$status" = "OPEN:BLOCKED" ]; then
+    if [ "$pending" = "0" ] && [ "$merge_state" = "BLOCKED" ]; then
       threads=$(unresolved_thread_count "$pr")
       if [ "$threads" -gt 0 ]; then
         log "PR #$pr: green checks but $threads unresolved review thread(s)"

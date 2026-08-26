@@ -47,13 +47,17 @@ The final output line is a machine-readable verdict:
 | `VERDICT ALL-MERGED` | Every watched pull request merged. |
 | `VERDICT ATTENTION <pr> dirty` | The branch conflicts with its base. |
 | `VERDICT ATTENTION <pr> behind` | Strict mode requires an update. |
+| `VERDICT ATTENTION <pr> auto-merge-unarmed` | Green checks do not merge a PR; arm auto-merge or merge it directly. |
 | `VERDICT ATTENTION <pr> checks-failed:<names>` | Required checks failed or were cancelled. |
 | `VERDICT ATTENTION <pr> unresolved-threads:<n>` | Green checks are blocked by unresolved review threads. |
 | `VERDICT ATTENTION <pr> closed-unmerged` | The pull request closed without merging. |
 
 An attention verdict returns ownership to the calling session: diagnose the
 reported state, make one targeted correction, and start the watcher again
-against the new head. Do not treat attention as task completion.
+against the new head. Do not treat attention as task completion. In
+particular, `auto-merge-unarmed` is a required decision point: use
+`gh pr merge --auto` when the repository supports protected auto-merge, or
+merge directly once all gates pass and the task authorizes delivery.
 
 Transient GitHub or network errors are reported and retried. The pull-request
 watcher has no timeout because a quiet protected merge queue is normal; stop it
