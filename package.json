@@ -24,7 +24,8 @@
   },
   "files": [
     "bin",
-    "eslint/index.mjs"
+    "eslint/index.mjs",
+    "plugins/repo-tools/scripts"
   ],
   "scripts": {
     "build": "node scripts/build-eslint.mjs",

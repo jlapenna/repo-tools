@@ -54,13 +54,19 @@ the pushed commit. Arm protected auto-merge when supported, but keep monitoring.
 
 ## Shepherd CI and review
 
-Prefer a repository-provided lifecycle watcher when one exists. Otherwise run
-`repo-watch-prs` (from the `@jlapenna/repo-tools` install on PATH) from the
-target repository after arming auto-merge:
+Prefer a repository-provided lifecycle watcher when one exists. Otherwise use
+the watcher bundled with this plugin after arming auto-merge. Derive an
+absolute plugin root from the path used to read this file (two directories
+above this `SKILL.md`), call it `$REPO_TOOLS_PLUGIN_ROOT`, and run from the
+target repository:
 
 ```bash
-repo-watch-prs <pr-number> [<pr-number>...]
+bash "$REPO_TOOLS_PLUGIN_ROOT/scripts/repo-watch-prs.sh" <pr-number> [<pr-number>...]
 ```
+
+An npm installation of `@jlapenna/repo-tools` also exposes the equivalent
+`repo-watch-prs` command on `PATH`, but a plugin-only installation does not
+depend on that package.
 
 The default matches a non-strict ruleset and ignores `BEHIND`; pass `--strict`
 only when branch protection actually requires an up-to-date head.

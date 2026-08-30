@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "General repository-management commands and skills for safe worktrees, CI monitoring, testing policy, and PR delivery. Same plugin as the Codex marketplace in .agents/plugins/marketplace.json.",
-    "version": "1.2.0"
+    "version": "1.2.1"
   },
   "plugins": [
     {
