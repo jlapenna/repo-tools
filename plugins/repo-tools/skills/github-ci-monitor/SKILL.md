@@ -5,23 +5,31 @@ description: Watch GitHub Actions runs and armed auto-merge pull requests until 
 
 # GitHub CI Monitor
 
-Use the public `repo-tools` commands instead of hand-written polling loops or
-repository-local watcher copies. Both commands emit only state changes and a
-terminal verdict, so a long quiet run does not consume the caller's context.
+Use the watcher scripts bundled with this plugin instead of hand-written
+polling loops or repository-local copies. Derive an absolute plugin root from
+the path used to read this file: it is two directories above this `SKILL.md`.
+The examples call that resolved path `$REPO_TOOLS_PLUGIN_ROOT`. Both scripts
+emit only state changes and a terminal verdict, so a long quiet run does not
+consume the caller's context.
+
+An npm installation of `@jlapenna/repo-tools` also exposes equivalent
+`repo-watch-run` and `repo-watch-prs` commands on `PATH`. Do not assume that
+package is installed when this skill came from the Codex or Claude plugin;
+the plugin-relative scripts below are always available with the skill.
 
 ## Watch one workflow run
 
-`repo-watch-run` answers whether one workflow run passed:
+`repo-watch-run.cjs` answers whether one workflow run passed:
 
 ```bash
-repo-watch-run [--workflow <name>] [--timeout <minutes>] <pr-number-or-branch>
+node "$REPO_TOOLS_PLUGIN_ROOT/scripts/repo-watch-run.cjs" [--workflow <name>] [--timeout <minutes>] <pr-number-or-branch>
 ```
 
 Examples:
 
 ```bash
-repo-watch-run 885
-repo-watch-run --workflow CI main
+node "$REPO_TOOLS_PLUGIN_ROOT/scripts/repo-watch-run.cjs" 885
+node "$REPO_TOOLS_PLUGIN_ROOT/scripts/repo-watch-run.cjs" --workflow CI main
 ```
 
 It finds the latest matching run, reports status changes, prints focused
@@ -33,7 +41,7 @@ After arming auto-merge, the real question is whether the pull request landed
 or needs intervention. Use:
 
 ```bash
-repo-watch-prs [--strict] [--interval <seconds>] <pr> [<pr>...]
+bash "$REPO_TOOLS_PLUGIN_ROOT/scripts/repo-watch-prs.sh" [--strict] [--interval <seconds>] <pr> [<pr>...]
 ```
 
 Use `--strict` only when the repository's branch protection requires the head

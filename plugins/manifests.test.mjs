@@ -6,7 +6,14 @@
 // runtime's manifest but not the other's fails plugin installation fleet-wide
 // without any other check noticing. Consumer: `pnpm test` in ci.yml.
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync, existsSync } from 'node:fs';
+import {
+  constants,
+  existsSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+} from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
@@ -45,4 +52,51 @@ for (const [runtime, { marketplace, pluginManifest }] of Object.entries(runtimes
 test('codex and claude marketplaces describe the same plugins', () => {
   const names = (path) => readJson(path).plugins.map((p) => `${p.name}@${pluginPath(p)}`).sort();
   assert.deepEqual(names(runtimes.codex.marketplace), names(runtimes.claude.marketplace));
+});
+
+test('repo-tools plugin bundles executable CI watchers referenced by its skills', () => {
+  const pluginRoot = join(root, 'plugins/repo-tools');
+  const watchRun = join(pluginRoot, 'scripts/repo-watch-run.cjs');
+  const watchPrs = join(pluginRoot, 'scripts/repo-watch-prs.sh');
+
+  for (const script of [watchRun, watchPrs]) {
+    assert.ok(existsSync(script), `${script} must be bundled with the plugin`);
+    assert.ok(
+      statSync(script).mode & constants.X_OK,
+      `${script} must remain executable`,
+    );
+  }
+
+  const ciMonitor = readFileSync(
+    join(pluginRoot, 'skills/github-ci-monitor/SKILL.md'),
+    'utf8',
+  );
+  const landPr = readFileSync(
+    join(pluginRoot, 'skills/land-pr/SKILL.md'),
+    'utf8',
+  );
+  assert.match(ciMonitor, /scripts\/repo-watch-run\.cjs/);
+  assert.match(ciMonitor, /scripts\/repo-watch-prs\.sh/);
+  assert.match(landPr, /scripts\/repo-watch-prs\.sh/);
+
+  const runUsage = spawnSync(process.execPath, [watchRun], {
+    cwd: pluginRoot,
+    encoding: 'utf8',
+  });
+  assert.equal(runUsage.status, 1);
+  assert.match(runUsage.stderr, /^Usage: repo-watch-run/m);
+
+  const prsUsage = spawnSync('bash', [watchPrs], {
+    cwd: pluginRoot,
+    encoding: 'utf8',
+  });
+  assert.equal(prsUsage.status, 1);
+  assert.match(prsUsage.stderr, /^usage: watch-prs\.sh/m);
+});
+
+test('npm package includes the plugin watcher implementations used by its bin wrappers', () => {
+  const packageJson = readJson('package.json');
+  assert.ok(packageJson.files.includes('plugins/repo-tools/scripts'));
+  assert.equal(packageJson.bin['repo-watch-run'], 'bin/watch-run.cjs');
+  assert.equal(packageJson.bin['repo-watch-prs'], 'bin/watch-prs.sh');
 });

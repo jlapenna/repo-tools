@@ -54,5 +54,10 @@ The Codex plugin exposes four authoritative skills:
   complete delivery lifecycle: commit, push, PR, CI and review, protected
   merge, post-merge verification, and worktree/branch cleanup.
 
+The plugin bundles the two CI watcher scripts under `scripts/`, so
+`github-ci-monitor` and `land-pr` work in a plugin-only installation. The npm
+package exposes the same implementations through the `repo-watch-run` and
+`repo-watch-prs` commands on `PATH`.
+
 Repository-local documentation may retain its own protection policy and check
 names, but should link to these skills rather than mirror their bodies.
