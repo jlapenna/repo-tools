@@ -17,7 +17,14 @@
 # Usage:
 #   watch-prs.sh [--strict] [--interval <seconds>] <pr-number> [<pr-number>...]
 #
-# Output: one timestamped line per state change, then a final verdict:
+# Output: one timestamped operational state per classification change, then a
+# final verdict. GitHub's raw mergeStateStatus is deliberately not exposed:
+# BLOCKED commonly means checks are still pending, which needs no intervention.
+#
+#   PR #123: OPEN:WAITING reason=checks-pending:2
+#   PR #123: OPEN:BLOCKED reason=checks-failed:Verify
+#
+# Final verdicts:
 #   VERDICT ALL-MERGED                          (exit 0)
 #   VERDICT ATTENTION <pr> <reason>             (exit 2)
 # <reason> is always a single whitespace-free token, so a consumer may parse
@@ -128,6 +135,14 @@ log() {
   echo "$(date -u +%H:%M:%S) $*"
 }
 
+report_state() {
+  local pr="$1" key="$2" message="$3"
+  if [ "${last[$pr]:-}" != "$key" ]; then
+    log "PR #$pr: $message"
+    last[$pr]="$key"
+  fi
+}
+
 while true; do
   all_merged=true
   for pr in "${prs[@]}"; do
@@ -158,13 +173,9 @@ while true; do
     esac
     all_merged=false
 
-    if [ "$status" != "${last[$pr]:-}" ]; then
-      log "PR #$pr: $status"
-      last[$pr]="$status"
-    fi
-
     case "$merge_state" in
       DIRTY)
+        report_state "$pr" "blocked:dirty" "OPEN:BLOCKED reason=dirty"
         echo "VERDICT ATTENTION $pr dirty"
         exit 2
         ;;
@@ -172,6 +183,7 @@ while true; do
         # A non-strict ruleset permits this state. Opt into attention only
         # when the repository actually requires an up-to-date branch.
         if [ "$strict" = true ]; then
+          report_state "$pr" "blocked:behind" "OPEN:BLOCKED reason=behind"
           echo "VERDICT ATTENTION $pr behind"
           exit 2
         fi
@@ -190,7 +202,8 @@ while true; do
       jq -r '[.[] | select(.bucket == "fail" or .bucket == "cancel") | .name] | join(", ")' 2>/dev/null || true)
     failed=$(printf '%s' "$buckets" | sanitize_names 2>/dev/null || true)
     if [ -n "$failed" ]; then
-      log "PR #$pr: failed/cancelled checks: $failed_raw"
+      report_state "$pr" "blocked:checks-failed:$failed" \
+        "OPEN:BLOCKED reason=checks-failed:$failed ($failed_raw)"
       echo "VERDICT ATTENTION $pr checks-failed:$failed"
       exit 2
     fi
@@ -198,11 +211,18 @@ while true; do
     pending=$(printf '%s' "$buckets" |
       jq -r '[.[] | select(.bucket == "pending")] | length' 2>/dev/null || echo 1)
 
+    if [ "$pending" != "0" ]; then
+      report_state "$pr" "waiting:checks-pending:$pending" \
+        "OPEN:WAITING reason=checks-pending:$pending"
+      continue
+    fi
+
     # A watcher is normally started after arming auto-merge, but verify that
     # precondition instead of sleeping forever when a PR was opened by a human
     # or an interactive agent. Green is not a merge disposition.
     if [ "$pending" = "0" ] && [ "$auto_merge_armed" != "true" ]; then
-      log "PR #$pr: green checks but auto-merge is not armed"
+      report_state "$pr" "blocked:auto-merge-unarmed" \
+        "OPEN:BLOCKED reason=auto-merge-unarmed"
       echo "VERDICT ATTENTION $pr auto-merge-unarmed"
       exit 2
     fi
@@ -216,11 +236,18 @@ while true; do
     if [ "$pending" = "0" ] && [ "$merge_state" = "BLOCKED" ]; then
       threads=$(unresolved_thread_count "$pr")
       if [ "$threads" -gt 0 ]; then
-        log "PR #$pr: green checks but $threads unresolved review thread(s)"
+        report_state "$pr" "blocked:unresolved-threads:$threads" \
+          "OPEN:BLOCKED reason=unresolved-threads:$threads"
         echo "VERDICT ATTENTION $pr unresolved-threads:$threads"
         exit 2
       fi
     fi
+
+    # Green, armed, and not otherwise actionable. BLOCKED can still mean a
+    # requested review is pending or GitHub is recalculating mergeability; both
+    # are waiting states until a concrete attention condition appears above.
+    report_state "$pr" "waiting:auto-merge:$merge_state" \
+      "OPEN:WAITING reason=auto-merge:$merge_state"
   done
 
   if $all_merged; then
