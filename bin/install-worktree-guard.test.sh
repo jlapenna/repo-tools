@@ -5,6 +5,10 @@
 # ci.yml.
 set -euo pipefail
 
+# The production guard intentionally permits GitHub Actions automation. This
+# contract test exercises normal developer hooks even when its consumer is CI.
+unset GITHUB_ACTIONS
+
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 installer="$here/install-worktree-guard.sh"
 tmp="$(mktemp -d)"
