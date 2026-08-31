@@ -1,0 +1,17 @@
+- id: repo-require-worktree
+  name: commits come from a feature worktree, not the primary checkout or main
+  entry: bin/require-feature-worktree.sh
+  language: unsupported_script
+  minimum_pre_commit_version: 4.4.0
+  pass_filenames: false
+  always_run: true
+  stages: [pre-commit]
+
+- id: repo-require-worktree-push
+  name: content pushes come from a feature worktree, not the primary checkout or main
+  entry: bin/require-feature-worktree.sh pushes
+  language: unsupported_script
+  minimum_pre_commit_version: 4.4.0
+  pass_filenames: false
+  always_run: true
+  stages: [pre-push]

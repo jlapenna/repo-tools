@@ -25,9 +25,6 @@ selection and repository-specific rules.
 - `repo-check-dependencies` — validate a pnpm frozen lockfile and report
   missing or invalid packages in the resolved dependency tree. Repository
   policy (such as permitted workspace dependency names) remains local.
-- `repo-install-worktree-guard` — install the commit and push worktree guards
-  for the current clone while retaining the repository's existing Git or
-  Husky hook chain. Running it again is safe and refreshes the managed hooks.
 - `repo-require-worktree [commits and pushes|pushes]` — reject authoring from
   a primary checkout or `main`, while allowing deletion-only pushes.
 - `repo-watch-prs` — watch auto-merge lifecycle for pull requests in the
@@ -44,25 +41,25 @@ selection and repository-specific rules.
   that never completed their own teardown.
 - `repo-nx` — run Nx with portable cache and linked-worktree safeguards.
 
-## Install the worktree guard
+## Pre-commit worktree guard
 
-Add `@jlapenna/repo-tools` to the consumer repository, then install the guard
-once in each clone:
+Consumers using [pre-commit](https://pre-commit.com/) can enable both commit
+and content-push enforcement directly from this repository:
 
-```sh
-pnpm exec repo-install-worktree-guard
+```yaml
+default_install_hook_types: [pre-commit, pre-push]
+
+repos:
+  - repo: https://github.com/jlapenna/repo-tools
+    rev: <commit-or-tag>
+    hooks:
+      - id: repo-require-worktree
+      - id: repo-require-worktree-push
 ```
 
-The installer configures a clone-local managed hook path for both `pre-commit`
-and `pre-push`. If the clone already uses Git hooks or Husky through
-`core.hooksPath`, those hooks run after the guard. Pre-push input is replayed
-to the existing hook, so both hooks see the same ref updates. A deletion-only
-push is allowed; a commit or content push from the primary checkout or from
-`main` is rejected.
-
-Rerun the command after updating `@jlapenna/repo-tools` to refresh the managed
-hook and guard copies. The installer is idempotent and preserves the
-originally chained hook path.
+Run `pre-commit install --install-hooks` after updating the configuration.
+Pre-commit skips its pre-push hooks for deletion-only pushes; content pushes
+run the shared guard and are rejected from the primary checkout or `main`.
 
 ## Skills
 
