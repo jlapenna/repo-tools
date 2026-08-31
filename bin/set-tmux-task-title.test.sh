@@ -11,7 +11,7 @@ calls="$tmpdir/calls"
 cat >"$mock_tmux" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"$TMUX_TEST_CALLS"
-if [ "$1" = show-window-options ]; then
+if [ "$1" = display-message ]; then
   printf '%s' "${TMUX_TEST_CURRENT:-}"
 fi
 EOF
@@ -22,7 +22,7 @@ TMUX=socket TMUX_PANE=%42 TMUX_BIN="$mock_tmux" TMUX_TEST_CALLS="$calls" \
 {"prompt":"  1234 Fix   flaky\n title assignment  "}
 EOF
 
-grep -Fx 'show-window-options -v -t %42 @user_title' "$calls"
+grep -Fx 'display-message -p -t %42 #{@user_title}' "$calls"
 grep -Fx 'set-window-option -t %42 @user_title 1234 Fix flaky title assignment' "$calls"
 grep -Fx 'set-window-option -t %42 automatic-rename on' "$calls"
 
@@ -41,4 +41,4 @@ TMUX=socket TMUX_PANE=%42 TMUX_BIN="$mock_tmux" TMUX_TEST_CALLS="$calls" TMUX_TE
 EOF
 
 test "$(wc -l <"$calls")" -eq 1
-grep -Fx 'show-window-options -v -t %42 @user_title' "$calls"
+grep -Fx 'display-message -p -t %42 #{@user_title}' "$calls"

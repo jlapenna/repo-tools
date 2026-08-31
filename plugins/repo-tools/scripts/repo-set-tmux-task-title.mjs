@@ -10,7 +10,7 @@ if (!process.env.TMUX || !pane) {
 }
 
 const runTmux = (args) => execFileSync(tmux, args, { encoding: 'utf8' });
-const current = runTmux(['show-window-options', '-v', '-t', pane, '@user_title']).trim();
+const current = runTmux(['display-message', '-p', '-t', pane, '#{@user_title}']).trim();
 
 if (current) {
   process.exit(0);
