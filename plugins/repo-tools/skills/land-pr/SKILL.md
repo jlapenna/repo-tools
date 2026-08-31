@@ -121,9 +121,10 @@ from a CLI message or from checks turning green.
 3. Confirm a linked issue closed only when the merged PR completed it. Do not
    close partial or follow-up work silently.
 4. Hand teardown to `worktree-hygiene`. Prove squash-merged content landed,
-   scan for live processes, require a clean worktree, remove it safely, delete
-   the exact local and remote feature branches, and synchronize a clean primary
-   base checkout.
+   scan for live processes, require a clean worktree, and remove it with
+   `repo-safe-remove-worktree` rather than plain `git worktree remove` (the
+   helper safely handles initialized submodules). Delete the exact local and
+   remote feature branches, and synchronize a clean primary base checkout.
 5. Report anything intentionally retained. Deleted branch/worktree content is
    recoverable from the merged commit and PR when the tree-equivalence proof
    succeeded.

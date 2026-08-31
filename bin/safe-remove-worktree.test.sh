@@ -80,4 +80,44 @@ if git -C primary worktree list --porcelain | grep -Fqx "worktree $wt"; then
 fi
 grep -Fq "cd $tmp/primary" "$tmp/out3"
 
+# 4. Plain Git refuses an otherwise-clean worktree with an initialized
+#    submodule. The guard's normal, safety-gated force handles that condition.
+submodule_origin="$tmp/submodule-origin"
+git init -q "$submodule_origin"
+printf 'submodule fixture\n' > "$submodule_origin/fixture.txt"
+git -C "$submodule_origin" add fixture.txt
+git -C "$submodule_origin" -c user.name=t -c user.email=t@t commit -q -m fixture
+git -C primary -c protocol.file.allow=always submodule add -q "$submodule_origin" modules/example
+git -C primary commit -q -am 'add submodule'
+
+submodule_wt="$tmp/wt-submodule"
+git -C primary worktree add -q "$submodule_wt" -b feat/submodule 2>/dev/null
+git -C "$submodule_wt" -c protocol.file.allow=always submodule update -q --init --recursive
+common_dir=$(git -C primary rev-parse --path-format=absolute --git-common-dir)
+if git --git-dir="$common_dir" worktree remove "$submodule_wt" > "$tmp/raw-submodule" 2>&1; then
+  echo "expected plain Git to reject an initialized submodule" >&2; exit 1
+fi
+grep -Fq 'working trees containing submodules cannot be moved or removed' "$tmp/raw-submodule"
+"$guard" "$submodule_wt" > "$tmp/out4" 2>&1 || {
+  echo "expected guarded initialized-submodule removal to succeed" >&2; cat "$tmp/out4" >&2; exit 1;
+}
+[ ! -d "$submodule_wt" ] || { echo "submodule worktree directory still exists after removal" >&2; exit 1; }
+
+# 5. The guard's single force must not bypass an intentional worktree lock.
+#    Once explicitly unlocked, the same clean submodule worktree removes.
+locked_wt="$tmp/wt-locked-submodule"
+git -C primary worktree add -q "$locked_wt" -b feat/locked-submodule 2>/dev/null
+git -C "$locked_wt" -c protocol.file.allow=always submodule update -q --init --recursive
+git -C primary worktree lock --reason 'test lock' "$locked_wt"
+if "$guard" "$locked_wt" > "$tmp/out5-locked" 2>&1; then
+  echo "expected an initialized-submodule worktree lock to refuse removal" >&2; exit 1
+fi
+[ -d "$locked_wt" ] || { echo "locked submodule worktree was removed" >&2; exit 1; }
+grep -Fq 'cannot remove a locked working tree' "$tmp/out5-locked"
+git -C primary worktree unlock "$locked_wt"
+"$guard" "$locked_wt" > "$tmp/out5-unlocked" 2>&1 || {
+  echo "expected unlocked initialized-submodule removal to succeed" >&2; cat "$tmp/out5-unlocked" >&2; exit 1;
+}
+[ ! -d "$locked_wt" ] || { echo "unlocked submodule worktree directory still exists" >&2; exit 1; }
+
 echo "repo-safe-remove-worktree: ok"

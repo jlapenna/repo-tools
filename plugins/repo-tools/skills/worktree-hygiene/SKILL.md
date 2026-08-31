@@ -103,7 +103,7 @@ anything went wrong). Skipped teardown steps accumulate silently — each
 worktree can carry its own installed dependencies and build output, so this
 adds up fast.
 
-Before running `git worktree remove`, work through this checklist — a
+Before removing a worktree, work through this checklist — a
 `git status` that reads clean right now is *not* sufficient on its own:
 
 1. **Confirm the branch's work actually landed.** Don't trust `git
@@ -156,7 +156,11 @@ Before running `git worktree remove`, work through this checklist — a
    it flagged. Never end a session with "run the remover after this session
    closes" — that hand-off is not executed by anyone, and the worktrees
    accumulate; your own processes being inside the worktree is exactly the
-   case the helper handles. After a successful removal the shell you ran it
+   case the helper handles. Always use the helper instead of calling `git
+   worktree remove` directly: after its process and cleanliness gates pass,
+   its normal `--force` also handles clean worktrees with initialized
+   submodules while still preserving intentional worktree locks. After a
+   successful removal the shell you ran it
    from no longer has a cwd; the helper prints the `cd` to run before your
    next command. If plain removal reports "cannot remove a
    locked working tree" from a harness-owned agent-session lock, confirm

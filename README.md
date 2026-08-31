@@ -33,7 +33,7 @@ selection and repository-specific rules.
   Codex `UserPromptSubmit` hook payload, without overwriting a pinned title.
 - `repo-watch-run` — watch one workflow run for a pull request or branch.
 - `repo-safe-remove-worktree` — validate and safely remove a completed
-  feature worktree.
+  feature worktree, including clean worktrees with initialized submodules.
 - `repo-sweep-worktrees [--repo <checkout>] [--base <ref>] [--delete]` —
   audit every linked worktree of a checkout and, with `--delete`, remove the
   ones whose work has landed (ancestor of the base, or merged pull request
