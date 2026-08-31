@@ -41,6 +41,26 @@ selection and repository-specific rules.
   that never completed their own teardown.
 - `repo-nx` — run Nx with portable cache and linked-worktree safeguards.
 
+## Pre-commit worktree guard
+
+Consumers using [pre-commit](https://pre-commit.com/) can enable both commit
+and content-push enforcement directly from this repository:
+
+```yaml
+default_install_hook_types: [pre-commit, pre-push]
+
+repos:
+  - repo: https://github.com/jlapenna/repo-tools
+    rev: <commit-or-tag>
+    hooks:
+      - id: repo-require-worktree
+      - id: repo-require-worktree-push
+```
+
+Run `pre-commit install --install-hooks` after updating the configuration.
+Pre-commit skips its pre-push hooks for deletion-only pushes; content pushes
+run the shared guard and are rejected from the primary checkout or `main`.
+
 ## Skills
 
 The Codex plugin exposes four authoritative skills:
