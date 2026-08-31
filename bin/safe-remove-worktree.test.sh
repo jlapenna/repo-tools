@@ -88,7 +88,7 @@ printf 'submodule fixture\n' > "$submodule_origin/fixture.txt"
 git -C "$submodule_origin" add fixture.txt
 git -C "$submodule_origin" -c user.name=t -c user.email=t@t commit -q -m fixture
 git -C primary -c protocol.file.allow=always submodule add -q "$submodule_origin" modules/example
-git -C primary commit -q -am 'add submodule'
+git -C primary -c user.name=t -c user.email=t@t commit -q -am 'add submodule'
 
 submodule_wt="$tmp/wt-submodule"
 git -C primary worktree add -q "$submodule_wt" -b feat/submodule 2>/dev/null
