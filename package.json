@@ -16,6 +16,7 @@
     "repo-safe-remove-worktree": "bin/safe-remove-worktree.sh",
     "repo-watch-run": "bin/watch-run.cjs",
     "repo-watch-prs": "bin/watch-prs.sh",
+    "repo-set-tmux-task-title": "bin/set-tmux-task-title.sh",
     "repo-scan-live-processes": "bin/scan-live-processes.sh",
     "repo-sweep-worktrees": "bin/sweep-worktrees.sh"
   },
@@ -29,7 +30,7 @@
   ],
   "scripts": {
     "build": "node scripts/build-eslint.mjs",
-    "test": "bash bin/check-dependencies.test.sh && bash bin/safe-remove-worktree.test.sh && bash bin/sweep-worktrees.test.sh && bash bin/watch-prs.test.sh && node --test plugins/manifests.test.mjs && pnpm run build && node --test eslint/test/consumer-contract.test.mjs && vitest run eslint/test/rules"
+    "test": "bash bin/check-dependencies.test.sh && bash bin/safe-remove-worktree.test.sh && bash bin/sweep-worktrees.test.sh && bash bin/watch-prs.test.sh && bash bin/set-tmux-task-title.test.sh && node --test plugins/manifests.test.mjs && pnpm run build && node --test eslint/test/consumer-contract.test.mjs && vitest run eslint/test/rules"
   },
   "dependencies": {
     "@nx/devkit": "23.1.1",
