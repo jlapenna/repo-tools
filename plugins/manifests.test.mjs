@@ -1,10 +1,8 @@
-// Protected contract: the plugin marketplace manifests every host installs
-// from — Codex via .agents/plugins/marketplace.json, Claude Code via
-// .claude-plugin/marketplace.json — describe the same plugin, point at a real
-// plugin directory that carries the runtime's plugin manifest, and that
-// directory's skills are well-formed. A broken path or a plugin present in one
-// runtime's manifest but not the other's fails plugin installation fleet-wide
-// without any other check noticing. Consumer: `pnpm test` in ci.yml.
+// Protected contract: repo-tools has one source layout consumed by three agent
+// runtimes — Codex and Claude Code install its marketplace plugin, while
+// OpenCode discovers its configured skill directory. A broken manifest, path,
+// or mismatched skill set fails provider setup fleet-wide without any other
+// check noticing. Consumer: `pnpm test` in ci.yml.
 import assert from 'node:assert/strict';
 import {
   constants,
@@ -25,6 +23,7 @@ const runtimes = {
   codex: { marketplace: '.agents/plugins/marketplace.json', pluginManifest: '.codex-plugin/plugin.json' },
   claude: { marketplace: '.claude-plugin/marketplace.json', pluginManifest: '.claude-plugin/plugin.json' },
 };
+const opencode = { skills: 'plugins/repo-tools/skills' };
 
 const pluginPath = (entry) =>
   typeof entry.source === 'string' ? entry.source : entry.source.path;
@@ -52,6 +51,31 @@ for (const [runtime, { marketplace, pluginManifest }] of Object.entries(runtimes
 test('codex and claude marketplaces describe the same plugins', () => {
   const names = (path) => readJson(path).plugins.map((p) => `${p.name}@${pluginPath(p)}`).sort();
   assert.deepEqual(names(runtimes.codex.marketplace), names(runtimes.claude.marketplace));
+});
+
+test('OpenCode configured skill source is the same well-formed repo-tools skill set', () => {
+  const skillRoot = join(root, opencode.skills);
+  assert.ok(existsSync(skillRoot), `OpenCode skill source ${opencode.skills} does not exist`);
+
+  const opencodeSkills = readdirSync(skillRoot, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
+  assert.ok(opencodeSkills.length > 0, 'OpenCode skill source must not be empty');
+
+  for (const skill of opencodeSkills) {
+    const skillMd = readFileSync(join(skillRoot, skill, 'SKILL.md'), 'utf8');
+    assert.match(skillMd, new RegExp(`^name: ${skill}$`, 'm'));
+    assert.match(skillMd, /^description: .+$/m, `OpenCode skill ${skill} needs discovery metadata`);
+  }
+
+  const marketplaceSkills = readdirSync(join(root, pluginPath(readJson(runtimes.codex.marketplace).plugins[0]), 'skills'), {
+    withFileTypes: true,
+  })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
+  assert.deepEqual(opencodeSkills, marketplaceSkills);
 });
 
 test('repo-tools plugin bundles executable CI watchers referenced by its skills', () => {

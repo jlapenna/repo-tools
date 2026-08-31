@@ -81,5 +81,22 @@ The plugin bundles the two CI watcher scripts under `scripts/`, so
 package exposes the same implementations through the `repo-watch-run` and
 `repo-watch-prs` commands on `PATH`.
 
+## Provider compatibility
+
+One checked-out copy of repo-tools can serve all supported agent runtimes. The
+CLI commands remain available from that checkout's package installation; do
+not copy skills into consumer repositories or install global plugins from their
+setup scripts.
+
+| Runtime | Supported integration from a shared checkout |
+| --- | --- |
+| Codex | `codex plugin marketplace add /opt/repo-tools`, then `codex plugin add repo-tools@repo-tools` |
+| Claude Code | `claude plugin marketplace add /opt/repo-tools`, then `claude plugin install repo-tools@repo-tools` |
+| OpenCode | Add `"/opt/repo-tools/plugins/repo-tools/skills"` to the global `opencode.json` `skills` array. |
+
+Codex and Claude Code maintain their own required plugin snapshots; OpenCode
+uses its documented configured skill-directory discovery. The provider matrix
+in `plugins/manifests.test.mjs` protects this shared source layout.
+
 Repository-local documentation may retain its own protection policy and check
 names, but should link to these skills rather than mirror their bodies.
