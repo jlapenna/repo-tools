@@ -16,7 +16,7 @@
     "repo-safe-remove-worktree": "bin/safe-remove-worktree.sh",
     "repo-watch-run": "bin/watch-run.cjs",
     "repo-watch-prs": "bin/watch-prs.sh",
-    "repo-set-tmux-task-title": "bin/set-tmux-task-title.sh",
+    "repo-set-tmux-task-title": "bin/set-tmux-task-title.mjs",
     "repo-scan-live-processes": "bin/scan-live-processes.sh",
     "repo-sweep-worktrees": "bin/sweep-worktrees.sh"
   },

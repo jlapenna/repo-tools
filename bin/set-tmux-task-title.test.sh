@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-script="$ROOT/bin/set-tmux-task-title.sh"
+script="$ROOT/bin/set-tmux-task-title.mjs"
 tmpdir="$(mktemp -d)"
 trap 'rm -rf "$tmpdir"' EXIT
 
@@ -25,6 +25,14 @@ EOF
 grep -Fx 'show-window-options -v -t %42 @user_title' "$calls"
 grep -Fx 'set-window-option -t %42 @user_title 1234 Fix flaky title assignment' "$calls"
 grep -Fx 'set-window-option -t %42 automatic-rename on' "$calls"
+
+: >"$calls"
+TMUX=socket TMUX_PANE=%42 TMUX_BIN="$mock_tmux" TMUX_TEST_CALLS="$calls" \
+  "$script" <<'EOF'
+{"prompt":"Please fix #2468: title helper formatting"}
+EOF
+
+grep -Fx 'set-window-option -t %42 @user_title 2468 title helper formatting' "$calls"
 
 : >"$calls"
 TMUX=socket TMUX_PANE=%42 TMUX_BIN="$mock_tmux" TMUX_TEST_CALLS="$calls" TMUX_TEST_CURRENT='existing task' \
