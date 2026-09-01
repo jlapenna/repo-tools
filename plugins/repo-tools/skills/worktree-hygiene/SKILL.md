@@ -28,12 +28,12 @@ mutating it moments later, and "it was clean when I checked" is not a
 guarantee. Only read-only inspection (`status`/`diff`/`log`) is safe
 directly in a primary/shared checkout.
 
-**One narrow exception:** always allow the primary checkout to fast-forward
-`main`. If it is clean, already on `main`, and can fast-forward to
-`origin/main`, run `git pull --ff-only` there even when other live sessions
-have that checkout as their cwd. Do not use the live-process scan as a blocker
-for this sync. Implementation work remains isolated in worktrees, so updating
-the shared read-only base is expected.
+**One narrow exception:** always allow the verified primary checkout to reset
+and fast-forward its base branch. The primary checkout is disposable shared
+state, not a place for WIP: after verifying both its identity and branch, its
+tracked edits may be discarded before updating it. Do not use the live-process
+scan as a blocker for this sync. Implementation work remains isolated in
+worktrees, so updating the shared read-only base is expected.
 
 ## Detecting concurrent sessions: don't trust tmux panes alone
 
@@ -209,22 +209,34 @@ required step of merged work. A clean worktree teardown is not complete while
 the primary checkout is silently behind the branch that just received the
 merge.
 
-Synchronizing a clean primary `main` is the sole allowed primary-checkout
-mutation and is not blocked by other live sessions:
+Synchronizing the verified primary checkout's base branch is the sole allowed
+primary-checkout mutation and is not blocked by other live sessions. Tracked
+edits there are invalid/disposable state, never user WIP to inspect, stash,
+preserve, or treat as a sync blocker:
 
-1. Fetch the remote and identify the repository's primary checkout and base
-   branch.
-2. Confirm the primary checkout is clean, is checked out on the base branch,
-   and can fast-forward to its upstream.
-3. Run `git -C <primary-checkout> pull --ff-only` regardless of whether other
+1. Fetch the remote. Resolve the candidate to its repository top level, then
+   verify it is the actual primary checkout (its `.git` is a directory, not a
+   linked-worktree gitfile, and `git worktree list --porcelain` lists that
+   top-level path). Identify the repository's base branch.
+2. Confirm that verified primary checkout is currently on the base branch.
+   If either identity or branch verification fails, stop: do not reset, switch,
+   or otherwise mutate it. Linked feature worktrees retain the full protections
+   in this skill.
+3. Without reviewing the diff, discard only tracked primary-checkout edits
+   with `git -C <primary-checkout> reset --hard`. Do not stash them, recover
+   them, or report them as WIP/blockers.
+4. Untracked files are not implicitly disposable. Leave them in place; never
+   use a broad `git clean` here. Fast-forward only when doing so will not
+   overwrite an untracked path. If one prevents the update, report that exact
+   untracked-file conflict and obtain direction before any narrow removal.
+5. Run `git -C <primary-checkout> pull --ff-only` regardless of whether other
    sessions currently have a cwd beneath the primary checkout.
-4. Verify the local base and its upstream resolve to the same commit.
+6. Verify the local base and its upstream resolve to the same commit.
 
-If the checkout is dirty, on another branch, or cannot fast-forward, do not
-stash, reset, switch branches, or force the update. Fetch so the
-remote-tracking ref is current, then explicitly report that the primary
-checkout remains unsynced and why. Never present merged work as fully cleaned
-up without either completing this sync or disclosing that blocker.
+If the verified primary checkout cannot fast-forward after tracked edits have
+been reset, report that separate synchronization failure. Never present merged
+work as fully cleaned up without either completing this sync or disclosing that
+blocker.
 
 ## Related skills
 
