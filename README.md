@@ -65,7 +65,7 @@ run the shared guard and are rejected from the primary checkout or `main`.
 
 ## Skills
 
-The Codex plugin exposes four authoritative skills:
+The Codex plugin exposes five authoritative skills:
 
 - `worktree-hygiene` covers safe creation, use, and teardown in shared
   repository checkouts.
@@ -75,6 +75,9 @@ The Codex plugin exposes four authoritative skills:
 - `land-pr` carries a local change or existing pull request through the
   complete delivery lifecycle: commit, push, PR, CI and review, protected
   merge, post-merge verification, and worktree/branch cleanup.
+- `renovate-maintenance` audits and lands Renovate updates within a repository,
+  with risk-based verification, sequential merges, combined-main validation,
+  and explicit separation from deployment and production-state checks.
 
 The plugin bundles the two CI watcher scripts under `scripts/`, so
 `github-ci-monitor` and `land-pr` work in a plugin-only installation. The npm

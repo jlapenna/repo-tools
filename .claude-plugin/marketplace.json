@@ -5,13 +5,13 @@
     "url": "https://github.com/jlapenna"
   },
   "metadata": {
-    "description": "General repository-management commands and skills for safe worktrees, CI monitoring, testing policy, and PR delivery. Same plugin as the Codex marketplace in .agents/plugins/marketplace.json.",
-    "version": "1.2.2"
+    "description": "General repository-management commands and skills for safe worktrees, CI monitoring, testing policy, PR delivery, and Renovate maintenance. Same plugin as the Codex marketplace in .agents/plugins/marketplace.json.",
+    "version": "1.3.0"
   },
   "plugins": [
     {
       "name": "repo-tools",
-      "description": "Authoritative worktree-hygiene, GitHub CI-monitoring, testing-policy, and land-pr skills for general repository management.",
+      "description": "Authoritative skills for worktree hygiene, GitHub CI monitoring, testing policy, PR delivery, and Renovate maintenance.",
       "source": "./plugins/repo-tools"
     }
   ]

@@ -1,7 +1,7 @@
 {
   "name": "repo-tools",
-  "version": "1.2.2",
-  "description": "General repository-management commands and skills for safe worktrees, CI monitoring, and PR delivery.",
+  "version": "1.3.0",
+  "description": "General repository-management commands and skills for safe worktrees, CI monitoring, PR delivery, and Renovate maintenance.",
   "author": {
     "name": "Joe LaPenna",
     "url": "https://github.com/jlapenna"
@@ -9,5 +9,5 @@
   "homepage": "https://github.com/jlapenna/repo-tools",
   "repository": "https://github.com/jlapenna/repo-tools",
   "license": "MIT",
-  "keywords": ["ci", "git", "github", "testing", "worktree", "repository-management"]
+  "keywords": ["ci", "dependencies", "git", "github", "renovate", "testing", "worktree", "repository-management"]
 }
