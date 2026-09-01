@@ -38,6 +38,13 @@ for (const [runtime, { marketplace, pluginManifest }] of Object.entries(runtimes
       assert.ok(existsSync(dir), `${runtime}: ${entry.name} -> ${pluginPath(entry)} does not exist`);
       const plugin = JSON.parse(readFileSync(join(dir, pluginManifest), 'utf8'));
       assert.equal(plugin.name, entry.name, `${runtime}: plugin manifest name must match marketplace entry`);
+      if (manifest.metadata?.version) {
+        assert.equal(
+          manifest.metadata.version,
+          plugin.version,
+          `${runtime}: marketplace and plugin manifest versions must match`,
+        );
+      }
       const skills = readdirSync(join(dir, 'skills'), { withFileTypes: true }).filter((d) => d.isDirectory());
       assert.ok(skills.length > 0, `${runtime}: ${entry.name} ships no skills`);
       for (const skill of skills) {
