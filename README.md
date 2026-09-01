@@ -43,6 +43,16 @@ selection and repository-specific rules.
   that never completed their own teardown.
 - `repo-nx` — run Nx with portable cache and linked-worktree safeguards.
 
+## Releasing
+
+`pnpm release <version>` bumps the plugin version across every published
+manifest — `.claude-plugin/marketplace.json`, `plugins/repo-tools/.claude-plugin/plugin.json`,
+and `plugins/repo-tools/.codex-plugin/plugin.json` — in one atomic step and
+commits the result. It validates all three files before writing any of
+them, so a missing file or malformed version leaves the release untouched
+rather than half-applied. Run it from a feature worktree, then push and open
+a PR as usual; it does not push or open the PR itself.
+
 ## Pre-commit worktree guard
 
 Consumers using [pre-commit](https://pre-commit.com/) can enable both commit
