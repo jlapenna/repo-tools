@@ -124,7 +124,7 @@ if [ -z "${NX_SELF_HOSTED_REMOTE_CACHE_SERVER:-}" ]; then
       set +a
     fi
   elif curl -sf --max-time 0.4 -o /dev/null \
-    "${NX_REMOTE_CACHE_URL:-http://spark.lan.jlapenna.net:3123}/healthz" 2>/dev/null; then
+    "${NX_REMOTE_CACHE_URL:-http://nx-cache.lan.jlapenna.net:3123}/healthz" 2>/dev/null; then
     # No credential anywhere, but the cache server is right there answering.
     # Say so once per invocation: the setup script is one-time init, so a
     # checkout created before its cache block existed (sprinkles#2442,
