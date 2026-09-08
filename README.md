@@ -20,6 +20,21 @@ selection and repository-specific rules.
 
 ## Commands
 
+- `repo-gh-shim` — a `gh` wrapper that authenticates as the App bot when an
+  agent session is driving, and does nothing otherwise. A token only helps
+  if it is actually used, and requiring an agent to remember it on every
+  call is how the wrong name ends up on the work; this removes the
+  remembering. Opt in per host by putting it ahead of `gh` on `PATH`
+  (`ln -s "$(command -v repo-gh-shim)" ~/.local/bin/gh`). Human
+  invocations, an explicitly supplied `GH_TOKEN`, and commands outside any
+  repository all pass straight through. If minting fails it refuses rather
+  than silently writing under the human's name; `REPO_GH_IDENTITY=optional`
+  allows the fallback and `=off` disables the shim.
+- `repo-adopt-agent-identity [<repo>] [--dry-run] [--force]` — give existing
+  linked worktrees the agent commit identity. Setting it at creation only
+  helps worktrees made afterwards, and a busy checkout can hold dozens that
+  predate it. Never touches the primary checkout, and leaves a worktree that
+  already carries a different identity alone unless forced.
 - `repo-github-app-token [--repo owner/name] [--json] [--refresh]` — mint a
   short-lived GitHub App installation token for a repository, so an agent
   session's GitHub writes carry the App's bot identity instead of the
