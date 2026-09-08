@@ -21,6 +21,24 @@
 #                              CODEX_THREAD_ID)
 set -euo pipefail
 
+# A package manager may install this command as a *wrapper script* rather than
+# a symlink (pnpm does), so $0 is the file in the package store while the PATH
+# entry that led here is a different path entirely. Path comparison alone
+# therefore cannot always recognise this shim in PATH, and picking itself as
+# "the real gh" makes exec replace the process with itself forever: one pid,
+# spinning, indistinguishable from a hang. This guard makes that impossible to
+# reach regardless of how the command was installed.
+if [ -n "${REPO_GH_SHIM_GUARD:-}" ]; then
+  cat >&2 <<'MSG'
+repo-gh-shim: refusing to re-enter itself.
+
+The `gh` found on PATH behind this shim is the shim again, so running it would
+loop forever. Point the shim at a PATH that also contains the real gh, or
+remove whatever alias or link makes `gh` resolve back here.
+MSG
+  exit 1
+fi
+
 self="$0"
 hops=0
 while [ -L "$self" ]; do
@@ -52,6 +70,16 @@ find_real_gh() {
       local target
       target="$(readlink -f "$candidate" 2>/dev/null || true)"
       [ "$target" = "$self_real" ] && continue
+      # ...and a symlink to a wrapper script that runs this shim is too. The
+      # wrapper names the file it runs, so the name is what identifies it;
+      # comparing paths cannot, because the wrapper and its target differ.
+      if [ -n "$target" ] && head -c 4096 "$target" 2>/dev/null | grep -q 'gh-shim'; then
+        continue
+      fi
+    fi
+    # The same wrapper reached directly rather than through a symlink.
+    if head -c 4096 "$candidate" 2>/dev/null | grep -q 'gh-shim'; then
+      continue
     fi
     printf '%s\n' "$candidate"
     return 0
@@ -65,7 +93,7 @@ if [ -z "$real_gh" ]; then
   exit 127
 fi
 
-passthrough() { exec "$real_gh" "$@"; }
+passthrough() { REPO_GH_SHIM_GUARD=1 exec "$real_gh" "$@"; }
 
 [ "${REPO_GH_IDENTITY:-}" = "off" ] && passthrough "$@"
 
@@ -125,4 +153,4 @@ MSG
   exit 1
 fi
 
-GH_TOKEN="$token" exec "$real_gh" "$@"
+GH_TOKEN="$token" REPO_GH_SHIM_GUARD=1 exec "$real_gh" "$@"

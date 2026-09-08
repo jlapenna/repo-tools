@@ -114,4 +114,48 @@ run_gh CLAUDE_CODE_SESSION_ID=abc MINT_SHOULD_FAIL=1 REPO_GH_IDENTITY=optional \
 grep -q 'token=<none>' <<<"$(last_call)" \
   || { echo "FAIL: optional mode should fall back: $(last_call)" >&2; exit 1; }
 
+# Regression: a package manager may install this as a *wrapper script* rather
+# than a symlink -- pnpm does -- so $0 is the file in the package store while
+# the PATH entry that led here is a different path. Path comparison alone then
+# fails to recognise the shim in PATH, it selects itself as "the real gh", and
+# exec replaces the process with itself forever: one pid, spinning, which reads
+# as a hang rather than a crash. This happened on a real host.
+store="$tmpdir/store"
+mkdir -p "$store"
+cp "$shim" "$store/gh-shim.sh"
+chmod +x "$store/gh-shim.sh"
+cat >"$bindir/repo-gh-shim" <<EOF
+#!/usr/bin/env bash
+exec "$store/gh-shim.sh" "\$@"
+EOF
+chmod +x "$bindir/repo-gh-shim"
+
+wrapdir="$tmpdir/wrap"
+mkdir -p "$wrapdir"
+ln -s "$bindir/repo-gh-shim" "$wrapdir/gh"
+
+: >"$calls"
+if ! timeout 20 env -u CLAUDE_CODE_SESSION_ID -u CODEX_THREAD_ID -u GH_TOKEN \
+  -u GITHUB_TOKEN -u REPO_GH_IDENTITY \
+  PATH="$wrapdir:$bindir:/usr/bin:/bin" GH_TEST_CALLS="$calls" \
+  CLAUDE_CODE_SESSION_ID=abc bash -c "cd '$repo' && gh pr list"; then
+  echo "FAIL: wrapper-script install looped or errored instead of finding real gh" >&2
+  exit 1
+fi
+grep -q 'token=ghs_for_cwd' <<<"$(last_call)" \
+  || { echo "FAIL: wrapper-script install did not reach real gh: $(last_call)" >&2; exit 1; }
+
+# And if the only gh on PATH really is the shim, it must say so and stop rather
+# than spin. Belt and braces for any install shape not anticipated above.
+onlydir="$tmpdir/only"
+mkdir -p "$onlydir"
+ln -s "$shim" "$onlydir/gh"
+if timeout 20 env -u CLAUDE_CODE_SESSION_ID -u CODEX_THREAD_ID \
+  PATH="$onlydir:/usr/bin:/bin" CLAUDE_CODE_SESSION_ID=abc \
+  bash -c "cd '$repo' && gh pr list" >/dev/null 2>"$tmpdir/loop_err"; then
+  echo "FAIL: shim-only PATH should exit non-zero" >&2
+  exit 1
+fi
+[ "$?" = 124 ] && { echo "FAIL: shim-only PATH timed out (it looped)" >&2; exit 1; }
+
 echo "gh-shim: all assertions passed"
