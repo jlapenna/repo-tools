@@ -70,8 +70,13 @@ REPO_AGENT_IDENTITY_NAME="$BOT_NAME" REPO_AGENT_IDENTITY_EMAIL="$BOT_EMAIL" \
 [ "$(git -C "$tmpdir/wt-b" config user.email)" = "$BOT_EMAIL" ] \
   || { echo "FAIL: env defaults were not used" >&2; exit 1; }
 
-# Without an identity it refuses rather than guessing one.
-if "$script" "$repo" >/dev/null 2>"$tmpdir/err"; then
+# Without an identity it refuses rather than guessing one. `env -u` is
+# load-bearing: a configured host exports REPO_AGENT_IDENTITY_* from its shell
+# profile, so without it this case inherits a real identity and stops testing
+# the refusal it names. CI has no such profile, so the failure only ever
+# appears on the machines that actually use the tool.
+if env -u REPO_AGENT_IDENTITY_NAME -u REPO_AGENT_IDENTITY_EMAIL \
+  "$script" "$repo" >/dev/null 2>"$tmpdir/err"; then
   echo "FAIL: missing identity should exit non-zero" >&2
   exit 1
 fi

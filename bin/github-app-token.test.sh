@@ -142,7 +142,12 @@ wait "$server_pid" 2>/dev/null || true
 
 # Misconfiguration fails loudly instead of falling back to the human's own
 # credentials, which is the whole failure this command exists to prevent.
-if GITHUB_APP_PRIVATE_KEY_COMMAND="cat $tmpdir/key.pem" \
+# `env -u` is load-bearing: a configured host exports GITHUB_APP_* from its
+# shell profile, so without it these cases inherit real configuration and stop
+# testing the misconfiguration they name. CI has no such profile, so the
+# failure only ever appears on the machines that actually use the tool.
+if env -u GITHUB_APP_CLIENT_ID -u GITHUB_APP_PRIVATE_KEY \
+  GITHUB_APP_PRIVATE_KEY_COMMAND="cat $tmpdir/key.pem" \
   REPO_TOOLS_TOKEN_CACHE_DIR="$tmpdir/cache2" \
   "$script" --repo acme/widgets >/dev/null 2>"$tmpdir/err"; then
   echo "FAIL: missing GITHUB_APP_CLIENT_ID should exit non-zero" >&2
@@ -151,7 +156,8 @@ fi
 grep -q GITHUB_APP_CLIENT_ID "$tmpdir/err" \
   || { echo "FAIL: error should name the missing variable" >&2; exit 1; }
 
-if GITHUB_APP_CLIENT_ID=Iv1testclientid \
+if env -u GITHUB_APP_PRIVATE_KEY -u GITHUB_APP_PRIVATE_KEY_COMMAND \
+  GITHUB_APP_CLIENT_ID=Iv1testclientid \
   REPO_TOOLS_TOKEN_CACHE_DIR="$tmpdir/cache2" \
   "$script" --repo acme/widgets >/dev/null 2>"$tmpdir/err2"; then
   echo "FAIL: missing private key should exit non-zero" >&2

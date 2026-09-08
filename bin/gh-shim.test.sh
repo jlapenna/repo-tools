@@ -114,6 +114,30 @@ run_gh CLAUDE_CODE_SESSION_ID=abc MINT_SHOULD_FAIL=1 REPO_GH_IDENTITY=optional \
 grep -q 'token=<none>' <<<"$(last_call)" \
   || { echo "FAIL: optional mode should fall back: $(last_call)" >&2; exit 1; }
 
+# Regression: `gh auth ...` must keep answering as the human. The usual git
+# credential helper is `!gh auth git-credential`, so substituting a token here
+# re-authenticates every git clone/fetch/push in the session as the App --
+# and repositories outside the App's installation then fail outright. That is
+# not theoretical: it broke a homelab submodule clone of a repo the App cannot
+# see. `gh auth token` is the same hazard by a shorter path.
+for authcmd in "auth git-credential" "auth token" "auth status" "auth setup-git"; do
+  # shellcheck disable=SC2086
+  run_gh CLAUDE_CODE_SESSION_ID=abc bash -c "cd '$repo' && gh $authcmd"
+  grep -q 'token=<none>' <<<"$(last_call)" \
+    || { echo "FAIL: gh $authcmd was given a bot token: $(last_call)" >&2; exit 1; }
+done
+
+# A flag before the subcommand must not hide it.
+run_gh CLAUDE_CODE_SESSION_ID=abc bash -c "cd '$repo' && gh --help auth token"
+grep -q 'token=<none>' <<<"$(last_call)" \
+  || { echo "FAIL: flags before 'auth' defeated the passthrough: $(last_call)" >&2; exit 1; }
+
+# ...while a repository command in the same session still gets one, so the
+# carve-out stays narrow.
+run_gh CLAUDE_CODE_SESSION_ID=abc bash -c "cd '$repo' && gh pr list"
+grep -q 'token=ghs_for_cwd' <<<"$(last_call)" \
+  || { echo "FAIL: auth carve-out leaked into normal commands: $(last_call)" >&2; exit 1; }
+
 # Regression: a package manager may install this as a *wrapper script* rather
 # than a symlink -- pnpm does -- so $0 is the file in the package store while
 # the PATH entry that led here is a different path. Path comparison alone then

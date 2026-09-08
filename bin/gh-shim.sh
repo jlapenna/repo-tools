@@ -97,6 +97,26 @@ passthrough() { REPO_GH_SHIM_GUARD=1 exec "$real_gh" "$@"; }
 
 [ "${REPO_GH_IDENTITY:-}" = "off" ] && passthrough "$@"
 
+# `gh auth ...` is identity plumbing, never an artifact this shim exists to
+# attribute, and it must keep answering as the human. git is the reason: the
+# usual credential helper is `!gh auth git-credential`, so substituting a token
+# here does not just relabel a comment -- it silently re-authenticates every
+# git clone, fetch and push in the session as the App. Repositories outside the
+# App's installation then fail outright, which is how a homelab submodule clone
+# of a repo the App cannot see broke. `gh auth token` is the same hazard by a
+# shorter path: it would hand a bot token to anything that asks.
+first_arg=""
+for arg in "$@"; do
+  case "$arg" in
+    -*) continue ;;
+    *)
+      first_arg="$arg"
+      break
+      ;;
+  esac
+done
+[ "$first_arg" = "auth" ] && passthrough "$@"
+
 # An explicit token from the caller always wins. Substituting one here would
 # silently override a deliberate choice, including this shim's own re-exec.
 [ -n "${GH_TOKEN:-}${GITHUB_TOKEN:-}" ] && passthrough "$@"
