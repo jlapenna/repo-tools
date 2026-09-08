@@ -20,6 +20,14 @@ selection and repository-specific rules.
 
 ## Commands
 
+- `repo-github-app-token [--repo owner/name] [--json] [--refresh]` — mint a
+  short-lived GitHub App installation token for a repository, so an agent
+  session's GitHub writes carry the App's bot identity instead of the
+  human maintainer's. Reads the App key on demand via
+  `GITHUB_APP_PRIVATE_KEY_COMMAND` (or `GITHUB_APP_PRIVATE_KEY`) and
+  `GITHUB_APP_CLIENT_ID`, so no long-lived credential is stored on the
+  host. Tokens are scoped to the single repository, cached until shortly
+  before expiry, and printed bare for `GH_TOKEN="$(repo-github-app-token)"`.
 - `repo-scan-live-processes <directory>` — list processes whose working
   directory is inside a repository or worktree.
 - `repo-check-dependencies` — validate a pnpm frozen lockfile and report
@@ -101,11 +109,11 @@ CLI commands remain available from that checkout's package installation; do
 not copy skills into consumer repositories or install global plugins from their
 setup scripts.
 
-| Runtime | Supported integration from a shared checkout |
-| --- | --- |
-| Codex | `codex plugin marketplace add /opt/repo-tools`, then `codex plugin add repo-tools@repo-tools` |
+| Runtime     | Supported integration from a shared checkout                                                        |
+| ----------- | --------------------------------------------------------------------------------------------------- |
+| Codex       | `codex plugin marketplace add /opt/repo-tools`, then `codex plugin add repo-tools@repo-tools`       |
 | Claude Code | `claude plugin marketplace add /opt/repo-tools`, then `claude plugin install repo-tools@repo-tools` |
-| OpenCode | Add `"/opt/repo-tools/plugins/repo-tools/skills"` to the global `opencode.json` `skills` array. |
+| OpenCode    | Add `"/opt/repo-tools/plugins/repo-tools/skills"` to the global `opencode.json` `skills` array.     |
 
 Codex and Claude Code maintain their own required plugin snapshots; OpenCode
 uses its documented configured skill-directory discovery. The provider matrix
