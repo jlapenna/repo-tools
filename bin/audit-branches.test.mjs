@@ -57,9 +57,16 @@ test("cleanup retains closed, gone, reused, open and checked-out work; deletes p
     git("config", "branch.gone.remote", "origin");
     git("config", "branch.gone.merge", "refs/heads/missing");
     git("worktree", "add", path.join(root, "occupied"), "checked-out");
+    const historyFile = path.join(root, "merged-prs.json");
+    fs.writeFileSync(historyFile, JSON.stringify([
+      {headRefName: "squashed", headRefOid: tips.squashed, mergeCommit: {oid: squash}},
+      {headRefName: "reused", headRefOid: base, mergeCommit: {oid: squash}},
+      ...Array.from({length: 998}, (_, index) => ({headRefName: `historic-${index}`, headRefOid: base, mergeCommit: {oid: squash}})),
+    ]));
+    assert.ok(fs.statSync(historyFile).size > 131072, "realistic 1000-PR history exceeds a single OS argument");
     fs.writeFileSync(
       path.join(bin, "gh"),
-      `#!/bin/sh\n[ -z "$FAIL_GH" ] || exit 1\ncase "$1" in\napi) printf '%s\\n' '[[],[{"head":{"ref":"open"}}]]';;\npr) printf '%s\\n' '[{"headRefName":"squashed","headRefOid":"${tips.squashed}","mergeCommit":{"oid":"${squash}"}},{"headRefName":"reused","headRefOid":"${base}","mergeCommit":{"oid":"${squash}"}}]';;\n*) exit 2;;\nesac\n`,
+      `#!/bin/sh\n[ -z "$FAIL_GH" ] || exit 1\ncase "$1" in\napi) printf '%s\\n' '[[],[{"head":{"ref":"open"}}]]';;\npr) cat '${historyFile}';;\n*) exit 2;;\nesac\n`,
       { mode: 0o755 },
     );
     const script = fileURLToPath(new URL("./audit-branches.sh", import.meta.url));
