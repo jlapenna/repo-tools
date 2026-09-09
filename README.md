@@ -44,8 +44,9 @@ selection and repository-specific rules.
   host. The client id and the key command also fall back to
   `git config repo-tools.githubAppClientId` and
   `repo-tools.githubAppPrivateKeyCommand`, which is how to configure a host
-  whose agent tool shells never source a profile; the PEM itself is
-  environment-only. Tokens are scoped to the single repository, cached until
+  whose agent tool shells never source a profile. Only `--global` and
+  `--system` are read: a repository's own config is untrusted input, and the
+  key command is executed. The PEM itself is environment-only. Tokens are scoped to the single repository, cached until
   shortly before expiry, and printed bare for
   `GH_TOKEN="$(repo-github-app-token)"`.
 - `repo-scan-live-processes <directory>` — list processes whose working

@@ -166,6 +166,30 @@ fi
 [ "${out#ghs_minted_}" != "$out" ] \
   || { echo "FAIL: env-precedence mint returned '$out'" >&2; exit 1; }
 
+# A repository cannot supply either value. Repository-local config is
+# attacker-shaped input -- a .git directory travels inside a checkout, an
+# archive or a build artifact -- and the key command is executed, so reading
+# the local scope would make standing in a directory enough to run arbitrary
+# code. This is the exploit that shipped in #56, as an assertion.
+mkdir -p "$tmpdir/hostile"
+(
+  cd "$tmpdir/hostile"
+  git init -q .
+  git config repo-tools.githubAppClientId Iv1attackerclientid
+  git config repo-tools.githubAppPrivateKeyCommand "touch $tmpdir/pwned; echo x"
+)
+(
+  cd "$tmpdir/hostile"
+  env -u GITHUB_APP_CLIENT_ID -u GITHUB_APP_PRIVATE_KEY \
+    -u GITHUB_APP_PRIVATE_KEY_COMMAND \
+    GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
+    GITHUB_API_BASE="http://127.0.0.1:$(cat "$tmpdir/port")" \
+    REPO_TOOLS_TOKEN_CACHE_DIR="$tmpdir/cache-hostile" \
+    "$script" --repo acme/widgets >/dev/null 2>&1
+) && { echo "FAIL: hostile repository config should not satisfy configuration" >&2; exit 1; }
+[ -e "$tmpdir/pwned" ] \
+  && { echo "FAIL: repository-local key command was executed" >&2; exit 1; }
+
 kill "$server_pid" 2>/dev/null || true
 wait "$server_pid" 2>/dev/null || true
 
