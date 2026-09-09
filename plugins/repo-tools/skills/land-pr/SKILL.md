@@ -14,13 +14,14 @@ PR when the remaining gates can be completed safely.
    development or release skills before mutating Git or GitHub.
 2. Apply higher-level instructions first, then the most specific compatible
    repository rule, then this cross-repository workflow.
-3. Treat invocation of this skill as authorization to:
+3. For a user-authorized delivery task, the normal lifecycle includes:
    - commit and push the confirmed in-scope changes;
    - open a ready-for-review PR;
    - enable auto-merge or merge after required gates pass;
    - reply to and resolve review threads only after their feedback is addressed;
    - delete the merged feature branch and remove its clean worktree.
-4. Do not treat invocation as authorization to bypass hooks or protection,
+4. Loading a skill does not create authorization. Honor explicit local-only,
+   review-only, no-fetch, or no-publication limits. Do not bypass hooks or protection,
    force-push, change unrelated issues, deploy unrelated services, discard a
    dirty checkout, or guess through ambiguous feedback.
 5. Prefer a ready PR and squash merge unless the user or repository specifies
