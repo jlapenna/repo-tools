@@ -37,6 +37,9 @@ test('broken links and malformed skills fail while examples and external links d
   const { write, run } = fixture(t);
   write('README.md', '[web](https://example.com/a)\n[anchor](#foo)\n`[example](missing)`\n```md\n[example](missing)\n```\n[valid](<docs/with space.md>)\n');
   write('docs/with space.md', 'hello\n');
+  // CI need not inherit a developer's global excludes file.
+  write('node_modules/dependency/README.md', '[upstream-only](not-shipped.md)\n');
+  write('.venv/dependency/README.md', '[upstream-only](not-shipped.md)\n');
   assert.equal(run('check').status, 0);
   write('docs/bad.md', '[bad][ref]\n\n[ref]: missing.md\n');
   assert.match(run('check').stderr, /missing link target/);

@@ -9,7 +9,7 @@ const read = (file) => readFileSync(file, 'utf8');
 const cell = (value) => String(value).replaceAll('|', '\\|').replaceAll('\n', ' ');
 
 export function repositoryFiles(root) {
-  return [...new Set(execFileSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], { cwd: root, encoding: 'utf8' }).split('\0').filter(Boolean))].sort();
+  return [...new Set(execFileSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard', '--exclude=node_modules/', '--exclude=.venv/'], { cwd: root, encoding: 'utf8' }).split('\0').filter(Boolean))].sort();
 }
 
 export function skillMetadata(text, file) {
