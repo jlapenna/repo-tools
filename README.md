@@ -2,9 +2,9 @@
 
 General repository-management commands, independent of Agent LCARS.
 
-The package owns worktree safety, process inspection, CI monitoring, and
-shared repository tooling. It must not contain agent identity, agent session,
-or Agent LCARS runtime behavior.
+The package owns worktree safety, process inspection, CI monitoring, shared
+repository tooling, and provider-neutral GitHub App identity helpers. Agent
+LCARS-specific session, dispatch, and runtime behavior remains in Agent LCARS.
 
 Repository-agnostic guidance for deciding which tests and checks earn their
 cost is in the [testing-policy skill reference](plugins/repo-tools/skills/testing-policy/references/testing-policy.md).
@@ -92,13 +92,15 @@ default_install_hook_types: [pre-commit, pre-push]
 
 repos:
   - repo: https://github.com/jlapenna/repo-tools
-    rev: <commit-or-tag>
+    rev: main
     hooks:
       - id: repo-require-worktree
       - id: repo-require-worktree-push
 ```
 
-Run `pre-commit install --install-hooks` after updating the configuration.
+First-party consumers follow `main`; pre-commit caches hook environments, so
+reinstall/refresh the environment when updating shared tooling. Run
+`pre-commit install --install-hooks` after updating the configuration.
 Pre-commit skips its pre-push hooks for deletion-only pushes; content pushes
 run the shared guard and are rejected from the primary checkout or `main`.
 

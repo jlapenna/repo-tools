@@ -5,6 +5,11 @@ description: Safely create, use, and tear down git worktrees in a checkout that 
 
 # Worktree Hygiene
 
+Apply the user's task constraints first, including requests to work from local
+source without fetching. Homegit-managed files use the explicit workflow in
+the `homegit` skill; do not create a linked worktree for ordinary destination
+edits and captures. The rules below govern normal repository implementation.
+
 ## Why this exists
 
 A single primary checkout is not automatically safe just because it's "your"
@@ -28,12 +33,12 @@ mutating it moments later, and "it was clean when I checked" is not a
 guarantee. Only read-only inspection (`status`/`diff`/`log`) is safe
 directly in a primary/shared checkout.
 
-**One narrow exception:** always allow the verified primary checkout to reset
-and fast-forward its base branch. The primary checkout is disposable shared
-state, not a place for WIP: after verifying both its identity and branch, its
-tracked edits may be discarded before updating it. Do not use the live-process
-scan as a blocker for this sync. Implementation work remains isolated in
-worktrees, so updating the shared read-only base is expected.
+**Primary synchronization is a narrow exception.** A verified, clean primary
+checkout on its base branch may fast-forward without blocking on other
+sessions merely having that cwd. Resetting tracked drift requires existing
+user authorization for that exact primary/base and compatibility with the
+repository's rules; it is not an unconditional cleanup step. Never extend the
+exception to feature worktrees or untracked files.
 
 ## Detecting concurrent sessions: don't trust tmux panes alone
 
@@ -76,7 +81,7 @@ identical. Check the project's own docs/skills for what that setup step is;
 this skill only covers the git/process mechanics that are the same
 regardless of language or stack.
 
-**Index the new worktree in the codebase-memory graph.** A freshly created
+**If using codebase-memory graph tools, index the new worktree first.** A freshly created
 worktree is a new path the `/codebase-memory-mcp` index does not yet know
 about — graph searches (`search_graph`, `trace_path`, `get_code_snippet`)
 will miss or mis-resolve symbols under it until it's indexed. After creating
@@ -87,6 +92,8 @@ or entering any new worktree, trigger:
 ```
 
 Run it before relying on graph tools for code discovery in that worktree.
+If that integration is unavailable or unnecessary, use ordinary file search;
+indexing is not a prerequisite for editing, testing, or delivery.
 Use the worktree path as `repo_path` (the index is keyed by path), and let
 the indexer derive the project name rather than overriding it. If the project
 was already indexed at its primary checkout, this picks up the worktree as a
@@ -209,10 +216,9 @@ required step of merged work. A clean worktree teardown is not complete while
 the primary checkout is silently behind the branch that just received the
 merge.
 
-Synchronizing the verified primary checkout's base branch is the sole allowed
-primary-checkout mutation and is not blocked by other live sessions. Tracked
-edits there are invalid/disposable state, never user WIP to inspect, stash,
-preserve, or treat as a sync blocker:
+Synchronizing the verified primary checkout's base branch is not blocked
+merely by another session's cwd. Respect explicit user limits on fetching or
+resetting and repository-specific deployment-source rules:
 
 1. Fetch the remote. Resolve the candidate to its repository top level, then
    verify it is the actual primary checkout (its `.git` is a directory, not a
@@ -222,9 +228,10 @@ preserve, or treat as a sync blocker:
    If either identity or branch verification fails, stop: do not reset, switch,
    or otherwise mutate it. Linked feature worktrees retain the full protections
    in this skill.
-3. Without reviewing the diff, discard only tracked primary-checkout edits
-   with `git -C <primary-checkout> reset --hard`. Do not stash them, recover
-   them, or report them as WIP/blockers.
+3. If tracked drift exists, inspect its scope. Reset it only when the user's
+   existing authorization and applicable repository policy permit restoring
+   this verified primary/base. Otherwise preserve it and report why sync
+   could not finish; do not silently stash or discard it.
 4. Untracked files are not implicitly disposable. Leave them in place; never
    use a broad `git clean` here. Fast-forward only when doing so will not
    overwrite an untracked path. If one prevents the update, report that exact
