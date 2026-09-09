@@ -109,7 +109,9 @@ export function main(args) {
   }
   const errors = [];
   if (output && (!existsSync(path.join(root, output)) || read(path.join(root, output)) !== renderInventory(root, output, files))) errors.push(`${output}: stale inventory; run repo-docs generate --output ${output}`);
-  for (const file of selected ?? files) {
+  // A requested inventory is a contract even when only a command's script
+  // was deleted. Its links must not disappear behind focused --files checks.
+  for (const file of new Set([...(selected ?? files), ...(output ? [output] : [])])) {
     if (/\.mdx?$/.test(file)) errors.push(...checkMarkdown(root, file));
   }
   if (errors.length) throw new Error(errors.join('\n'));
