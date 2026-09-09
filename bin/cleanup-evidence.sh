@@ -11,8 +11,10 @@ cleanup_load_prs() {
     else error("invalid open PR pages") end' <<<"$open") || return 1
   # Missing older merged records is conservative: unproven squash heads stay.
   merged=$(cd "$repo" && gh pr list --state merged --limit 1000 --json headRefName,headRefOid,mergeCommit) || return 1
-  CLEANUP_PRS=$(jq -cen --argjson open "$open" --argjson merged "$merged" '
-    if ($merged | type) == "array" then $open + ($merged | map(. + {state:"MERGED"}))
+  # Histories of 1000 PRs exceed Linux's per-argument limit. Keep bulk data
+  # on stdin; --argjson would fail before jq could validate it.
+  CLEANUP_PRS=$(printf '%s\n%s\n' "$open" "$merged" | jq -ces '
+    if (.[1] | type) == "array" then .[0] + (.[1] | map(. + {state:"MERGED"}))
     else error("invalid merged PR data") end') || return 1
 }
 
