@@ -28,7 +28,8 @@ g() { git -c user.name=t -c user.email=t@t "$@"; }
 mkdir -p "$tmp/bin"
 cat > "$tmp/bin/gh" <<'GH'
 #!/usr/bin/env bash
-if [ "$1" = pr ] && [ "$2" = list ]; then printf '%s\n' "${GH_PRS_JSON:-[]}"; exit 0; fi
+if [ "$1" = pr ] && [ "$2" = list ]; then printf '%s\n' "${GH_PRS_JSON:-[]}" | jq '[.[]|select(.state=="MERGED")]'; exit 0; fi
+if [ "$1" = api ]; then printf '%s\n' "${GH_PRS_JSON:-[]}" | jq '[[.[]|select(.state=="OPEN")|{head:{ref:.headRefName}}]]'; exit 0; fi
 echo "gh stub: unsupported: $*" >&2; exit 1
 GH
 chmod +x "$tmp/bin/gh"
@@ -61,7 +62,7 @@ wt wt-parent feat/parent; g worktree add -q "$tmp/wt-parent/.claude/worktrees/ch
 # h. detached HEAD at main tip.
 g worktree add -q --detach "$tmp/wt-detached" 2>/dev/null
 
-export GH_PRS_JSON="[{\"headRefName\":\"feat/squash\",\"state\":\"MERGED\",\"mergeCommit\":{\"oid\":\"$squash\"}},{\"headRefName\":\"feat/open\",\"state\":\"OPEN\",\"mergeCommit\":null}]"
+export GH_PRS_JSON="[{\"headRefName\":\"feat/squash\",\"headRefOid\":\"$(git rev-parse feat/squash)\",\"state\":\"MERGED\",\"mergeCommit\":{\"oid\":\"$squash\"}},{\"headRefName\":\"feat/open\",\"state\":\"OPEN\",\"mergeCommit\":null}]"
 
 all_dirs=(wt-squash wt-ancestor wt-dirty wt-open wt-wip wt-live wt-parent wt-parent/.claude/worktrees/child wt-detached)
 
@@ -78,6 +79,9 @@ grep -Eq "^KEEP[[:space:]].*/wt-wip[[:space:]].*unverified" "$tmp/report"
 grep -Eq "^KEEP[[:space:]].*/wt-live[[:space:]].*live" "$tmp/report"
 
 # 2. --delete removes exactly the SAFE set (nested child before its parent) and their branches.
+"$sweep" --repo "$primary" --base main --path "$tmp/wt-ancestor" > "$tmp/scoped" 2>&1
+[ "$(grep -c '^SAFE' "$tmp/scoped")" = 1 ]
+! grep -q 'wt-squash' "$tmp/scoped"
 "$sweep" --repo "$primary" --base main --delete > "$tmp/deleted" 2>&1 || { echo "delete run failed" >&2; cat "$tmp/deleted" >&2; exit 1; }
 for d in wt-squash wt-ancestor wt-parent/.claude/worktrees/child wt-parent wt-detached; do
   [ ! -e "$tmp/$d" ] || { echo "expected $d removed" >&2; cat "$tmp/deleted" >&2; exit 1; }

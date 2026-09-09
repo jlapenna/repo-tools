@@ -65,11 +65,17 @@ selection and repository-specific rules.
   feature worktree, including clean worktrees with initialized submodules.
 - `repo-sweep-worktrees [--repo <checkout>] [--base <ref>] [--delete]` —
   audit every linked worktree of a checkout and, with `--delete`, remove the
-  ones whose work has landed (ancestor of the base, or merged pull request
-  with content identical to its squash) that are clean and unoccupied;
+  ones whose work has landed (ancestor of the base, or exact merged PR head
+  whose merge commit is on the base) that are clean and unoccupied;
   dirty, live, open-PR, and unverified worktrees are reported and kept. Run
   it from the primary checkout, on a schedule, as the backstop for sessions
   that never completed their own teardown.
+- Use `--path <worktree>` to scope that command to one completed task. Both
+  the sweep and `repo-audit-branches [--base main] [--fetch] [--delete] [--delete-remote]`
+  use the same fail-closed merge/ownership checker. Reports are TSV with stable
+  reasons; missing ownership evidence preserves work. No fetch is implicit.
+  Local and remote branch deletion require separate flags; remote deletion uses
+  the originally audited SHA and runs push hooks.
 - `repo-nx` — run Nx with portable cache and linked-worktree safeguards.
 
 ## Releasing

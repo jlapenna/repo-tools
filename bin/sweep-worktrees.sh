@@ -2,15 +2,15 @@
 # Sweep the linked worktrees of a repository: remove the ones whose work has
 # landed and that nothing is using; report everything else.
 #
-# Usage: repo-sweep-worktrees [--repo <checkout>] [--base <ref>] [--delete]
+# Usage: repo-sweep-worktrees [--repo <checkout>] [--base <ref>] [--path <worktree>] [--delete]
 #
 # A worktree is SAFE to remove only when all of these hold:
 #   - its tree is clean (no uncommitted or untracked-but-tracked-path changes);
 #   - no process has its cwd inside it (run this from the primary checkout);
 #   - its branch has no OPEN pull request; and
 #   - its work is in the base: the tip is an ancestor of --base, or the
-#     branch's pull request is MERGED and the branch's content is identical to
-#     that squash commit on every file the branch touched.
+#     exact branch head was merged by a PR whose merge commit is on the base.
+# Missing PR ownership data is unverified, never permission to delete.
 # Anything else is KEEP with the reason. Nothing is removed without --delete.
 # Nested worktrees are removed before their parents. Removal goes through
 # safe-remove-worktree, which re-checks live processes and cleanliness.
@@ -23,10 +23,12 @@ set -euo pipefail
 REPO=""
 BASE=""
 DELETE=false
+ONLY_PATH=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --repo) [ "$#" -ge 2 ] || { echo "--repo requires a path" >&2; exit 64; }; REPO="$2"; shift ;;
     --base) [ "$#" -ge 2 ] || { echo "--base requires a ref" >&2; exit 64; }; BASE="$2"; shift ;;
+    --path) [ "$#" -ge 2 ] || exit 64; ONLY_PATH=$(realpath -e -- "$2"); shift ;;
     --delete) DELETE=true ;;
     -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 64 ;;
@@ -35,6 +37,8 @@ while [ "$#" -gt 0 ]; do
 done
 
 here=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)
+# shellcheck source=bin/cleanup-evidence.sh
+source "$here/cleanup-evidence.sh"
 REMOVER="$here/safe-remove-worktree.sh"
 SCANNER="$here/scan-live-processes.sh"
 [ -x "$REMOVER" ] && [ -x "$SCANNER" ] || { echo "missing sibling scripts next to $0" >&2; exit 70; }
@@ -49,21 +53,8 @@ if [ -z "$BASE" ]; then
 fi
 git -C "$PRIMARY" rev-parse -q --verify "$BASE^{commit}" >/dev/null || { echo "unknown base ref: $BASE" >&2; exit 1; }
 
-# One PR lookup for the whole sweep. Without gh or jq, only ancestor evidence
-# counts, and squash-merged branches are reported as unverified.
-PRS=""
-if command -v gh >/dev/null && command -v jq >/dev/null; then
-  PRS=$(cd "$PRIMARY" && gh pr list --state all --limit 1000 --json headRefName,state,mergeCommit 2>/dev/null) || PRS=""
-fi
-[ -n "$PRS" ] || echo "# no pull-request data (gh/jq unavailable or failed): only ancestor evidence counts" >&2
-
-pr_lookup() { # prints "STATE<TAB>mergeCommit" for a branch, preferring an OPEN PR; empty if none
-  [ -n "$PRS" ] || return 0
-  jq -r --arg b "$1" '
-    [.[] | select(.headRefName == $b)]
-    | (map(select(.state == "OPEN"))[0] // .[0])
-    | if . == null then "" else "\(.state)\t\(.mergeCommit.oid // "")" end' <<<"$PRS"
-}
+BASE=$(git -C "$PRIMARY" rev-parse "$BASE^{commit}")
+cleanup_load_prs "$PRIMARY" || echo '# PR data unavailable; keeping unverified worktrees' >&2
 
 live_count() { "$SCANNER" "$1" 2>/dev/null | grep -cE '^[0-9]+ ' || true; }
 
@@ -94,6 +85,7 @@ emit() { printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4"; }
 
 safe_paths=()
 safe_branches=()
+safe_heads=()
 path=""; head=""; branch=""
 while IFS= read -r line; do
   case "$line" in
@@ -102,7 +94,7 @@ while IFS= read -r line; do
     "branch "*) branch=${line#branch refs/heads/} ;;
     "")
       [ -n "$path" ] || continue
-      if [ "$path" != "$PRIMARY" ]; then
+      if [ "$path" != "$PRIMARY" ] && { [[ -z $ONLY_PATH ]] || [[ $path == "$ONLY_PATH" ]]; }; then
         if [ ! -d "$path" ]; then
           emit KEEP "$path" "$branch" "directory missing (git worktree prune)"
         elif dirty=$(dirty_count "$path") && [ "$dirty" -gt 0 ]; then
@@ -110,27 +102,11 @@ while IFS= read -r line; do
         elif live=$(live_count "$path") && [ "$live" -gt 0 ]; then
           emit KEEP "$path" "$branch" "live: $live process(es) with cwd inside"
         else
-          pr=""; [ -n "$branch" ] && pr=$(pr_lookup "$branch")
-          pr_state=${pr%%$'\t'*}; pr_merge=${pr#*$'\t'}; [ "$pr" = "$pr_state" ] && pr_merge=""
-          ahead=$(git -C "$PRIMARY" rev-list --count "$BASE..$head" 2>/dev/null || echo "?")
-          if [ "$pr_state" = OPEN ]; then
-            emit KEEP "$path" "$branch" "open pull request"
-          elif [ "$ahead" = 0 ]; then
-            emit SAFE "$path" "$branch" "ancestor of $BASE"
-            safe_paths+=("$path"); safe_branches+=("$branch")
-          elif [ "$pr_state" = MERGED ] && [ -n "$pr_merge" ] &&
-            git -C "$PRIMARY" rev-parse -q --verify "$pr_merge^{commit}" >/dev/null; then
-            mb=$(git -C "$PRIMARY" merge-base "$BASE" "$head")
-            files=$(git -C "$PRIMARY" diff --name-only "$mb" "$head")
-            # shellcheck disable=SC2086
-            if [ -z "$files" ] || git -C "$PRIMARY" diff --quiet "$head" "$pr_merge" -- $files; then
-              emit SAFE "$path" "$branch" "content in merged squash ${pr_merge:0:9}"
-              safe_paths+=("$path"); safe_branches+=("$branch")
-            else
-              emit KEEP "$path" "$branch" "unverified: differs from merge commit ${pr_merge:0:9}"
-            fi
+          if reason=$(cleanup_evidence "$PRIMARY" "$BASE" "$branch" "$head"); then
+            emit SAFE "$path" "$branch" "$reason"
+            safe_paths+=("$path"); safe_branches+=("$branch"); safe_heads+=("$head")
           else
-            emit KEEP "$path" "$branch" "unverified: $ahead commit(s) not in $BASE, no merged pull request"
+            emit KEEP "$path" "$branch" "$reason"
           fi
         fi
       fi
@@ -147,6 +123,12 @@ done <<<"$RECORDS
 order=$(for i in "${!safe_paths[@]}"; do printf '%s\t%s\n' "$(tr -cd '/' <<<"${safe_paths[$i]}" | wc -c)" "$i"; done | sort -k1,1nr | cut -f2)
 for i in $order; do
   p=${safe_paths[$i]}; b=${safe_branches[$i]}
+  h=${safe_heads[$i]}
+  if ! cleanup_load_prs "$PRIMARY" ||
+    ! cleanup_evidence "$PRIMARY" "$BASE" "$b" "$h" >/dev/null ||
+    [[ $(git -C "$p" rev-parse HEAD) != "$h" ]]; then
+    emit KEEP "$p" "$b" 'unverified:plan-changed'; continue
+  fi
   # The remover re-checks live processes and cleanliness right before acting.
   out=$("$REMOVER" "$p" 2>&1) || true
   if [ -e "$p" ]; then
@@ -156,7 +138,7 @@ for i in $order; do
   fi
   note="removed"
   if [ -n "$b" ]; then
-    if git -C "$PRIMARY" branch -D "$b" >/dev/null 2>&1; then note="removed; branch $b deleted"; else note="removed; branch $b kept (still checked out elsewhere?)"; fi
+    if cleanup_delete_branch "$PRIMARY" "$b" "$h" false >/dev/null 2>&1; then note="removed; branch $b deleted"; else note="removed; branch $b kept (occupied or changed)"; fi
   fi
   emit REMOVED "$p" "$b" "$note"
 done

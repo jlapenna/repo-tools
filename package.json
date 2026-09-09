@@ -19,6 +19,7 @@
     "repo-set-tmux-task-title": "bin/set-tmux-task-title.mjs",
     "repo-scan-live-processes": "bin/scan-live-processes.sh",
     "repo-sweep-worktrees": "bin/sweep-worktrees.sh",
+    "repo-audit-branches": "bin/audit-branches.sh",
     "repo-github-app-token": "bin/github-app-token.mjs",
     "repo-gh-shim": "bin/gh-shim.sh",
     "repo-adopt-agent-identity": "bin/adopt-agent-identity.sh"
@@ -32,6 +33,7 @@
     "plugins/repo-tools/scripts"
   ],
   "scripts": {
+    "test:cleanup": "node --test bin/audit-branches.test.mjs",
     "build": "node scripts/build-eslint.mjs",
     "release": "node scripts/release.mjs",
     "test": "bash bin/check-dependencies.test.sh && bash bin/safe-remove-worktree.test.sh && bash bin/sweep-worktrees.test.sh && bash bin/watch-prs.test.sh && bash bin/set-tmux-task-title.test.sh && bash bin/github-app-token.test.sh && bash bin/gh-shim.test.sh && bash bin/adopt-agent-identity.test.sh && node --test plugins/manifests.test.mjs && node --test scripts/release.test.mjs && pnpm run build && node --test eslint/test/consumer-contract.test.mjs && vitest run eslint/test/rules"

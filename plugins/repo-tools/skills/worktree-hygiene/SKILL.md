@@ -101,114 +101,36 @@ distinct path so the graph stays fresh for concurrent sessions working there.
 
 ## Tearing a worktree down safely
 
-Merging a PR does not remove the worktree directory — `gh pr merge
---delete-branch` only deletes the remote branch (and the local one, if it
-isn't locked by a worktree checkout; if it is, that's expected local
-cleanup noise, not a merge failure — confirm the merge really happened via
-`gh pr view --json state,mergedAt,mergeCommit` rather than assuming
-anything went wrong). Skipped teardown steps accumulate silently — each
-worktree can carry its own installed dependencies and build output, so this
-adds up fast.
+Use the shared evidence checker rather than reconstructing merge proof in shell.
+From outside the target worktree:
 
-Before removing a worktree, work through this checklist — a
-`git status` that reads clean right now is *not* sufficient on its own:
+```bash
+repo-sweep-worktrees --repo <primary> --path <worktree> --base origin/main
+repo-sweep-worktrees --repo <primary> --path <worktree> --base origin/main --delete
+```
 
-1. **Confirm the branch's work actually landed.** Don't trust `git
-   merge-base --is-ancestor <branch> main` alone — it false-negatives on
-   every squash merge (see the `stale-branch-cleanup` skill for the full
-   recipe: find the squash commit, diff content, don't just trust "not an
-   ancestor" as "not merged").
-2. **Scan for live processes with cwd inside the worktree** — the same
-   `/proc` scan as above, scoped to this worktree's path. A worktree can
-   look stale (clean status, zero unique commits vs main) and still be
-   actively serving a dev server or hosting another live session's shell
-   right now. Re-run the scan immediately before removing, not just once.
-   Your *own* session does not count: if you were launched with cwd inside
-   the worktree, the scan lists your launcher shell, the `claude`/`codex`
-   binary, its MCP servers, and the shell running the scan itself — that
-   is not a reason to refuse, and the remover in step 5 tells the two
-   apart for you.
-3. **Check your own background tasks/watchers.** A `run_in_background`
-   monitor or polling loop launched while your cwd was the worktree
-   inherits that cwd — removing the worktree out from under it makes every
-   subsequent `git`/`gh` call in the loop fail with "unable to read current
-   working directory." If the loop's error handling swallows that (e.g. a
-   bare `|| true` fallback), it can silently poll blind and report a bogus
-   result long after the real outcome already happened. Either confirm no
-   background task is still running against this cwd, or start long-running
-   watchers with an explicit absolute-path `cd`/`-C` so they survive
-   teardown.
-4. **A "locked" entry with a dead PID is not the same as safe to delete.**
-   `git worktree list` can show `locked ... (pid N)` where `ps -p N` proves
-   the process is long dead — but the worktree can still hold 100s of lines
-   of real uncommitted diff (a crashed session's WIP that exists *only* on
-   disk, never committed). Check `git status --porcelain` regardless of
-   lock state; if it's dirty, don't delete — report the path, branch, and
-   diff stat, and check whether it matches a still-open issue/PR before
-   deciding.
-5. **Remove it** — as the session's last action, after stepping out of the
-   directory you are about to delete:
-   ```bash
-   cd <owning-checkout>
-   repo-safe-remove-worktree <worktree-path>
-   ```
-   The helper resolves the target worktree's own Git common directory, so it
-   is safe to invoke from a different repository; inspect the exact removal
-   command first with `--dry-run`. It classifies every process with cwd
-   under the worktree as either your **own session** (the outermost ancestor
-   of the helper, within the same process session, whose cwd is inside the
-   worktree, plus everything that ancestor spawned — ignored) or **foreign**
-   (listed, and the reason it refuses). It also refuses on uncommitted
-   changes. Pass `--force-anyway` only after you've personally reviewed what
-   it flagged. Never end a session with "run the remover after this session
-   closes" — that hand-off is not executed by anyone, and the worktrees
-   accumulate; your own processes being inside the worktree is exactly the
-   case the helper handles. Always use the helper instead of calling `git
-   worktree remove` directly: after its process and cleanliness gates pass,
-   its normal `--force` also handles clean worktrees with initialized
-   submodules while still preserving intentional worktree locks. After a
-   successful removal the shell you ran it
-   from no longer has a cwd; the helper prints the `cd` to run before your
-   next command. If plain removal reports "cannot remove a
-   locked working tree" from a harness-owned agent-session lock, confirm
-   the locking PID is actually dead first, then `git worktree remove
-   <path> --force --force` (twice) — never do this for a worktree you know
-   is still in active use. If a previous removal left the directory but
-   removed its `.git` link, the helper identifies it as a **partially removed
-   linked worktree** (not the primary checkout), refuses by default, and can
-   recover it only after review. If the owning checkout is not an ancestor or
-   immediate sibling (for example, a centralized `worktrees/` directory),
-   identify it explicitly with `--git-dir <owning-checkout-or-git-dir>`:
-   ```bash
-   repo-safe-remove-worktree <worktree-path> --force-anyway --dry-run
-   repo-safe-remove-worktree <worktree-path> --force-anyway
-   repo-safe-remove-worktree <worktree-path> --git-dir <owner> --force-anyway --dry-run
-   ```
-   That recovery identifies only the target's administrative record, restores
-   its missing `.git` link, and asks `git worktree remove` to remove that
-   exact checkout. It never runs repository-wide `git worktree prune`, so
-   unrelated stale worktree records remain recoverable. Recovery creates the
-   repaired link relative to a verified `O_DIRECTORY|O_NOFOLLOW` directory
-   descriptor. It fully writes and syncs an unnamed `O_TMPFILE`, then
-   atomically publishes that completed inode as `.git`. On filesystems without
-   `O_TMPFILE`, it instead uses an exclusive descriptor-relative staging file
-   and publishes the opened staging inode through its descriptor with an atomic
-   no-overwrite hard link. Every existing node type is refused, and write
-   failures expose no partial `.git` link. The named staging hard link is not
-   unlinked by pathname, because another writer could replace that name during
-   cleanup; the immediately following worktree removal deletes it. If removal
-   fails, the safe `.git-recovery-*` link remains for inspection.
-6. **Orphaned directories** (no `.git/worktrees/<name>/` admin entry, `git
-   worktree list` doesn't mention them, but the directory is still on
-   disk — usually a prior `git worktree remove` that partially failed) are
-   safe to `rm -rf` directly once you've confirmed: no live process (step 2
-   above), no matching local/remote branch, no matching open PR. If
-   anything in the worktree ran inside a container as root (a Dockerized
-   test runner, for instance), `git worktree remove` can also partially
-   fail with `Permission denied` on the root-owned files it left behind —
-   it still unregisters from git; leave the leftover subtree for a manual
-   `sudo rm -rf` rather than escalating privileges unprompted.
+The report is TSV: verdict, path, branch, reason. The command combines paginated
+open-PR ownership, exact merged-head/ancestor evidence, cleanliness, and live
+process checks. Apply rechecks ownership and HEAD, delegates removal to
+`repo-safe-remove-worktree`, and compare-and-deletes only the audited local
+branch tip. Missing GitHub evidence is KEEP, not permission. No fetch is implicit;
+refresh the base only when the user's task permits it.
 
+Use `--path` for task-scoped cleanup. Omitting it audits every linked worktree;
+a repository-wide `--delete` requires that broader cleanup scope. A dry run never
+removes anything. Stop task-owned background watchers before cleanup, and do not
+kill another session to turn KEEP into SAFE.
+
+Standalone local/remote branches use `repo-audit-branches`; its `--delete`
+and `--delete-remote` flags are independent. Remote removal binds the push to the
+audited SHA and runs hooks. A closed PR, gone upstream, or timestamp is not proof
+that unmerged work may be discarded.
+
+Explicit abandonment of your own unmerged work is a separate user-authorized
+operation, not "merged" cleanup. Inspect its exact content and scope, then use
+`repo-safe-remove-worktree <path> --dry-run` before removal. Never override a dirty,
+locked, occupied, or partially removed worktree merely to finish a checklist.
+Preserve disputed work and report the specific blocker.
 ## Syncing the primary checkout after a merge
 
 Treat syncing the primary checkout to the latest remote base as the final
