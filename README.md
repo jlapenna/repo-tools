@@ -41,8 +41,13 @@ selection and repository-specific rules.
   human maintainer's. Reads the App key on demand via
   `GITHUB_APP_PRIVATE_KEY_COMMAND` (or `GITHUB_APP_PRIVATE_KEY`) and
   `GITHUB_APP_CLIENT_ID`, so no long-lived credential is stored on the
-  host. Tokens are scoped to the single repository, cached until shortly
-  before expiry, and printed bare for `GH_TOKEN="$(repo-github-app-token)"`.
+  host. The client id and the key command also fall back to
+  `git config repo-tools.githubAppClientId` and
+  `repo-tools.githubAppPrivateKeyCommand`, which is how to configure a host
+  whose agent tool shells never source a profile; the PEM itself is
+  environment-only. Tokens are scoped to the single repository, cached until
+  shortly before expiry, and printed bare for
+  `GH_TOKEN="$(repo-github-app-token)"`.
 - `repo-scan-live-processes <directory>` — list processes whose working
   directory is inside a repository or worktree.
 - `repo-check-dependencies` — validate a pnpm frozen lockfile and report
