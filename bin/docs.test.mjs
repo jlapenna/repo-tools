@@ -66,3 +66,14 @@ test('package-manager bin symlinks execute the CLI instead of silently returning
   assert.equal(result.status, 1);
   assert.match(result.stderr, /missing link target/);
 });
+
+test('focused checks still reject deleted command targets in the requested inventory', (t) => {
+  const { root, write, run } = fixture(t);
+  write('package.json', JSON.stringify({ bin: { 'repo-one': 'bin/one.sh' } }));
+  write('bin/one.sh', '#!/bin/sh\n');
+  assert.equal(run('generate', '--output', 'docs/interfaces.md').status, 0);
+  rmSync(path.join(root, 'bin/one.sh'));
+  const result = spawnSync(process.execPath, [cli, 'check', '--root', root, '--output', 'docs/interfaces.md', '--files', 'bin/one.sh'], { encoding: 'utf8' });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /missing link target: ..\/bin\/one.sh/);
+});
