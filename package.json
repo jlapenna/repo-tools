@@ -10,6 +10,7 @@
     "pnpm": "11.24.0"
   },
   "bin": {
+    "repo-docs": "bin/docs.mjs",
     "repo-require-worktree": "bin/require-feature-worktree.sh",
     "repo-check-dependencies": "bin/check-dependencies.sh",
     "repo-nx": "bin/nx.sh",
@@ -33,6 +34,7 @@
     "plugins/repo-tools/scripts"
   ],
   "scripts": {
+    "test:docs": "node --test bin/docs.test.mjs && node bin/docs.mjs check --output docs/interfaces.md",
     "test:cleanup": "node --test bin/audit-branches.test.mjs",
     "build": "node scripts/build-eslint.mjs",
     "release": "node scripts/release.mjs",
@@ -40,7 +42,8 @@
   },
   "dependencies": {
     "@nx/devkit": "23.1.1",
-    "@typescript-eslint/utils": "8.58.0"
+    "@typescript-eslint/utils": "8.58.0",
+    "yaml": "2.9.0"
   },
   "devDependencies": {
     "esbuild": "0.28.0",

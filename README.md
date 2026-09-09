@@ -20,6 +20,16 @@ selection and repository-specific rules.
 
 ## Commands
 
+The [generated interface inventory](docs/interfaces.md) lists commands and
+skills directly from their manifests. `repo-docs generate --output
+docs/interfaces.md` refreshes it; `repo-docs check --output docs/interfaces.md`
+rejects drift, malformed skill frontmatter, and broken literal local Markdown
+file links. Use `--files <paths...>` last for focused link/skill checks; inventory
+checks still cover all source manifests. Code examples, web URLs, root-relative
+web routes, and heading anchors are not checked. Nx inventories include only
+explicit targets, not inferred targets. These are source contracts, not runtime
+health checks.
+
 - `repo-gh-shim` — a `gh` wrapper that authenticates as the App bot when an
   agent session is driving, and does nothing otherwise. A token only helps
   if it is actually used, and requiring an agent to remember it on every
