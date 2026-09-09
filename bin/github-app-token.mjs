@@ -24,7 +24,8 @@
 // agent tool shell, the population this command exists for (see configured()):
 //   git config --global repo-tools.githubAppClientId Iv23li...
 //   git config --global repo-tools.githubAppPrivateKeyCommand 'gcloud secrets ...'
-// The PEM itself has no such fallback, on purpose.
+// Only --global and --system are consulted; a repository cannot supply either
+// value. The PEM itself has no fallback at all, on purpose.
 //
 // Usage:
 //   repo-github-app-token [--repo owner/name] [--json] [--refresh]
@@ -101,22 +102,36 @@ function detectRepo() {
 // session works for up to an hour and then refuses with nothing having changed
 // (jlapenna/repo-tools#55).
 //
-// git config is readable from any shell, layers per-repository over per-user
-// the way the rest of git already does, and is the same file a host's dotfile
-// management already delivers.
+// git config is readable from any shell and is the same file a host's dotfile
+// management already delivers. Only the machine's own scopes count — see
+// configured() for why a repository's config is not trusted here.
+// Only the machine's own scopes are read, never the repository's.
+//
+// A plain `git config --get` searches repository-local config first, and a
+// repository is not trusted ground: a .git directory can travel inside a
+// checkout, an archive, or a build artifact, so its config is attacker-shaped
+// input wherever an agent clones or unpacks something. One of these values is
+// executed (`sh -c`, in readPrivateKey below), which turned "stand in this
+// directory" into arbitrary code execution the first time this fallback
+// shipped. The client id gets the same treatment: a repository has no business
+// redirecting which App an agent mints against.
 function configured(envName, gitKey) {
   const fromEnv = process.env[envName];
   if (fromEnv && fromEnv.trim() !== "") return fromEnv;
-  try {
-    const value = execFileSync("git", ["config", "--get", gitKey], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    }).trim();
-    return value === "" ? null : value;
-  } catch {
-    // Unset (exit 1), or no git at all. Either way there is nothing to read.
-    return null;
+  // Highest precedence first, matching git's own layering minus the local
+  // scopes.
+  for (const scope of ["--global", "--system"]) {
+    try {
+      const value = execFileSync("git", ["config", scope, "--get", gitKey], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      }).trim();
+      if (value !== "") return value;
+    } catch {
+      // Unset in this scope (exit 1), no such file, or no git at all.
+    }
   }
+  return null;
 }
 
 function readPrivateKey() {
