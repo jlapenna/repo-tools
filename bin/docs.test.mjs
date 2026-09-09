@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, symlinkSync } from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
@@ -55,4 +55,14 @@ test('selected checks allow deleted docs but fail invalid options and output esc
   assert.equal(selected.status, 0);
   assert.equal(run('generate', '--output', '../escape.md').status, 1);
   assert.equal(run('check', '--typo').status, 1);
+});
+
+test('package-manager bin symlinks execute the CLI instead of silently returning success', (t) => {
+  const { root, write } = fixture(t);
+  const link = path.join(root, 'repo-docs');
+  symlinkSync(cli, link);
+  write('README.md', '[broken](missing.md)\n');
+  const result = spawnSync(process.execPath, [link, 'check', '--root', root], { encoding: 'utf8' });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /missing link target/);
 });
