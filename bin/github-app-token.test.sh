@@ -126,6 +126,46 @@ if (!parsed.token.startsWith("ghs_")) throw new Error("token missing from --json
 if (Number.isNaN(Date.parse(parsed.expiresAt))) throw new Error("expiresAt not a date");
 ' "$(run --json)"
 
+# Configuration also reaches the command through git config, so it works in a
+# shell that never sourced a profile -- an agent's tool shell, which is the
+# population this command exists for and the one the environment misses.
+cat >"$tmpdir/gitconfig" <<EOF
+[repo-tools]
+	githubAppClientId = Iv1configclientid
+	githubAppPrivateKeyCommand = cat $tmpdir/key.pem
+EOF
+
+if ! out="$(env -u GITHUB_APP_CLIENT_ID -u GITHUB_APP_PRIVATE_KEY \
+  -u GITHUB_APP_PRIVATE_KEY_COMMAND \
+  GIT_CONFIG_GLOBAL="$tmpdir/gitconfig" GIT_CONFIG_SYSTEM=/dev/null \
+  GITHUB_API_BASE="http://127.0.0.1:$(cat "$tmpdir/port")" \
+  REPO_TOOLS_TOKEN_CACHE_DIR="$tmpdir/cache-config" \
+  "$script" --repo acme/widgets)"; then
+  echo "FAIL: git config alone should be enough to mint" >&2
+  exit 1
+fi
+[ "${out#ghs_minted_}" != "$out" ] \
+  || { echo "FAIL: git config mint returned '$out'" >&2; exit 1; }
+
+# The environment still wins where both are set. The git config value here is a
+# command that fails, so a mint proves which source was consulted.
+cat >"$tmpdir/gitconfig-bad" <<'EOF'
+[repo-tools]
+	githubAppClientId = Iv1shouldnotbeused
+	githubAppPrivateKeyCommand = false
+EOF
+if ! out="$(GITHUB_APP_CLIENT_ID=Iv1testclientid \
+  GITHUB_APP_PRIVATE_KEY_COMMAND="cat $tmpdir/key.pem" \
+  GIT_CONFIG_GLOBAL="$tmpdir/gitconfig-bad" GIT_CONFIG_SYSTEM=/dev/null \
+  GITHUB_API_BASE="http://127.0.0.1:$(cat "$tmpdir/port")" \
+  REPO_TOOLS_TOKEN_CACHE_DIR="$tmpdir/cache-env-wins" \
+  "$script" --repo acme/widgets)"; then
+  echo "FAIL: environment should take precedence over git config" >&2
+  exit 1
+fi
+[ "${out#ghs_minted_}" != "$out" ] \
+  || { echo "FAIL: env-precedence mint returned '$out'" >&2; exit 1; }
+
 kill "$server_pid" 2>/dev/null || true
 wait "$server_pid" 2>/dev/null || true
 
@@ -146,8 +186,12 @@ wait "$server_pid" 2>/dev/null || true
 # shell profile, so without it these cases inherit real configuration and stop
 # testing the misconfiguration they name. CI has no such profile, so the
 # failure only ever appears on the machines that actually use the tool.
+# GIT_CONFIG_GLOBAL/SYSTEM are load-bearing for the same reason now that git
+# config is a source: a host configured that way would otherwise supply the
+# value these cases are asserting is absent.
 if env -u GITHUB_APP_CLIENT_ID -u GITHUB_APP_PRIVATE_KEY \
   GITHUB_APP_PRIVATE_KEY_COMMAND="cat $tmpdir/key.pem" \
+  GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
   REPO_TOOLS_TOKEN_CACHE_DIR="$tmpdir/cache2" \
   "$script" --repo acme/widgets >/dev/null 2>"$tmpdir/err"; then
   echo "FAIL: missing GITHUB_APP_CLIENT_ID should exit non-zero" >&2
@@ -158,6 +202,7 @@ grep -q GITHUB_APP_CLIENT_ID "$tmpdir/err" \
 
 if env -u GITHUB_APP_PRIVATE_KEY -u GITHUB_APP_PRIVATE_KEY_COMMAND \
   GITHUB_APP_CLIENT_ID=Iv1testclientid \
+  GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
   REPO_TOOLS_TOKEN_CACHE_DIR="$tmpdir/cache2" \
   "$script" --repo acme/widgets >/dev/null 2>"$tmpdir/err2"; then
   echo "FAIL: missing private key should exit non-zero" >&2

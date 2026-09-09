@@ -12,12 +12,19 @@
 // installation token lasts an hour, so a host needs no long-lived credential
 // on disk and there is nothing to rotate here.
 //
-// Configuration, all by environment:
+// Configuration, by environment:
 //   GITHUB_APP_CLIENT_ID            required; the App's client id (a public value)
 //   GITHUB_APP_PRIVATE_KEY          the PEM itself, or
 //   GITHUB_APP_PRIVATE_KEY_COMMAND  a shell command that prints the PEM
 //   GITHUB_API_BASE                 override the API root (tests, GHES)
 //   REPO_TOOLS_TOKEN_CACHE_DIR      override the cache location
+//
+// The first and third fall back to git config when their variable is unset,
+// so this works in a shell that never sourced a profile -- which is every
+// agent tool shell, the population this command exists for (see configured()):
+//   git config --global repo-tools.githubAppClientId Iv23li...
+//   git config --global repo-tools.githubAppPrivateKeyCommand 'gcloud secrets ...'
+// The PEM itself has no such fallback, on purpose.
 //
 // Usage:
 //   repo-github-app-token [--repo owner/name] [--json] [--refresh]
@@ -82,14 +89,50 @@ function detectRepo() {
   return `${match[1]}/${match[2]}`;
 }
 
+// Configuration reaches this command from the environment when it can, and
+// from git config when it cannot.
+//
+// The environment alone does not reach the callers that matter. An agent's
+// tool shell is both where misattribution happens and where the environment is
+// thinnest: Claude Code's Bash tool starts a shell that never sources
+// ~/.bashrc, so an export placed in a shell profile reaches every human
+// invocation and no agent one. The gap stayed invisible for as long as a
+// cached token lasts -- readCache() below runs before any of this -- so a
+// session works for up to an hour and then refuses with nothing having changed
+// (jlapenna/repo-tools#55).
+//
+// git config is readable from any shell, layers per-repository over per-user
+// the way the rest of git already does, and is the same file a host's dotfile
+// management already delivers.
+function configured(envName, gitKey) {
+  const fromEnv = process.env[envName];
+  if (fromEnv && fromEnv.trim() !== "") return fromEnv;
+  try {
+    const value = execFileSync("git", ["config", "--get", gitKey], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    return value === "" ? null : value;
+  } catch {
+    // Unset (exit 1), or no git at all. Either way there is nothing to read.
+    return null;
+  }
+}
+
 function readPrivateKey() {
+  // Deliberately environment-only: the PEM itself is the one durable secret in
+  // play, and git config is a file on disk. Its *command* falls back below,
+  // because a command is not the credential -- it is how to go and fetch one.
   const direct = process.env.GITHUB_APP_PRIVATE_KEY;
   if (direct && direct.trim() !== "") return direct;
 
-  const command = process.env.GITHUB_APP_PRIVATE_KEY_COMMAND;
+  const command = configured(
+    "GITHUB_APP_PRIVATE_KEY_COMMAND",
+    "repo-tools.githubAppPrivateKeyCommand",
+  );
   if (!command) {
     fail(
-      "set GITHUB_APP_PRIVATE_KEY or GITHUB_APP_PRIVATE_KEY_COMMAND (a command that prints the PEM)",
+      "set GITHUB_APP_PRIVATE_KEY or GITHUB_APP_PRIVATE_KEY_COMMAND (a command that prints the PEM), or git config repo-tools.githubAppPrivateKeyCommand",
     );
   }
   let value;
@@ -204,8 +247,15 @@ async function githubJson(url, { token, method = "GET", body } = {}) {
 }
 
 async function mint(repo) {
-  const clientId = process.env.GITHUB_APP_CLIENT_ID;
-  if (!clientId) fail("set GITHUB_APP_CLIENT_ID to the App client id");
+  const clientId = configured(
+    "GITHUB_APP_CLIENT_ID",
+    "repo-tools.githubAppClientId",
+  );
+  if (!clientId) {
+    fail(
+      "set GITHUB_APP_CLIENT_ID, or git config repo-tools.githubAppClientId, to the App client id",
+    );
+  }
   const apiBase = (
     process.env.GITHUB_API_BASE ?? "https://api.github.com"
   ).replace(/\/+$/, "");
