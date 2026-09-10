@@ -19,13 +19,14 @@ function fixture(t) {
 test('real CLI generates stable inventories and catches source drift', (t) => {
   const { root, write, run } = fixture(t);
   write('package.json', JSON.stringify({ bin: { 'repo-one': 'bin/one.sh' } }));
+  write('.repo/verify.json', JSON.stringify({ version: 1, checks: [{ id: 'native-test', command: ['node', '--test'] }] }));
   write('bin/one.sh', '#!/bin/sh\n');
   write('apps/a/project.json', JSON.stringify({ name: '@a/web', targets: { serve: {} } }));
   write('apps/a/infra/deployment.yaml', 'apps:\n  frontend:\n    project: example\n');
   write('.agents/skills/one/SKILL.md', '---\nname: one\ndescription: "Run when asked to do one"\ndisable-model-invocation: true\n---\n');
   assert.equal(run('generate', '--output', 'docs/interfaces.md').status, 0);
   const generated = readFileSync(path.join(root, 'docs/interfaces.md'), 'utf8');
-  for (const name of ['repo-one', '@a/web:serve', 'a/frontend', '.agents/skills/one/SKILL.md']) assert.ok(generated.includes(name));
+  for (const name of ['repo-one', 'native-test', '@a/web:serve', 'a/frontend', '.agents/skills/one/SKILL.md']) assert.ok(generated.includes(name));
   assert.equal(run('check', '--output', 'docs/interfaces.md').status, 0);
   write('apps/a/project.json', JSON.stringify({ name: '@a/web', targets: { build: {} } }));
   const stale = run('check', '--output', 'docs/interfaces.md');

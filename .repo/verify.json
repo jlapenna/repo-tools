@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "inventory": "docs/interfaces.md",
+  "checks": [
+    { "id": "tests", "command": ["pnpm", "test"] },
+    { "id": "cleanup", "command": ["pnpm", "run", "test:cleanup"] },
+    { "id": "docs-tests", "command": ["pnpm", "run", "test:docs"] },
+    { "id": "verify-tests", "command": ["pnpm", "run", "test:verify"] }
+  ]
+}
