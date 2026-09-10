@@ -26,7 +26,7 @@ export function skillMetadata(text, file) {
 }
 
 export function inventory(root, files = repositoryFiles(root)) {
-  const rows = { Commands: [], 'Package scripts': [], 'Verification checks': [], Skills: [], 'Explicit Nx targets': [], 'Deployment targets': [] };
+  const rows = { Commands: [], Skills: [], 'Explicit Nx targets': [], 'Deployment targets': [] };
   for (const file of files) {
     const full = path.join(root, file);
     if (!existsSync(full)) continue; // tracked deletion
@@ -34,13 +34,6 @@ export function inventory(root, files = repositoryFiles(root)) {
       const pkg = JSON.parse(read(full));
       const bins = typeof pkg.bin === 'string' ? { [pkg.name]: pkg.bin } : pkg.bin ?? {};
       for (const [name, script] of Object.entries(bins)) rows.Commands.push([name, script]);
-      // Existing inventories stay byte-stable until a repo adopts a plan.
-      if (files.includes('.repo/verify.json')) for (const name of Object.keys(pkg.scripts ?? {})) rows['Package scripts'].push([name, file]);
-    } else if (file === '.repo/verify.json') {
-      const config = JSON.parse(read(full));
-      rows['Verification checks'].push(['docs', file]);
-      if (config.workflows) rows['Verification checks'].push(['workflows', file]);
-      for (const check of config.checks ?? []) rows['Verification checks'].push([check.id, file]);
     } else if (path.basename(file) === 'SKILL.md') {
       const skill = skillMetadata(read(full), file);
       rows.Skills.push([skill.name, file]);

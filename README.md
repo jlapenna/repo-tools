@@ -20,37 +20,6 @@ selection and repository-specific rules.
 
 ## Commands
 
-`repo-verify --base origin/main` explains the repository's executable plan;
-add `--run` to execute it. `.repo/verify.json` owns native commands, not another
-set of copied wrappers. CI passes immutable `--base` and `--head` values and
-may select a job's checks with repeatable `--check <id>` options. Unknown refs,
-unknown checks, malformed plans, and failed commands fail closed. `--head`
-must match the checkout when executing; omit it to include local changes.
-
-Plans use `version: 1`, optional `inventory`, and a `checks` array. Each check
-has a unique `id`, an argv `command`, optional string-valued `env`, and
-`when: "always"` (default) or `"full"`. `{base}` and `{head}` expand to resolved
-commit IDs; a standalone `{files}` argument expands to changed paths. Commands
-run without a shell unless the plan explicitly invokes one. They have the same
-authority as running that repository's tests; do not run untrusted plans with
-credentials or elevated privileges.
-
-Documentation selection is **off by default**. `documentationOnly: true`
-allows a nonempty Markdown-only diff to skip checks marked `full`. Opt in only
-where Markdown is not a build/runtime input requiring those checks. Renames
-include both paths; empty diffs retain full validation; invalid bases fail.
-The built-in `docs` check always validates changed local links and any requested
-inventory. Prerequisite installation, release checks, E2E selection, and
-authorization remain with the repository; this command does not deploy or
-change required-check policy. `--github-output <file>` emits the chosen lane.
-`workflows: true` adds the shared `workflows` check: actionlint's Docker image
-with bundled shellcheck/pyflakes against this checkout. It uses
-`ACTIONLINT_VERSION` when supplied (default `1.7.7`) so the published fleet
-workflow retains its existing version input without copying its implementation.
-
-This repository uses the same plan locally and in its required Verify job:
-`node bin/verify.mjs --base origin/main --run`.
-
 The [generated interface inventory](docs/interfaces.md) lists commands and
 skills directly from their manifests. `repo-docs generate --output
 docs/interfaces.md` refreshes it; `repo-docs check --output docs/interfaces.md`
