@@ -20,30 +20,8 @@ Nx-inferred targets are intentionally not listed. Runtime status is not inferred
 | repo-scan-live-processes | [bin/scan-live-processes.sh](../bin/scan-live-processes.sh) |
 | repo-set-tmux-task-title | [bin/set-tmux-task-title.mjs](../bin/set-tmux-task-title.mjs) |
 | repo-sweep-worktrees | [bin/sweep-worktrees.sh](../bin/sweep-worktrees.sh) |
-| repo-verify | [bin/verify.mjs](../bin/verify.mjs) |
 | repo-watch-prs | [bin/watch-prs.sh](../bin/watch-prs.sh) |
 | repo-watch-run | [bin/watch-run.cjs](../bin/watch-run.cjs) |
-
-## Package scripts
-
-| Name | Source |
-| --- | --- |
-| build | [package.json](../package.json) |
-| release | [package.json](../package.json) |
-| test | [package.json](../package.json) |
-| test:cleanup | [package.json](../package.json) |
-| test:docs | [package.json](../package.json) |
-| test:verify | [package.json](../package.json) |
-
-## Verification checks
-
-| Name | Source |
-| --- | --- |
-| cleanup | [.repo/verify.json](../.repo/verify.json) |
-| docs | [.repo/verify.json](../.repo/verify.json) |
-| docs-tests | [.repo/verify.json](../.repo/verify.json) |
-| tests | [.repo/verify.json](../.repo/verify.json) |
-| verify-tests | [.repo/verify.json](../.repo/verify.json) |
 
 ## Skills
 
