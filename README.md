@@ -43,6 +43,10 @@ The built-in `docs` check always validates changed local links and any requested
 inventory. Prerequisite installation, release checks, E2E selection, and
 authorization remain with the repository; this command does not deploy or
 change required-check policy. `--github-output <file>` emits the chosen lane.
+`workflows: true` adds the shared `workflows` check: actionlint's Docker image
+with bundled shellcheck/pyflakes against this checkout. It uses
+`ACTIONLINT_VERSION` when supplied (default `1.7.7`) so the published fleet
+workflow retains its existing version input without copying its implementation.
 
 This repository uses the same plan locally and in its required Verify job:
 `node bin/verify.mjs --base origin/main --run`.

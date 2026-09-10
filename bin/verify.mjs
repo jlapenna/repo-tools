@@ -12,8 +12,9 @@ export function loadConfig(root, file = '.repo/verify.json') {
   const config = JSON.parse(readFileSync(path.resolve(root, file), 'utf8'));
   if (config.version !== 1 || !Array.isArray(config.checks)) throw new Error(`${file}: expected version 1 and checks array`);
   if (config.documentationOnly !== undefined && typeof config.documentationOnly !== 'boolean') throw new Error(`${file}: documentationOnly must be boolean`);
+  if (config.workflows !== undefined && typeof config.workflows !== 'boolean') throw new Error(`${file}: workflows must be boolean`);
   if (config.inventory !== undefined && (typeof config.inventory !== 'string' || !config.inventory || path.isAbsolute(config.inventory) || config.inventory.split('/').includes('..'))) throw new Error(`${file}: inventory must be a repository-relative path`);
-  const ids = new Set(['docs']);
+  const ids = new Set(['docs', 'workflows']);
   for (const check of config.checks) {
     if (typeof check?.id !== 'string' || !/^[a-z][a-z0-9-]*$/.test(check.id) || ids.has(check.id)) throw new Error(`${file}: invalid or duplicate check id: ${check?.id}`);
     ids.add(check.id);
@@ -40,6 +41,7 @@ export function select(root, base, head, config) {
     reason: docs ? 'only Markdown changed; repository opted into documentation selection' : 'full validation: non-Markdown, empty diff, or no documentation-only opt-in',
     checks: [
       { id: 'docs', selected: true, command: ['repo-docs', 'check', ...(config.inventory ? ['--output', config.inventory] : []), '--files', ...files] },
+      ...(config.workflows ? [{ id: 'workflows', selected: true, command: ['docker', 'run', '--rm', '--volume', `${root}:/repo`, '--workdir', '/repo', `rhysd/actionlint:${process.env.ACTIONLINT_VERSION || '1.7.7'}`, '-color'] }] : []),
       ...config.checks.map((check) => ({
         id: check.id,
         selected: !(docs && check.when === 'full'),

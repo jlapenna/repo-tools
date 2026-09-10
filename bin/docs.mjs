@@ -39,6 +39,7 @@ export function inventory(root, files = repositoryFiles(root)) {
     } else if (file === '.repo/verify.json') {
       const config = JSON.parse(read(full));
       rows['Verification checks'].push(['docs', file]);
+      if (config.workflows) rows['Verification checks'].push(['workflows', file]);
       for (const check of config.checks ?? []) rows['Verification checks'].push([check.id, file]);
     } else if (path.basename(file) === 'SKILL.md') {
       const skill = skillMetadata(read(full), file);
