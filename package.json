@@ -10,6 +10,7 @@
     "pnpm": "11.24.0"
   },
   "bin": {
+    "repo-verify": "bin/verify.mjs",
     "repo-docs": "bin/docs.mjs",
     "repo-require-worktree": "bin/require-feature-worktree.sh",
     "repo-check-dependencies": "bin/check-dependencies.sh",
@@ -34,6 +35,7 @@
     "plugins/repo-tools/scripts"
   ],
   "scripts": {
+    "test:verify": "node --test bin/verify.test.mjs",
     "test:docs": "node --test bin/docs.test.mjs && node bin/docs.mjs check --output docs/interfaces.md",
     "test:cleanup": "node --test bin/audit-branches.test.mjs",
     "build": "node scripts/build-eslint.mjs",
