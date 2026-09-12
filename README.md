@@ -68,8 +68,9 @@ health checks.
   a primary checkout or `main`, while allowing deletion-only pushes.
 - `repo-watch-prs` — watch auto-merge lifecycle for pull requests in the
   current repository.
-- `repo-set-tmux-task-title` — set an empty tmux window task title from a
-  Codex `UserPromptSubmit` hook payload, without overwriting a pinned title.
+- `repo-set-tmux-task-title [--force <title>]` — set an empty tmux window task
+  title from a Codex `UserPromptSubmit` hook payload, without overwriting a
+  pinned title; `--force` explicitly pins or replaces a title for manual use.
 - `repo-watch-run` — watch one workflow run for a pull request or branch.
 - `repo-safe-remove-worktree` — validate and safely remove a completed
   feature worktree, including clean worktrees with initialized submodules.
