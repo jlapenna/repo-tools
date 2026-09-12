@@ -25,6 +25,7 @@ EOF
 grep -Fx 'display-message -p -t %42 #{@user_title}' "$calls"
 grep -Fx 'set-window-option -t %42 @user_title 1234 Fix flaky title assignment' "$calls"
 grep -Fx 'set-window-option -t %42 automatic-rename on' "$calls"
+grep -Fx 'refresh-client -S' "$calls"
 
 : >"$calls"
 TMUX=socket TMUX_PANE=%42 TMUX_BIN="$mock_tmux" TMUX_TEST_CALLS="$calls" \
@@ -42,3 +43,20 @@ EOF
 
 test "$(wc -l <"$calls")" -eq 1
 grep -Fx 'display-message -p -t %42 #{@user_title}' "$calls"
+
+: >"$calls"
+manual_output=$(TMUX=socket TMUX_PANE=%42 TMUX_BIN="$mock_tmux" TMUX_TEST_CALLS="$calls" TMUX_TEST_CURRENT='existing task' \
+  "$script" --force 'manual pinned title')
+
+test "$manual_output" = 'set @user_title for pane %42: manual pinned title'
+grep -Fx 'set-window-option -t %42 @user_title manual pinned title' "$calls"
+grep -Fx 'set-window-option -t %42 automatic-rename on' "$calls"
+grep -Fx 'refresh-client -S' "$calls"
+! grep -Fq 'display-message' "$calls"
+
+if TMUX=socket TMUX_PANE=%42 TMUX_BIN="$mock_tmux" TMUX_TEST_CALLS="$calls" \
+  "$script" --force '' >"$tmpdir/stdout" 2>"$tmpdir/stderr"; then
+  echo 'empty forced title unexpectedly succeeded' >&2
+  exit 1
+fi
+grep -Fx 'usage: repo-set-tmux-task-title [--force <title>]' "$tmpdir/stderr"
