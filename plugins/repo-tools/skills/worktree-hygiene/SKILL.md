@@ -51,10 +51,10 @@ the old cwd, invisible to tmux. The authoritative check is a `/proc` scan:
 repo-scan-live-processes <repo-or-worktree-path>
 ```
 
-If more than one *other* session shows a `cwd` under the path you're about
-to mutate, do not edit or commit there directly — worktree it. Re-run the
-scan immediately before acting, not just once at the start of a session:
-state can change between listing and mutating.
+Any other session or unexplained live process under a candidate feature
+worktree is an ownership conflict: retain it and choose another worktree.
+A scan with no other sessions does not waive the primary-checkout isolation
+rule above. Re-run the scan before mutation or cleanup; ownership can change.
 
 ## Worktree names can collide
 
