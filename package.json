@@ -48,6 +48,6 @@
     "esbuild": "0.28.2",
     "eslint": "10.11.0",
     "typescript-eslint": "8.70.0",
-    "vitest": "4.1.11"
+    "vitest": "5.0.1"
   }
 }
