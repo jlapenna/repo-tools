@@ -103,8 +103,10 @@ Use the PR source metadata and commit authors for provenance, and use
 Hosts that opted into the retired ambient shim should remove only its link:
 
 ```sh
-if [ "$(readlink "$HOME/.local/bin/gh" 2>/dev/null)" = "$HOME/.local/bin/repo-gh-shim" ]; then
-  rm "$HOME/.local/bin/gh"
+if [ -L "$HOME/.local/bin/gh" ]; then
+  case "$(readlink "$HOME/.local/bin/gh")" in
+    repo-gh-shim|*/repo-gh-shim) rm "$HOME/.local/bin/gh" ;;
+  esac
 fi
 ```
 
