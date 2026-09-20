@@ -12,7 +12,6 @@ Nx-inferred targets are intentionally not listed. Runtime status is not inferred
 | repo-audit-branches | [bin/audit-branches.sh](../bin/audit-branches.sh) |
 | repo-check-dependencies | [bin/check-dependencies.sh](../bin/check-dependencies.sh) |
 | repo-docs | [bin/docs.mjs](../bin/docs.mjs) |
-| repo-gh-shim | [bin/gh-shim.sh](../bin/gh-shim.sh) |
 | repo-github-app-token | [bin/github-app-token.mjs](../bin/github-app-token.mjs) |
 | repo-nx | [bin/nx.sh](../bin/nx.sh) |
 | repo-require-worktree | [bin/require-feature-worktree.sh](../bin/require-feature-worktree.sh) |

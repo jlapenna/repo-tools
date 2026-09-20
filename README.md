@@ -30,25 +30,14 @@ web routes, and heading anchors are not checked. Nx inventories include only
 explicit targets, not inferred targets. These are source contracts, not runtime
 health checks.
 
-- `repo-gh-shim` — a `gh` wrapper that authenticates as the App bot when an
-  agent session is driving, and does nothing otherwise. A token only helps
-  if it is actually used, and requiring an agent to remember it on every
-  call is how the wrong name ends up on the work; this removes the
-  remembering. Opt in per host by putting it ahead of `gh` on `PATH`
-  (`ln -s "$(command -v repo-gh-shim)" ~/.local/bin/gh`). Human
-  invocations, an explicitly supplied `GH_TOKEN`, and commands outside any
-  repository all pass straight through. If minting fails it refuses rather
-  than silently writing under the human's name; `REPO_GH_IDENTITY=optional`
-  allows the fallback and `=off` disables the shim.
 - `repo-adopt-agent-identity [<repo>] [--dry-run] [--force]` — give existing
   linked worktrees the agent commit identity. Setting it at creation only
   helps worktrees made afterwards, and a busy checkout can hold dozens that
   predate it. Never touches the primary checkout, and leaves a worktree that
   already carries a different identity alone unless forced.
 - `repo-github-app-token [--repo owner/name] [--json] [--refresh]` — mint a
-  short-lived GitHub App installation token for a repository, so an agent
-  session's GitHub writes carry the App's bot identity instead of the
-  human maintainer's. Reads the App key on demand via
+  short-lived GitHub App installation token for one explicit automation
+  boundary. Reads the App key on demand via
   `GITHUB_APP_PRIVATE_KEY_COMMAND` (or `GITHUB_APP_PRIVATE_KEY`) and
   `GITHUB_APP_CLIENT_ID`, so no long-lived credential is stored on the
   host. The client id and the key command also fall back to
@@ -57,7 +46,7 @@ health checks.
   whose agent tool shells never source a profile. Only `--global` and
   `--system` are read: a repository's own config is untrusted input, and the
   key command is executed. The PEM itself is environment-only. Tokens are scoped to the single repository, cached until
-  shortly before expiry, and printed bare for
+  shortly before expiry, and printed bare for an explicit invocation such as
   `GH_TOKEN="$(repo-github-app-token)"`.
 - `repo-scan-live-processes <directory>` — list processes whose working
   directory is inside a repository or worktree.
@@ -88,6 +77,36 @@ health checks.
   Local and remote branch deletion require separate flags; remote deletion uses
   the originally audited SHA and runs push hooks.
 - `repo-nx` — run Nx with portable cache and linked-worktree safeguards.
+
+## GitHub authentication and provenance
+
+Interactive and agent-driven shells use the installed `gh` command and its
+normal user login. Do not place a wrapper named `gh` earlier on `PATH`, and do
+not inject an App installation token into every command. Git's
+`!gh auth git-credential` helper, repository administration, workflow
+operations, and ordinary CLI commands then share one stable authentication
+boundary instead of changing identity according to the current directory.
+
+Agent provenance is recorded separately from authentication:
+
+- linked worktrees use the worktree-scoped `agent-lcars-bot` commit identity;
+- PR bodies record the provider and session or work-item source; and
+- headless workflows use an App installation token only where the workflow
+  explicitly supplies one.
+
+GitHub's `mergedBy` field identifies the principal that executed the merge. It
+is not implementation provenance: protected auto-merge may report
+`github-actions`, while a direct merge reports the authenticated user or App.
+Use the PR source metadata and commit authors for provenance, and use
+`mergedBy` only as merge-execution evidence.
+
+Hosts that opted into the retired ambient shim should remove only its link:
+
+```sh
+if [ "$(readlink "$HOME/.local/bin/gh" 2>/dev/null)" = "$HOME/.local/bin/repo-gh-shim" ]; then
+  rm "$HOME/.local/bin/gh"
+fi
+```
 
 ## Releasing
 

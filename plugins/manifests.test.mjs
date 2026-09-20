@@ -124,3 +124,15 @@ test('npm package includes the plugin watcher implementations used by its bin wr
   assert.equal(packageJson.bin['repo-watch-run'], 'bin/watch-run.cjs');
   assert.equal(packageJson.bin['repo-watch-prs'], 'bin/watch-prs.sh');
 });
+
+// Protected contract: installing repo-tools must never change the identity or
+// permissions of an ordinary `gh` invocation. A PATH-level shim previously
+// broke Git's `gh auth git-credential` helper, failed when its short-lived App
+// token could not renew, and gave repository-scoped tokens to unrelated API
+// calls. Consumer: `pnpm test` in ci.yml blocks publishing that regression.
+test('npm package does not export an ambient GitHub CLI shim', () => {
+  const packageJson = readJson('package.json');
+  assert.equal(packageJson.bin.gh, undefined);
+  assert.equal(packageJson.bin['repo-gh-shim'], undefined);
+  assert.equal(existsSync(join(root, 'bin/gh-shim.sh')), false);
+});
