@@ -39,6 +39,12 @@ PR when the remaining gates can be completed safely.
 4. Commit intentionally and push normally with upstream tracking.
 5. Confirm GitHub authentication and resolve the repository, base branch, and
    head branch from local evidence rather than assumption.
+6. Use the installed `gh` command with its normal user login for interactive
+   delivery. Do not put an identity-selecting wrapper named `gh` on `PATH` or
+   inject a repository-scoped App token across the lifecycle: Git credential
+   helpers, repository administration, and merge operations need one stable
+   authentication boundary. A repository-specific workflow may explicitly
+   supply an App token at its own automation boundary.
 
 ## Open the PR
 
@@ -48,6 +54,7 @@ Create a ready PR with a concise title and body covering:
 - why it changed and the root cause for fixes;
 - user or operational impact;
 - verification already performed;
+- provider/session or work-item provenance when the change was agent-authored;
 - issue-closing syntax only when the merged PR fully completes that issue.
 
 Confirm required checks were actually created and that the PR head SHA matches
@@ -110,6 +117,11 @@ Before merging, require all of the following:
 Merge or let auto-merge complete without administrative bypass. Verify the PR's
 actual `MERGED` state, merge timestamp, and merge commit; do not infer success
 from a CLI message or from checks turning green.
+
+Treat `mergedBy` as the merge executor, not as implementation provenance.
+Protected auto-merge may report `github-actions`; direct merge reports the
+authenticated user or App. Preserve implementation provenance in the PR body
+and worktree-scoped commit author instead.
 
 ## Verify and clean up
 
