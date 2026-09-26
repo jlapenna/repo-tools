@@ -13,6 +13,7 @@ Nx-inferred targets are intentionally not listed. Runtime status is not inferred
 | repo-check-dependencies | [bin/check-dependencies.sh](../bin/check-dependencies.sh) |
 | repo-docs | [bin/docs.mjs](../bin/docs.mjs) |
 | repo-github-app-token | [bin/github-app-token.mjs](../bin/github-app-token.mjs) |
+| repo-install-husky-hooks | [bin/install-husky-hooks.sh](../bin/install-husky-hooks.sh) |
 | repo-nx | [bin/nx.sh](../bin/nx.sh) |
 | repo-require-worktree | [bin/require-feature-worktree.sh](../bin/require-feature-worktree.sh) |
 | repo-safe-remove-worktree | [bin/safe-remove-worktree.sh](../bin/safe-remove-worktree.sh) |

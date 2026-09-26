@@ -114,6 +114,13 @@ if [ -z "${NX_SELF_HOSTED_REMOTE_CACHE_SERVER:-}" ]; then
     fi
   fi
 
+  # Workstation reconciliation can bootstrap one account-wide credential.
+  # Explicit environment and repository configuration remain overrides; a
+  # newly cloned repository or bare worktree needs no per-repo secret copy.
+  if [ -z "$rc_env" ] && [ -f "${XDG_CONFIG_HOME:-$HOME/.config}/nx/remote-cache.env" ]; then
+    rc_env="${XDG_CONFIG_HOME:-$HOME/.config}/nx/remote-cache.env"
+  fi
+
   if [ -n "$rc_env" ]; then
     rc_server="$(sed -n 's/^NX_SELF_HOSTED_REMOTE_CACHE_SERVER=//p' "$rc_env" | tail -1)"
     if [ -n "$rc_server" ] &&
