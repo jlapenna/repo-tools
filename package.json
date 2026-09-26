@@ -22,7 +22,8 @@
     "repo-sweep-worktrees": "bin/sweep-worktrees.sh",
     "repo-audit-branches": "bin/audit-branches.sh",
     "repo-github-app-token": "bin/github-app-token.mjs",
-    "repo-adopt-agent-identity": "bin/adopt-agent-identity.sh"
+    "repo-adopt-agent-identity": "bin/adopt-agent-identity.sh",
+    "repo-install-husky-hooks": "bin/install-husky-hooks.sh"
   },
   "exports": {
     "./eslint": "./eslint/index.mjs"
@@ -37,7 +38,7 @@
     "test:cleanup": "node --test bin/audit-branches.test.mjs",
     "build": "node scripts/build-eslint.mjs",
     "release": "node scripts/release.mjs",
-    "test": "bash bin/check-dependencies.test.sh && bash bin/safe-remove-worktree.test.sh && bash bin/sweep-worktrees.test.sh && bash bin/watch-prs.test.sh && bash bin/set-tmux-task-title.test.sh && bash bin/github-app-token.test.sh && bash bin/adopt-agent-identity.test.sh && node --test plugins/manifests.test.mjs && node --test scripts/release.test.mjs && pnpm run build && node --test eslint/test/consumer-contract.test.mjs && vitest run eslint/test/rules"
+    "test": "bash bin/nx-global-cache.test.sh && bash bin/install-husky-hooks.test.sh && bash bin/check-dependencies.test.sh && bash bin/safe-remove-worktree.test.sh && bash bin/sweep-worktrees.test.sh && bash bin/watch-prs.test.sh && bash bin/set-tmux-task-title.test.sh && bash bin/github-app-token.test.sh && bash bin/adopt-agent-identity.test.sh && node --test plugins/manifests.test.mjs && node --test scripts/release.test.mjs && pnpm run build && node --test eslint/test/consumer-contract.test.mjs && vitest run eslint/test/rules"
   },
   "dependencies": {
     "@nx/devkit": "23.2.1",
@@ -47,6 +48,7 @@
   "devDependencies": {
     "esbuild": "0.28.2",
     "eslint": "10.11.0",
+    "husky": "9.1.7",
     "typescript-eslint": "8.70.0",
     "vitest": "5.0.1"
   }

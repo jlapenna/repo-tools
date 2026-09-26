@@ -77,6 +77,20 @@ health checks.
   Local and remote branch deletion require separate flags; remote deletion uses
   the originally audited SHA and runs push hooks.
 - `repo-nx` — run Nx with portable cache and linked-worktree safeguards.
+  Explicit environment wins, followed by a worktree/primary checkout's
+  `.nx-remote-cache.env`, then the account-wide
+  `${XDG_CONFIG_HOME:-$HOME/.config}/nx/remote-cache.env`. Workstation
+  reconciliation can rotate the last file without copying secrets into every
+  checkout. Offline health checks still fall back to local computation.
+- `repo-install-husky-hooks [PROJECT_HOOK_DIRECTORY]` — run after a project's
+  Husky installation to keep hooks active in bare linked worktrees. The default
+  directory is `.husky`. It places generated Husky runtime and a repo-tools
+  dispatcher in Git's common directory and sets an absolute `core.hooksPath`.
+  Every invocation runs the current worktree's tracked hook, preserving Husky's
+  global init, arguments, stdin, and exit status. Project hook bodies are never
+  copied. Missing bootstrap fails closed; unrelated hook configurations are
+  refused. Rerun the installer after Husky setup (which restores its relative
+  path), after moving the primary checkout, or when upgrading the runtime.
 
 ## GitHub authentication and provenance
 
