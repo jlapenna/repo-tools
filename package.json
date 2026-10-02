@@ -34,11 +34,11 @@
     "plugins/repo-tools/scripts"
   ],
   "scripts": {
-    "test:docs": "node --test bin/docs.test.mjs && node bin/docs.mjs check --output docs/interfaces.md",
+    "test:docs": "node --test bin/docs.test.mjs plugins/agent-context.test.mjs && node bin/docs.mjs check --output docs/interfaces.md",
     "test:cleanup": "node --test bin/audit-branches.test.mjs",
     "build": "node scripts/build-eslint.mjs",
     "release": "node scripts/release.mjs",
-    "test": "bash bin/nx-global-cache.test.sh && bash bin/install-husky-hooks.test.sh && bash bin/check-dependencies.test.sh && bash bin/safe-remove-worktree.test.sh && bash bin/sweep-worktrees.test.sh && bash bin/watch-prs.test.sh && bash bin/set-tmux-task-title.test.sh && bash bin/github-app-token.test.sh && bash bin/adopt-agent-identity.test.sh && node --test plugins/manifests.test.mjs && node --test scripts/release.test.mjs && pnpm run build && node --test eslint/test/consumer-contract.test.mjs && vitest run eslint/test/rules"
+    "test": "bash bin/nx-global-cache.test.sh && bash bin/install-husky-hooks.test.sh && bash bin/check-dependencies.test.sh && bash bin/safe-remove-worktree.test.sh && bash bin/sweep-worktrees.test.sh && bash bin/watch-prs.test.sh && bash bin/set-tmux-task-title.test.sh && bash bin/github-app-token.test.sh && bash bin/adopt-agent-identity.test.sh && node --test plugins/manifests.test.mjs plugins/agent-context.test.mjs && node --test scripts/release.test.mjs && pnpm run build && node --test eslint/test/consumer-contract.test.mjs && vitest run eslint/test/rules"
   },
   "dependencies": {
     "@nx/devkit": "23.2.1",
