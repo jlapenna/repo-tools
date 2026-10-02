@@ -6,6 +6,9 @@ The package owns worktree safety, process inspection, CI monitoring, shared
 repository tooling, and provider-neutral GitHub App identity helpers. Agent
 LCARS-specific session, dispatch, and runtime behavior remains in Agent LCARS.
 
+See [ARCHITECTURE.md](ARCHITECTURE.md) for component and consumer boundaries,
+and [docs/README.md](docs/README.md) for the documentation index.
+
 Repository-agnostic guidance for deciding which tests and checks earn their
 cost is in the [testing-policy skill reference](plugins/repo-tools/skills/testing-policy/references/testing-policy.md).
 
