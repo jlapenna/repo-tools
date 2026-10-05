@@ -58,6 +58,12 @@ health checks.
   policy (such as permitted workspace dependency names) remains local.
 - `repo-require-worktree [commits and pushes|pushes]` — reject authoring from
   a primary checkout or `main`, while allowing deletion-only pushes.
+- `repo-check-runner-labels [file ...]` — reject a literal workflow `runs-on`
+  that pairs `self-hosted` with a label declared in `.github/actionlint.yaml`'s
+  `self-hosted-runner.labels`. actionlint accepts `self-hosted` everywhere, but
+  a runner scale set matches only its own name, so the pair never schedules.
+  Adopt it (also as the `repo-check-runner-labels` pre-commit hook) only where
+  declared labels name scale sets. Dependency-free; no-op without labels.
 - `repo-watch-prs` — watch auto-merge lifecycle for pull requests in the
   current repository.
 - `repo-set-tmux-task-title [--force <title>]` — set an empty tmux window task

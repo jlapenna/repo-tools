@@ -15,3 +15,11 @@
   pass_filenames: false
   always_run: true
   stages: [pre-push]
+
+- id: repo-check-runner-labels
+  name: runs-on never pairs self-hosted with a declared runner scale-set label
+  entry: bin/check-runner-labels.mjs
+  language: unsupported_script
+  minimum_pre_commit_version: 4.4.0
+  files: ^\.github/(workflows/[^/]+\.ya?ml|actionlint\.ya?ml)$
+  stages: [pre-commit]

@@ -11,6 +11,7 @@ Nx-inferred targets are intentionally not listed. Runtime status is not inferred
 | repo-adopt-agent-identity | [bin/adopt-agent-identity.sh](../bin/adopt-agent-identity.sh) |
 | repo-audit-branches | [bin/audit-branches.sh](../bin/audit-branches.sh) |
 | repo-check-dependencies | [bin/check-dependencies.sh](../bin/check-dependencies.sh) |
+| repo-check-runner-labels | [bin/check-runner-labels.mjs](../bin/check-runner-labels.mjs) |
 | repo-docs | [bin/docs.mjs](../bin/docs.mjs) |
 | repo-github-app-token | [bin/github-app-token.mjs](../bin/github-app-token.mjs) |
 | repo-install-husky-hooks | [bin/install-husky-hooks.sh](../bin/install-husky-hooks.sh) |
