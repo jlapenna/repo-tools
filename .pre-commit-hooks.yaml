@@ -23,3 +23,14 @@
   minimum_pre_commit_version: 4.4.0
   files: ^\.github/(workflows/[^/]+\.ya?ml|actionlint\.ya?ml)$
   stages: [pre-commit]
+
+# Checks every tracked file (not just the staged ones) so the repository's
+# inventory of sub-hourly schedules stays complete and explicit.
+- id: repo-check-schedules
+  name: schedules more frequent than hourly carry a schedule-justification comment
+  entry: bin/check-schedules.mjs
+  language: unsupported_script
+  minimum_pre_commit_version: 4.4.0
+  pass_filenames: false
+  always_run: true
+  stages: [pre-commit]
