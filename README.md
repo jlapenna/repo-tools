@@ -68,7 +68,8 @@ health checks.
   that fires more often than hourly unless an adjacent
   `# schedule-justification: <reason>` comment explains why polling is the
   right design: systemd timers (`OnUnitActiveSec`, `OnUnitInactiveSec`,
-  `OnCalendar`, including `[Timer]` blocks embedded in YAML), GitHub Actions
+  `OnCalendar`, including `*.timer.d/*.conf` drop-ins and `[Timer]` blocks
+  embedded in YAML), GitHub Actions
   `on.schedule` crons, and Kubernetes CronJobs. A frequent timer usually means
   the design should react to an event instead. With no files it checks every
   tracked file, so `--list` (or `git grep schedule-justification`) is the

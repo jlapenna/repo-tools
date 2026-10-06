@@ -10,11 +10,13 @@
 // greppable (`git grep schedule-justification`).
 //
 // Checked declarations:
-// - systemd timers (`*.timer`, `*.timer.j2`, and `[Timer]` sections embedded in
-//   YAML/Jinja files such as Ansible `copy: content:` blocks): OnUnitActiveSec,
-//   OnUnitInactiveSec, and OnCalendar, including several OnCalendar entries
-//   that together fire more than once an hour.
-// - GitHub Actions `on.schedule[].cron` in .github/workflows.
+// - systemd timers (`*.timer`, `*.timer.j2`, `*.timer.d/*.conf` drop-ins, and
+//   `[Timer]` sections embedded in YAML/Jinja files such as Ansible
+//   `copy: content:` blocks): OnUnitActiveSec, OnUnitInactiveSec, and
+//   OnCalendar, including several OnCalendar entries that together fire less
+//   than an hour apart. An empty assignment resets the list, as in systemd.
+// - GitHub Actions `on.schedule[].cron` in .github/workflows, where several
+//   crons are likewise evaluated together.
 // - Kubernetes CronJob `schedule` (YAML documents with `kind: CronJob`).
 //
 // A value that cannot be evaluated (for example a Jinja or Helm expression)
@@ -29,13 +31,16 @@
 // every sub-hourly schedule with its justification instead of failing.
 // Dependency-free so it runs as a pre-commit `unsupported_script` hook.
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { readFileSync, realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HOUR = 3600;
-const JUSTIFICATION = /schedule-justification:[ \t]*(\S.*?)\s*(?:#\}|\*\/)?\s*$/;
-const TIMER_FILE = /\.timer(\.j2)?$/;
+const JUSTIFICATION = /schedule-justification:[ \t]*(\S.*?)\s*$/;
+// Closing delimiters of Jinja and C-style comments are not part of a reason.
+const COMMENT_CLOSE = /\s*(#\}|\*\/)\s*$/;
+const TIMER_FILE = /(\.timer|\.timer\.d\/[^/]+\.conf)(\.j2)?$/;
+const CRONJOB = /^\s*(-\s+)?kind\s*:\s*['"]?CronJob\b/;
 const WORKFLOW = /(^|\/)\.github\/workflows\/[^/]+\.ya?ml$/;
 const EMBEDDING = /\.(ya?ml|j2|tpl)$/;
 const COMMENT = /^\s*(#|;|\{#|\/\/)/;
@@ -193,8 +198,8 @@ export function parseCron(value) {
 // ---------------------------------------------------------------------------
 // Declaration discovery. Each finding: { line, label, verdict, group }.
 // Entries sharing a group (one [Timer] section, one workflow schedule list,
-// one CronJob document) are also checked together: two hourly crons at :00 and
-// :30 are a half-hourly schedule.
+// one CronJob document) are also checked together: two crons at :00 and :30,
+// or at 0:50 and 1:10, fire less than an hour apart.
 
 function unquote(text) {
   const trimmed = text.trim();
@@ -219,8 +224,15 @@ function timerEntries(lines) {
     }
     if (section !== 'Timer') return;
     const directive = /^(OnUnitActiveSec|OnUnitInactiveSec|OnCalendar)\s*=\s*(.*)$/.exec(trimmed);
-    if (!directive || !directive[2].trim()) return;
+    if (!directive) return;
     const [, key, value] = directive;
+    if (!value.trim()) {
+      // `OnCalendar=` (and friends) clears every earlier value of that setting.
+      for (let k = entries.length - 1; k >= 0; k--) {
+        if (entries[k].group === `timer:${group}` && entries[k].key === key) entries.splice(k, 1);
+      }
+      return;
+    }
     let verdict;
     if (key === 'OnCalendar') {
       verdict = parseCalendar(value);
@@ -228,30 +240,34 @@ function timerEntries(lines) {
       const seconds = parseTimespan(value);
       verdict = seconds === undefined ? { kind: 'unknown', detail: `cannot evaluate "${value.trim()}"` } : { kind: 'interval', seconds };
     }
-    entries.push({ line: i, label: `${key}=${value.trim()}`, verdict, group: `timer:${group}`, comments: 'above' });
+    entries.push({ line: i, key, label: `${key}=${value.trim()}`, verdict, group: `timer:${group}`, comments: 'above' });
   });
   return entries;
 }
+
+// Quoted `cron:` values in flow style: `[{cron: '...'}]` or `- {cron: '...'}`.
+const flowCrons = (text) => [...text.matchAll(/cron\s*:\s*(['"])(.*?)\1/g)].map((match) => match[2]);
 
 function workflowEntries(lines) {
   const entries = [];
   lines.forEach((line, i) => {
     const key = /^(\s*)schedule\s*:(.*)$/.exec(stripYamlComment(line));
     if (!key) return;
-    const inline = key[2].trim();
-    if (inline) {
-      for (const match of inline.matchAll(/cron\s*:\s*(['"])(.*?)\1/g)) {
-        entries.push({ line: i, label: `cron: '${match[2]}'`, verdict: parseCron(match[2]), group: `schedule:${i}` });
-      }
+    const add = (j, value) => entries.push({ line: j, label: `cron: '${value}'`, verdict: parseCron(value), group: `schedule:${i}` });
+    const inline = flowCrons(key[2]);
+    if (inline.length) {
+      for (const value of inline) add(i, value);
       return;
     }
+    const keyIndent = key[1].length;
     for (let j = i + 1; j < lines.length; j++) {
       if (!lines[j].trim() || COMMENT.test(lines[j])) continue;
-      if (indentOf(lines[j]) <= key[1].length) break;
+      // A block sequence may sit at its key's own indent.
+      const indent = indentOf(lines[j]);
+      if (indent < keyIndent || (indent === keyIndent && !/^\s*-(\s|$)/.test(lines[j]))) break;
       const cron = /^\s*-?\s*cron\s*:\s*(.*)$/.exec(lines[j]);
-      if (!cron) continue;
-      const value = unquote(stripYamlComment(cron[1]));
-      entries.push({ line: j, label: `cron: '${value}'`, verdict: parseCron(value), group: `schedule:${i}` });
+      if (cron) add(j, unquote(stripYamlComment(cron[1])));
+      else for (const value of flowCrons(lines[j])) add(j, value);
     }
   });
   return entries;
@@ -262,7 +278,7 @@ function cronJobEntries(lines) {
   let start = 0;
   const flush = (end) => {
     const doc = lines.slice(start, end);
-    if (doc.some((line) => /^kind\s*:\s*['"]?CronJob['"]?\s*(#.*)?$/.test(line))) {
+    if (doc.some((line) => CRONJOB.test(line))) {
       doc.forEach((line, offset) => {
         const schedule = /^\s+schedule\s*:\s*(.+)$/.exec(line);
         if (!schedule) return;
@@ -280,13 +296,13 @@ function cronJobEntries(lines) {
 }
 
 export function scheduleEntries(text, file) {
-  const lines = text.split('\n');
+  const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/);
   const entries = [];
   if (TIMER_FILE.test(file) || (EMBEDDING.test(file) && lines.some((line) => line.trim() === '[Timer]'))) {
     entries.push(...timerEntries(lines));
   }
   if (WORKFLOW.test(file)) entries.push(...workflowEntries(lines));
-  if (/\.(ya?ml|j2|tpl)$/.test(file) && /^kind\s*:\s*['"]?CronJob/m.test(text)) entries.push(...cronJobEntries(lines));
+  if (/\.(ya?ml|j2|tpl)$/.test(file) && lines.some((line) => CRONJOB.test(line))) entries.push(...cronJobEntries(lines));
   for (const entry of entries) entry.justification = justificationFor(lines, entry);
   return entries;
 }
@@ -294,11 +310,11 @@ export function scheduleEntries(text, file) {
 function justificationFor(lines, entry) {
   if (entry.comments !== 'above') {
     const trailing = /\s#(.*)$/.exec(lines[entry.line]);
-    const match = trailing && JUSTIFICATION.exec(trailing[1]);
+    const match = trailing && JUSTIFICATION.exec(trailing[1].replace(COMMENT_CLOSE, ''));
     if (match) return match[1];
   }
   for (let i = entry.line - 1; i >= 0 && COMMENT.test(lines[i]); i--) {
-    const match = JUSTIFICATION.exec(lines[i]);
+    const match = JUSTIFICATION.exec(lines[i].replace(COMMENT_CLOSE, ''));
     if (match) return match[1];
   }
   return undefined;
@@ -319,14 +335,30 @@ function frequencyProblem(entry, group) {
   if (verdict.kind === 'subhourly') return verdict.detail;
   if (verdict.kind === 'interval' && verdict.seconds < HOUR) return `fires every ${describe(verdict.seconds)}`;
   if (verdict.kind !== 'calendar') return undefined;
-  const other = group.find(
-    (candidate) =>
-      candidate !== entry &&
-      candidate.verdict.kind === 'calendar' &&
-      (candidate.verdict.minute !== verdict.minute || candidate.verdict.second !== verdict.second) &&
-      [...candidate.verdict.hours].some((hour) => verdict.hours.has(hour)),
-  );
-  return other ? `together with ${other.label} (line ${other.line + 1}) fires more than once in the same hour` : undefined;
+  const other = closeNeighbor(entry, group);
+  return other ? `together with ${other.label} (line ${other.line + 1}) fires less than an hour apart` : undefined;
+}
+
+// Another calendar entry in the group whose firing time of day falls within an
+// hour of one of this entry's, counting the wrap past midnight. Each entry on
+// its own fires at most once an hour, so only different entries can collide.
+// Dates and weekdays are ignored, which can only over-report.
+function closeNeighbor(entry, group) {
+  const day = 86400;
+  const times = group
+    .filter((candidate) => candidate.verdict.kind === 'calendar')
+    .flatMap((candidate) => {
+      const { hours, minute, second } = candidate.verdict;
+      return [...hours].map((hour) => ({ at: hour * HOUR + minute * 60 + second, candidate }));
+    })
+    .sort((a, b) => a.at - b.at);
+  for (let k = 0; k < times.length; k++) {
+    const next = times[(k + 1) % times.length];
+    const gap = (next.at - times[k].at + day) % day;
+    const pair = [times[k].candidate, next.candidate];
+    if (gap > 0 && gap < HOUR && pair[0] !== pair[1] && pair.includes(entry)) return pair.find((candidate) => candidate !== entry);
+  }
+  return undefined;
 }
 
 export function findings(text, file = '<file>') {
@@ -365,12 +397,20 @@ function trackedFiles() {
   }
 }
 
+function isFile(file) {
+  try {
+    return statSync(file).isFile();
+  } catch {
+    return false;
+  }
+}
+
 const candidate = (file) => TIMER_FILE.test(file) || WORKFLOW.test(file) || EMBEDDING.test(file);
 
 function main(args) {
   const list = args.includes('--list');
   const named = args.filter((arg) => arg !== '--list').map((arg) => path.relative('.', arg).split(path.sep).join('/'));
-  const files = (named.length ? named : trackedFiles()).filter((file) => candidate(file) && existsSync(file));
+  const files = (named.length ? named : trackedFiles()).filter((file) => candidate(file) && isFile(file));
 
   const all = files.flatMap((file) => {
     const text = readFileSync(file, 'utf8');
