@@ -14,10 +14,11 @@
 //   `[Timer]` sections embedded in YAML/Jinja files such as Ansible
 //   `copy: content:` blocks): OnUnitActiveSec, OnUnitInactiveSec, and
 //   OnCalendar, including several OnCalendar entries that together fire less
-//   than an hour apart. An empty assignment resets the list, as in systemd.
+//   than an hour apart. An empty assignment to any timer setting resets every
+//   earlier one, as in systemd.
 // - GitHub Actions `on.schedule[].cron` in .github/workflows, where several
 //   crons are likewise evaluated together.
-// - Kubernetes CronJob `schedule` (YAML documents with `kind: CronJob`).
+// - Kubernetes CronJob `.spec.schedule`, per CronJob (also inside a `kind: List`).
 //
 // A value that cannot be evaluated (for example a Jinja or Helm expression)
 // also needs a justification: the check cannot prove it is hourly or slower.
@@ -123,13 +124,44 @@ function expandField(field, min, max, { rangeSep, stepFromStartRuns }) {
   return values;
 }
 
-function fromFields(hours, minutes, seconds, source) {
+// `days` narrows which days an entry fires on: { months, dom, dow }, each a
+// Set or null for unrestricted. Combined-entry checks skip pairs whose days
+// are provably disjoint.
+function fromFields(hours, minutes, seconds, source, days = {}) {
   if (!hours || !minutes || !seconds) return { kind: 'unknown', detail: `cannot evaluate "${source}"` };
   if (minutes.size > 1 || seconds.size > 1) {
     return { kind: 'subhourly', detail: `"${source}" matches ${minutes.size * seconds.size} times an hour` };
   }
-  return { kind: 'calendar', hours, minute: [...minutes][0], second: [...seconds][0] };
+  return { kind: 'calendar', hours, minute: [...minutes][0], second: [...seconds][0], days };
 }
+
+const disjoint = (a, b) => ![...a].some((value) => b.has(value));
+
+// False only when the two entries can never fire on the same day.
+function mayShareDay(a, b) {
+  if (a.months && b.months && disjoint(a.months, b.months)) return false;
+  // Cron matches either day field when both are restricted; only compare the
+  // simple cases where each entry restricts the same single field.
+  const only = (days, field, other) => days[field] && !days[other];
+  if (only(a, 'dow', 'dom') && only(b, 'dow', 'dom')) return !disjoint(a.dow, b.dow);
+  if (only(a, 'dom', 'dow') && only(b, 'dom', 'dow')) return !disjoint(a.dom, b.dom);
+  return true;
+}
+
+const WEEKDAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+
+// Replace day or month names with their numbers, then expand. Undefined for
+// syntax this check does not model; callers treat that as unrestricted.
+function expandNamed(field, min, max, names, offset, options) {
+  const numeric = field.replace(/[a-z]+/gi, (name) => {
+    const index = names.indexOf(name.slice(0, 3).toLowerCase());
+    return index < 0 ? name : String(index + offset);
+  });
+  return expandField(numeric, min, max, options);
+}
+
+const restricted = (field) => field !== '*' && field !== '?';
 
 const CALENDAR_SHORTHANDS = {
   minutely: 'subhourly',
@@ -152,15 +184,20 @@ export function parseCalendar(value) {
   const shorthand = CALENDAR_SHORTHANDS[text.toLowerCase()];
   if (shorthand === 'subhourly') return { kind: 'subhourly', detail: `"${text}" fires every minute` };
   const spec = shorthand ?? text;
-  const time = spec.split(/\s+/).find((token) => token.includes(':')) ?? '00:00:00';
+  const tokens = spec.split(/\s+/);
+  const time = tokens.find((token) => token.includes(':')) ?? '00:00:00';
   const [h, m, s = '00', extra] = time.split(':');
   if (extra !== undefined || m === undefined) return { kind: 'unknown', detail: `cannot evaluate "${text}"` };
   const options = { rangeSep: '..', stepFromStartRuns: true };
+  // A leading weekday list (Mon..Fri, Sat,Sun); dates are left unrestricted.
+  const weekday = /^[a-z]/i.test(tokens[0]) && !tokens[0].includes('/') ? tokens[0] : undefined;
+  const dow = weekday && expandNamed(weekday, 0, 6, WEEKDAYS, 0, options);
   return fromFields(
     expandField(h, 0, 23, options),
     expandField(m, 0, 59, options),
     expandField(s, 0, 59, options),
     text,
+    { dow: dow ?? null },
   );
 }
 
@@ -187,11 +224,20 @@ export function parseCron(value) {
   const fields = (CRON_MACROS[text] ?? text).split(/\s+/);
   if (fields.length !== 5) return { kind: 'unknown', detail: `"${text}" is not a five-field cron expression` };
   const options = { rangeSep: '-', stepFromStartRuns: true };
+  const [, , dom, month, dow] = fields;
+  const days = {
+    dom: (restricted(dom) && expandField(dom, 1, 31, options)) || null,
+    months: (restricted(month) && expandNamed(month, 1, 12, MONTHS, 1, options)) || null,
+    // Cron allows 7 for Sunday.
+    dow: (restricted(dow) && new Set([...(expandNamed(dow, 0, 7, WEEKDAYS, 0, options) ?? [])].map((day) => day % 7))) || null,
+  };
+  if (days.dow && !days.dow.size) days.dow = null;
   return fromFields(
     expandField(fields[1], 0, 23, options),
     expandField(fields[0], 0, 59, options),
     new Set([0]),
     text,
+    days,
   );
 }
 
@@ -223,16 +269,19 @@ function timerEntries(lines) {
       return;
     }
     if (section !== 'Timer') return;
-    const directive = /^(OnUnitActiveSec|OnUnitInactiveSec|OnCalendar)\s*=\s*(.*)$/.exec(trimmed);
+    const directive = /^(On(?:Active|Boot|Startup|UnitActive|UnitInactive)Sec|OnCalendar)\s*=\s*(.*)$/.exec(trimmed);
     if (!directive) return;
     const [, key, value] = directive;
     if (!value.trim()) {
-      // `OnCalendar=` (and friends) clears every earlier value of that setting.
+      // An empty assignment to any timer setting resets every earlier
+      // monotonic and calendar timer (systemd.timer(5)).
       for (let k = entries.length - 1; k >= 0; k--) {
-        if (entries[k].group === `timer:${group}` && entries[k].key === key) entries.splice(k, 1);
+        if (entries[k].group === `timer:${group}`) entries.splice(k, 1);
       }
       return;
     }
+    // One-shot timers relative to boot, startup, or activation never repeat.
+    if (!['OnUnitActiveSec', 'OnUnitInactiveSec', 'OnCalendar'].includes(key)) return;
     let verdict;
     if (key === 'OnCalendar') {
       verdict = parseCalendar(value);
@@ -240,9 +289,22 @@ function timerEntries(lines) {
       const seconds = parseTimespan(value);
       verdict = seconds === undefined ? { kind: 'unknown', detail: `cannot evaluate "${value.trim()}"` } : { kind: 'interval', seconds };
     }
-    entries.push({ line: i, key, label: `${key}=${value.trim()}`, verdict, group: `timer:${group}`, comments: 'above' });
+    entries.push({ line: i, label: `${key}=${value.trim()}`, verdict, group: `timer:${group}`, comments: 'above' });
   });
   return entries;
+}
+
+// Whether the key at line i is a direct child of the top-level `on:` mapping,
+// so `jobs.<id>.strategy.matrix.schedule` and similar keys are ignored.
+function underOn(lines, i) {
+  const indent = indentOf(lines[i]);
+  if (indent === 0) return false;
+  for (let j = i - 1; j >= 0; j--) {
+    if (!lines[j].trim() || COMMENT.test(lines[j])) continue;
+    const parentIndent = indentOf(lines[j]);
+    if (parentIndent < indent) return parentIndent === 0 && /^(on|"on"|'on'|true)\s*:\s*(#.*)?$/.test(lines[j]);
+  }
+  return false;
 }
 
 // Quoted `cron:` values in flow style: `[{cron: '...'}]` or `- {cron: '...'}`.
@@ -252,7 +314,7 @@ function workflowEntries(lines) {
   const entries = [];
   lines.forEach((line, i) => {
     const key = /^(\s*)schedule\s*:(.*)$/.exec(stripYamlComment(line));
-    if (!key) return;
+    if (!key || !underOn(lines, i)) return;
     const add = (j, value) => entries.push({ line: j, label: `cron: '${value}'`, verdict: parseCron(value), group: `schedule:${i}` });
     const inline = flowCrons(key[2]);
     if (inline.length) {
@@ -273,25 +335,44 @@ function workflowEntries(lines) {
   return entries;
 }
 
+// `.spec.schedule` of each CronJob object: the object is the mapping holding
+// its `kind: CronJob` key (a whole document, or one `kind: List` item). Each
+// CronJob is its own group.
 function cronJobEntries(lines) {
   const entries = [];
-  let start = 0;
-  const flush = (end) => {
-    const doc = lines.slice(start, end);
-    if (doc.some((line) => CRONJOB.test(line))) {
-      doc.forEach((line, offset) => {
-        const schedule = /^\s+schedule\s*:\s*(.+)$/.exec(line);
-        if (!schedule) return;
-        const value = unquote(stripYamlComment(schedule[1]));
-        entries.push({ line: start + offset, label: `schedule: '${value}'`, verdict: parseCron(value), group: `cronjob:${start}` });
-      });
+  const blank = (line) => !line.trim() || COMMENT.test(line) || /^---/.test(line);
+  lines.forEach((line, k) => {
+    if (!CRONJOB.test(line)) return;
+    const item = /^(\s*)-\s+/.exec(line);
+    const keyIndent = item ? item[0].length : indentOf(line);
+    // The object's keys share keyIndent; a sibling list item or a shallower
+    // key, or a document separator, ends it.
+    const inObject = (j) => !/^---/.test(lines[j]) && (blank(lines[j]) || indentOf(lines[j]) >= keyIndent) && !/^\s*-\s/.test(lines[j].slice(0, keyIndent));
+    // `- kind: CronJob` opens its list item. Otherwise walk back over the
+    // object's earlier keys, including a `- apiVersion:` line that opened it.
+    let start = k;
+    if (!item) {
+      while (start > 0 && inObject(start - 1)) start--;
+      if (start > 0 && /^\s*-\s/.test(lines[start - 1]) && indentOf(lines[start - 1]) === keyIndent - 2) start--;
     }
-    start = end + 1;
-  };
-  lines.forEach((line, i) => {
-    if (/^---/.test(line)) flush(i);
+    let end = k + 1;
+    while (end < lines.length && inObject(end)) end++;
+    for (let j = start; j < end; j++) {
+      const keyText = lines[j].slice(0, keyIndent).replace(/^\s*-\s/, (m) => ' '.repeat(m.length)) + lines[j].slice(keyIndent);
+      if (indentOf(keyText) !== keyIndent || !/^\s*spec\s*:\s*(#.*)?$/.test(keyText)) continue;
+      let childIndent;
+      for (let c = j + 1; c < end; c++) {
+        if (blank(lines[c])) continue;
+        const indent = indentOf(lines[c]);
+        if (indent <= keyIndent) break;
+        childIndent ??= indent;
+        const schedule = /^\s*schedule\s*:\s*(.+)$/.exec(lines[c]);
+        if (indent !== childIndent || !schedule) continue;
+        const value = unquote(stripYamlComment(schedule[1]));
+        entries.push({ line: c, label: `schedule: '${value}'`, verdict: parseCron(value), group: `cronjob:${k}` });
+      }
+    }
   });
-  flush(lines.length);
   return entries;
 }
 
@@ -342,23 +423,25 @@ function frequencyProblem(entry, group) {
 // Another calendar entry in the group whose firing time of day falls within an
 // hour of one of this entry's, counting the wrap past midnight. Each entry on
 // its own fires at most once an hour, so only different entries can collide.
-// Dates and weekdays are ignored, which can only over-report.
+// Entries restricted to provably different days (weekdays, months, or days of
+// the month) are not compared; one that ends a day just before another starts
+// the next is not detected.
 function closeNeighbor(entry, group) {
   const day = 86400;
-  const times = group
-    .filter((candidate) => candidate.verdict.kind === 'calendar')
-    .flatMap((candidate) => {
-      const { hours, minute, second } = candidate.verdict;
-      return [...hours].map((hour) => ({ at: hour * HOUR + minute * 60 + second, candidate }));
-    })
-    .sort((a, b) => a.at - b.at);
-  for (let k = 0; k < times.length; k++) {
-    const next = times[(k + 1) % times.length];
-    const gap = (next.at - times[k].at + day) % day;
-    const pair = [times[k].candidate, next.candidate];
-    if (gap > 0 && gap < HOUR && pair[0] !== pair[1] && pair.includes(entry)) return pair.find((candidate) => candidate !== entry);
-  }
-  return undefined;
+  const timesOf = ({ verdict: { hours, minute, second } }) => [...hours].map((hour) => hour * HOUR + minute * 60 + second);
+  const mine = timesOf(entry);
+  return group.find(
+    (other) =>
+      other !== entry &&
+      other.verdict.kind === 'calendar' &&
+      mayShareDay(entry.verdict.days, other.verdict.days) &&
+      timesOf(other).some((at) =>
+        mine.some((own) => {
+          const gap = Math.min((at - own + day) % day, (own - at + day) % day);
+          return gap > 0 && gap < HOUR;
+        }),
+      ),
+  );
 }
 
 export function findings(text, file = '<file>') {
@@ -367,8 +450,13 @@ export function findings(text, file = '<file>') {
     const group = entries.filter((candidate) => candidate.group === entry.group);
     const problem = frequencyProblem(entry, group);
     if (!problem) return [];
-    // A combined group needs one justification among its participants.
-    const justification = entry.justification ?? group.find((candidate) => candidate.justification && problem.includes(candidate.label))?.justification;
+    // A combined group needs one justification among its participants: any
+    // entry that itself collides with another.
+    const justification =
+      entry.justification ??
+      (entry.verdict.kind === 'calendar'
+        ? group.find((candidate) => candidate.justification && candidate.verdict.kind === 'calendar' && closeNeighbor(candidate, group))?.justification
+        : undefined);
     return [{ file, line: entry.line + 1, label: entry.label, problem, justification }];
   });
 }

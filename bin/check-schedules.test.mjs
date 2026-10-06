@@ -172,13 +172,78 @@ test('regressions from review: YAML layouts, line endings, drop-ins, resets', ()
   // systemd drop-ins that change a packaged timer.
   assert.equal(violations('[Timer]\nOnCalendar=\nOnCalendar=*:0/5\n', 'etc/foo.timer.d/override.conf').length, 1);
   assert.equal(violations('[Timer]\nOnCalendar=*:0/5\n', 'roles/x/templates/foo.timer.d/10-fast.conf.j2').length, 1);
-  // An empty assignment resets earlier values of that setting only.
+  // An empty assignment to any timer setting resets every earlier timer.
   assert.deepEqual(violations(timer('OnCalendar=*:00\nOnCalendar=\nOnCalendar=*:30'), 'x.timer'), []);
-  assert.equal(violations(timer('OnUnitActiveSec=5m\nOnCalendar='), 'x.timer').length, 1);
+  assert.deepEqual(violations(timer('OnUnitActiveSec=5m\nOnCalendar='), 'x.timer'), []);
+  assert.deepEqual(violations(timer('OnUnitActiveSec=5m\nOnBootSec='), 'x.timer'), []);
+  assert.equal(violations(timer('OnCalendar=\nOnUnitActiveSec=5m'), 'x.timer').length, 1);
   // Entries in different hours that still fire less than an hour apart.
   assert.equal(violations(workflow("    - cron: '50 */2 * * *'\n    - cron: '10 1-23/2 * * *'"), w).length, 2);
   assert.equal(violations(timer('OnCalendar=*-*-* 23:50\nOnCalendar=*-*-* 00:20'), 'x.timer').length, 2);
   assert.deepEqual(violations(workflow("    - cron: '0 9 * * *'\n    - cron: '0 10 * * *'"), w), []);
+});
+
+test('regressions from Codex review: scoping, days, and group justifications', () => {
+  const w = '.github/workflows/w.yml';
+  // Crons restricted to different weekdays, months, or days of the month.
+  assert.deepEqual(violations(workflow("    - cron: '0 9 * * 1'\n    - cron: '30 9 * * 2'"), w), []);
+  assert.deepEqual(violations(workflow("    - cron: '0 9 * * MON'\n    - cron: '30 9 * * TUE,WED'"), w), []);
+  assert.deepEqual(violations(workflow("    - cron: '0 9 * 1 *'\n    - cron: '30 9 * FEB *'"), w), []);
+  assert.deepEqual(violations(workflow("    - cron: '0 9 1 * *'\n    - cron: '30 9 15 * *'"), w), []);
+  assert.equal(violations(workflow("    - cron: '0 9 * * 1-3'\n    - cron: '30 9 * * 3'"), w).length, 2);
+  assert.equal(violations(workflow("    - cron: '0 9 * * 0'\n    - cron: '30 9 * * 7'"), w).length, 2);
+  // Mixed day fields may overlap, so they are still compared.
+  assert.equal(violations(workflow("    - cron: '0 9 1 * *'\n    - cron: '30 9 * * 1'"), w).length, 2);
+  assert.deepEqual(violations(timer('OnCalendar=Mon *-*-* 09:00\nOnCalendar=Tue *-*-* 09:30'), 'x.timer'), []);
+  assert.equal(violations(timer('OnCalendar=Mon..Wed *-*-* 09:00\nOnCalendar=Wed,Fri *-*-* 09:30'), 'x.timer').length, 2);
+
+  // Only on.schedule is a workflow trigger.
+  const matrix = "on: push\njobs:\n  a:\n    strategy:\n      matrix:\n        schedule:\n          - cron: '*/5 * * * *'\n    runs-on: x\n";
+  assert.deepEqual(violations(matrix, w), []);
+  assert.equal(violations("'on':\n  schedule:\n    - cron: '*/5 * * * *'\n", w).length, 1);
+  assert.equal(violations("on: # triggers\n  push:\n  schedule:\n    - cron: '*/5 * * * *'\n", w).length, 1);
+
+  // Only a CronJob's own .spec.schedule, and each CronJob on its own.
+  const annotated = [
+    'apiVersion: batch/v1',
+    'kind: CronJob',
+    'metadata:',
+    '  annotations:',
+    "    schedule: '*/1 * * * *'",
+    'spec:',
+    "  schedule: '17 3 * * *'",
+    '  jobTemplate:',
+    '    spec:',
+    '      template:',
+    '        metadata:',
+    '          annotations:',
+    "            schedule: '*/5 * * * *'",
+    '',
+  ].join('\n');
+  assert.deepEqual(violations(annotated, 'k.yaml'), []);
+  const list = [
+    'apiVersion: v1',
+    'kind: List',
+    'items:',
+    '  - apiVersion: batch/v1',
+    '    kind: CronJob',
+    '    spec:',
+    "      schedule: '0 * * * *'",
+    '  - kind: CronJob',
+    '    spec:',
+    "      schedule: '30 * * * *'",
+    '  - kind: CronJob',
+    '    spec:',
+    "      schedule: '*/10 * * * *'",
+    '',
+  ].join('\n');
+  const found = violations(list, 'k.yaml');
+  assert.equal(found.length, 1);
+  assert.match(found[0], /^k\.yaml:13: schedule: '\*\/10/);
+
+  // One justification anywhere in a colliding group covers all of it.
+  const three = timer('OnCalendar=*:00\nOnCalendar=*:15\n# schedule-justification: quarter-hour windows\nOnCalendar=*:30');
+  assert.deepEqual(violations(three, 'x.timer'), []);
 });
 
 test('an empty Jinja or C-style justification is still empty', () => {
