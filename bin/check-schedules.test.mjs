@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -154,6 +154,40 @@ test('flags sub-hourly Kubernetes CronJobs per document', () => {
   assert.equal(violations('kind: CronJob\nspec:\n  schedule: "{{ .Values.every }}"\n', 'chart/cron.yaml').length, 1);
 });
 
+test('regressions from review: YAML layouts, line endings, drop-ins, resets', () => {
+  const w = '.github/workflows/w.yml';
+  // A block sequence at its key's own indent.
+  assert.equal(violations("on:\n  schedule:\n  - cron: '*/5 * * * *'\njobs: {}\n", w).length, 1);
+  assert.deepEqual(violations("on:\n  schedule:\n  - cron: '17 9 * * *'\n  workflow_dispatch:\n    inputs:\n      cron:\n        default: '*/5 * * * *'\n", w), []);
+  // Inline maps as list items, and a flow list starting on the next line.
+  assert.equal(violations("on:\n  schedule:\n    - {cron: '*/5 * * * *'}\n", w).length, 1);
+  assert.equal(violations("on:\n  schedule: [\n    {cron: '*/5 * * * *'}\n  ]\n", w).length, 1);
+  // CRLF and a byte-order mark.
+  assert.equal(violations("on:\r\n  schedule:\r\n    - cron: '*/5 * * * *'\r\n", w).length, 1);
+  assert.equal(violations("apiVersion: batch/v1\r\nkind: CronJob\r\nspec:\r\n  schedule: '*/5 * * * *'\r\n", 'k.yaml').length, 1);
+  assert.equal(violations("\uFEFFkind: CronJob\nspec:\n  schedule: '*/5 * * * *'\n", 'k.yaml').length, 1);
+  assert.equal(violations(timer('OnUnitActiveSec=5m').replaceAll('\n', '\r\n'), 'x.timer').length, 1);
+  // A CronJob nested in a List.
+  assert.equal(violations("kind: List\nitems:\n  - kind: CronJob\n    spec:\n      schedule: '*/5 * * * *'\n", 'k.yaml').length, 1);
+  // systemd drop-ins that change a packaged timer.
+  assert.equal(violations('[Timer]\nOnCalendar=\nOnCalendar=*:0/5\n', 'etc/foo.timer.d/override.conf').length, 1);
+  assert.equal(violations('[Timer]\nOnCalendar=*:0/5\n', 'roles/x/templates/foo.timer.d/10-fast.conf.j2').length, 1);
+  // An empty assignment resets earlier values of that setting only.
+  assert.deepEqual(violations(timer('OnCalendar=*:00\nOnCalendar=\nOnCalendar=*:30'), 'x.timer'), []);
+  assert.equal(violations(timer('OnUnitActiveSec=5m\nOnCalendar='), 'x.timer').length, 1);
+  // Entries in different hours that still fire less than an hour apart.
+  assert.equal(violations(workflow("    - cron: '50 */2 * * *'\n    - cron: '10 1-23/2 * * *'"), w).length, 2);
+  assert.equal(violations(timer('OnCalendar=*-*-* 23:50\nOnCalendar=*-*-* 00:20'), 'x.timer').length, 2);
+  assert.deepEqual(violations(workflow("    - cron: '0 9 * * *'\n    - cron: '0 10 * * *'"), w), []);
+});
+
+test('an empty Jinja or C-style justification is still empty', () => {
+  assert.equal(violations(timer('{# schedule-justification: #}\nOnUnitActiveSec=5min'), 'x.timer.j2').length, 1);
+  assert.equal(violations(timer('{# schedule-justification:#}\nOnUnitActiveSec=5min'), 'x.timer.j2').length, 1);
+  assert.equal(violations('kind: CronJob\nspec:\n  /* schedule-justification: */\n  schedule: "*/5 * * * *"\n', 'k.yaml').length, 1);
+  assert.equal(findings(timer('{# schedule-justification: real reason #}\nOnUnitActiveSec=5min'), 'x.timer.j2')[0].justification, 'real reason');
+});
+
 test('CLI checks every tracked file by default and only named files otherwise', () => {
   const root = mkdtempSync(path.join(tmpdir(), 'schedules-'));
   const run = (...args) => spawnSync(process.execPath, [script, ...args], { cwd: root, encoding: 'utf8' });
@@ -173,6 +207,13 @@ test('CLI checks every tracked file by default and only named files otherwise', 
     const all = run();
     assert.equal(all.status, 1);
     assert.match(all.stderr, /^units\/fast\.timer:5: OnUnitActiveSec=5m fires every 5min/);
+
+    // A tracked symlink to a directory is not a file to read.
+    mkdirSync(path.join(root, 'dir'));
+    symlinkSync('dir', path.join(root, 'link.yml'));
+    execFileSync('git', ['add', 'link.yml'], { cwd: root });
+    assert.equal(run().status, 1);
+    assert.doesNotMatch(run().stderr, /EISDIR/);
 
     // Named files restrict the check.
     assert.equal(run('units/daily.timer', 'README.md').status, 0);
