@@ -64,6 +64,15 @@ health checks.
   a runner scale set matches only its own name, so the pair never schedules.
   Adopt it (also as the `repo-check-runner-labels` pre-commit hook) only where
   declared labels name scale sets. Dependency-free; no-op without labels.
+- `repo-check-schedules [--list] [file ...]` — reject a periodic schedule
+  that fires more often than hourly unless an adjacent
+  `# schedule-justification: <reason>` comment explains why polling is the
+  right design: systemd timers (`OnUnitActiveSec`, `OnUnitInactiveSec`,
+  `OnCalendar`, including `[Timer]` blocks embedded in YAML), GitHub Actions
+  `on.schedule` crons, and Kubernetes CronJobs. A frequent timer usually means
+  the design should react to an event instead. With no files it checks every
+  tracked file, so `--list` (or `git grep schedule-justification`) is the
+  complete inventory. Also the `repo-check-schedules` pre-commit hook.
 - `repo-watch-prs` — watch auto-merge lifecycle for pull requests in the
   current repository.
 - `repo-set-tmux-task-title [--force <title>]` — set an empty tmux window task
