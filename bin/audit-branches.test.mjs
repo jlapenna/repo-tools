@@ -129,3 +129,91 @@ test("cleanup retains closed, gone, reused, open and checked-out work; deletes p
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("cleanup abandons only old branches that never had a PR", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "branch-no-pr-test-"));
+  const repo = path.join(root, "repo"),
+    bin = path.join(root, "bin"),
+    prs = path.join(root, "prs");
+  for (const dir of [repo, bin, prs]) fs.mkdirSync(dir);
+  const env = {
+    ...process.env,
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_CONFIG_GLOBAL: "/dev/null",
+    PATH: bin + ":" + process.env.PATH,
+  };
+  const git = (args, extraEnv = {}) =>
+    execFileSync("git", args, {
+      cwd: repo,
+      env: { ...env, ...extraEnv },
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    }).trim();
+  const old = new Date(Date.now() - 10 * 86400 * 1000).toISOString();
+  try {
+    git(["init", "-b", "main"]);
+    git(["config", "user.name", "Fixture"]);
+    git(["config", "user.email", "fixture@example.invalid"]);
+    git(["commit", "--allow-empty", "-m", "base"]);
+    const branches = {
+      "old-no-pr": old,
+      "old-closed-pr": old,
+      "old-upstream-pr": old,
+      "old-occupied": old,
+      "old-pushed-elsewhere": old,
+      "young-no-pr": undefined,
+    };
+    for (const [branch, date] of Object.entries(branches)) {
+      git(["switch", "-c", branch, "main"]);
+      fs.writeFileSync(path.join(repo, branch), "unmerged work\n");
+      git(["add", branch]);
+      git(["commit", "-m", branch], date ? { GIT_COMMITTER_DATE: date, GIT_AUTHOR_DATE: date } : {});
+    }
+    git(["switch", "main"]);
+    // An old commit under a freshly created branch is recent work.
+    git(["branch", "fresh-on-old-commit", "old-no-pr"]);
+    git(["config", "branch.old-upstream-pr.remote", "origin"]);
+    git(["config", "branch.old-upstream-pr.merge", "refs/heads/published-name"]);
+    git(["worktree", "add", path.join(root, "occupied"), "old-occupied"]);
+    // Pushed under another name with a PR there, with no upstream configured.
+    git(["update-ref", "refs/remotes/origin/renamed-on-push", "old-pushed-elsewhere"]);
+    // Any PR, in any state, for the branch or its upstream name keeps it.
+    for (const name of ["old-closed-pr", "published-name", "renamed-on-push"])
+      fs.writeFileSync(path.join(prs, name), "");
+    fs.writeFileSync(
+      path.join(bin, "gh"),
+      `#!/bin/sh
+[ -z "$FAIL_HEAD" ] || [ "$3" != --head ] || exit 1
+case "$1 $2" in
+"api "*) printf '%s\\n' '[[]]';;
+"pr list") if [ "$3" = --head ]; then if [ -e '${prs}'/"$4" ]; then echo 1; else echo 0; fi; else echo '[]'; fi;;
+*) exit 2;;
+esac
+`,
+      { mode: 0o755 },
+    );
+    const script = fileURLToPath(new URL("./audit-branches.sh", import.meta.url));
+    const run = (args, extraEnv = {}) =>
+      execFileSync("bash", [script, ...args], {
+        cwd: repo,
+        env: { ...env, ...extraEnv },
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+    const branchesLeft = () => git(["branch", "--format=%(refname:short)"]).split("\n");
+
+    run(["--delete"]);
+    assert.ok(branchesLeft().includes("old-no-pr"), "the age rule is opt-in");
+    run(["--delete", "--no-pr-days", "3"], { FAIL_HEAD: "1" });
+    assert.ok(branchesLeft().includes("old-no-pr"), "a failed PR lookup is not absence");
+
+    const report = run(["--delete", "--no-pr-days", "3"]);
+    assert.match(report, /^SAFE\tlocal\told-no-pr\t[0-9a-f]+\tabandoned:no-pr-3d$/m);
+    const left = branchesLeft();
+    assert.ok(!left.includes("old-no-pr"));
+    for (const name of ["old-closed-pr", "old-upstream-pr", "old-pushed-elsewhere", "old-occupied", "young-no-pr", "fresh-on-old-commit"])
+      assert.ok(left.includes(name), `${name} must be retained`);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
