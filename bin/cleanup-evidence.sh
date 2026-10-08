@@ -44,11 +44,22 @@ cleanup_no_pr_abandoned() {
   local repo=$1 kind=$2 branch=$3 tip=$4 days=$5 committed name upstream count
   ((days > 0)) || return 1
   committed=$(git -C "$repo" log -1 --format=%ct "$tip") || return 1
+  # A ref recently created or reset onto an old commit is recent activity:
+  # its reflog, when present, outranks the commit date.
+  local ref=refs/heads/$branch moved
+  [[ $kind == local ]] || ref=refs/remotes/origin/$branch
+  moved=$(git -C "$repo" reflog show --date=unix --format=%gd -1 "$ref" -- 2>/dev/null | sed -n 's/.*@{\([0-9]*\)}$/\1/p')
+  ((${moved:-0} <= committed)) || committed=$moved
   (( $(date +%s) - committed > days * 86400 )) || return 1
+  # Work published under another name may have a PR there: check the upstream
+  # and every remote-tracking branch that already contains this tip.
   local names=("$branch")
   if [[ $kind == local ]] && upstream=$(git -C "$repo" config "branch.$branch.merge" 2>/dev/null); then
     names+=("${upstream#refs/heads/}")
   fi
+  while IFS= read -r name; do
+    [[ -z $name || $name == HEAD ]] || names+=("$name")
+  done < <(git -C "$repo" for-each-ref --contains "$tip" --format='%(refname:lstrip=3)' refs/remotes/origin/) || return 1
   for name in "${names[@]}"; do
     count=$(cd "$repo" && gh pr list --head "$name" --state all --limit 1 --json number --jq length) || return 1
     [[ $count == 0 ]] || return 1

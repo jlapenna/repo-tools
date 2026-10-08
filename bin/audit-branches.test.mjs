@@ -160,6 +160,7 @@ test("cleanup abandons only old branches that never had a PR", () => {
       "old-closed-pr": old,
       "old-upstream-pr": old,
       "old-occupied": old,
+      "old-pushed-elsewhere": old,
       "young-no-pr": undefined,
     };
     for (const [branch, date] of Object.entries(branches)) {
@@ -169,11 +170,15 @@ test("cleanup abandons only old branches that never had a PR", () => {
       git(["commit", "-m", branch], date ? { GIT_COMMITTER_DATE: date, GIT_AUTHOR_DATE: date } : {});
     }
     git(["switch", "main"]);
+    // An old commit under a freshly created branch is recent work.
+    git(["branch", "fresh-on-old-commit", "old-no-pr"]);
     git(["config", "branch.old-upstream-pr.remote", "origin"]);
     git(["config", "branch.old-upstream-pr.merge", "refs/heads/published-name"]);
     git(["worktree", "add", path.join(root, "occupied"), "old-occupied"]);
+    // Pushed under another name with a PR there, with no upstream configured.
+    git(["update-ref", "refs/remotes/origin/renamed-on-push", "old-pushed-elsewhere"]);
     // Any PR, in any state, for the branch or its upstream name keeps it.
-    for (const name of ["old-closed-pr", "published-name"])
+    for (const name of ["old-closed-pr", "published-name", "renamed-on-push"])
       fs.writeFileSync(path.join(prs, name), "");
     fs.writeFileSync(
       path.join(bin, "gh"),
@@ -197,16 +202,16 @@ esac
       });
     const branchesLeft = () => git(["branch", "--format=%(refname:short)"]).split("\n");
 
-    run(["--delete"], { FAIL_HEAD: "1" });
+    run(["--delete"]);
+    assert.ok(branchesLeft().includes("old-no-pr"), "the age rule is opt-in");
+    run(["--delete", "--no-pr-days", "3"], { FAIL_HEAD: "1" });
     assert.ok(branchesLeft().includes("old-no-pr"), "a failed PR lookup is not absence");
-    run(["--delete", "--no-pr-days", "0"]);
-    assert.ok(branchesLeft().includes("old-no-pr"), "--no-pr-days 0 keeps unmerged work");
 
-    const report = run(["--delete"]);
+    const report = run(["--delete", "--no-pr-days", "3"]);
     assert.match(report, /^SAFE\tlocal\told-no-pr\t[0-9a-f]+\tabandoned:no-pr-3d$/m);
     const left = branchesLeft();
     assert.ok(!left.includes("old-no-pr"));
-    for (const name of ["old-closed-pr", "old-upstream-pr", "old-occupied", "young-no-pr"])
+    for (const name of ["old-closed-pr", "old-upstream-pr", "old-pushed-elsewhere", "old-occupied", "young-no-pr", "fresh-on-old-commit"])
       assert.ok(left.includes(name), `${name} must be retained`);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });

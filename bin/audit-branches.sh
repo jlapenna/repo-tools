@@ -3,13 +3,13 @@
 #                            [--no-pr-days N]
 # Reports TSV: verdict, local|remote, branch, audited SHA, reason. No fetch or
 # deletion by default. Local and remote deletions require separate flags.
-# Unmerged branches that never had a PR are abandoned once their tip is older
-# than N days (default 3; 0 keeps them).
+# --no-pr-days opts in to abandoning unmerged branches that never had a PR
+# once their tip is older than N days. Without it, unmerged work is kept.
 set -euo pipefail
 here=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)
 # shellcheck source=bin/cleanup-evidence.sh
 source "$here/cleanup-evidence.sh"
-base=main; local_delete=false; remote_delete=false; fetch=false; no_pr_days=3
+base=main; local_delete=false; remote_delete=false; fetch=false; no_pr_days=0
 while (($#)); do
   case $1 in
     --base) [[ $# -ge 2 ]] || exit 64; base=$2; shift ;;

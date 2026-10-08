@@ -126,7 +126,7 @@ and `--delete-remote` flags are independent. Remote removal binds the push to th
 audited SHA and runs hooks. A closed PR or gone upstream is not proof that
 unmerged work may be discarded. The one age rule is the checker's own: a
 branch that never had a PR (nor did its upstream name) is abandoned once its
-tip is older than `--no-pr-days` (default 3).
+tip is older than the opt-in `--no-pr-days N`.
 
 Explicit abandonment of your own unmerged work is a separate user-authorized
 operation, not "merged" cleanup. Inspect its exact content and scope, then use

@@ -93,9 +93,11 @@ health checks.
   the sweep and `repo-audit-branches [--base main] [--fetch] [--delete] [--delete-remote]`
   use the same fail-closed merge/ownership checker. Reports are TSV with stable
   reasons; missing ownership evidence preserves work. No fetch is implicit.
-  `repo-audit-branches` also treats an unmerged, unoccupied branch as
+  `repo-audit-branches --no-pr-days N` also treats an unmerged, unoccupied branch as
   `abandoned:no-pr-Nd` when no PR in any state exists for it or its upstream
-  name and its tip is older than `--no-pr-days N` (default 3; 0 disables).
+  name or any remote-tracking branch containing its tip, and its tip is older
+  than `--no-pr-days N`. The rule is opt-in; without the flag unmerged work
+  is kept.
   Local and remote branch deletion require separate flags; remote deletion uses
   the originally audited SHA and runs push hooks.
 - `repo-nx` — run Nx with portable cache and linked-worktree safeguards.
