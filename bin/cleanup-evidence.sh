@@ -37,6 +37,25 @@ cleanup_evidence() {
   echo 'unverified:unmerged'; return 1
 }
 
+# An unmerged branch is abandoned when no PR in any state was ever opened from
+# it (or from its upstream branch) and its tip is older than the window. A
+# failed PR lookup is not absence: the branch stays.
+cleanup_no_pr_abandoned() {
+  local repo=$1 kind=$2 branch=$3 tip=$4 days=$5 committed name upstream count
+  ((days > 0)) || return 1
+  committed=$(git -C "$repo" log -1 --format=%ct "$tip") || return 1
+  (( $(date +%s) - committed > days * 86400 )) || return 1
+  local names=("$branch")
+  if [[ $kind == local ]] && upstream=$(git -C "$repo" config "branch.$branch.merge" 2>/dev/null); then
+    names+=("${upstream#refs/heads/}")
+  fi
+  for name in "${names[@]}"; do
+    count=$(cd "$repo" && gh pr list --head "$name" --state all --limit 1 --json number --jq length) || return 1
+    [[ $count == 0 ]] || return 1
+  done
+  echo "abandoned:no-pr-${days}d"
+}
+
 cleanup_branch_occupied() {
   git -C "$1" worktree list --porcelain | sed -n 's#^branch refs/heads/##p' | grep -Fxq -- "$2"
 }
