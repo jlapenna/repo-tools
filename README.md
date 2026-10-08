@@ -96,8 +96,11 @@ health checks.
   `repo-audit-branches --no-pr-days N` also treats an unmerged, unoccupied branch as
   `abandoned:no-pr-Nd` when no PR in any state exists for it or its upstream
   name or any remote-tracking branch containing its tip, and its tip is older
-  than `--no-pr-days N`. The rule is opt-in; without the flag unmerged work
-  is kept.
+  than `--no-pr-days N`. `--closed-pr-heads` treats an unmerged, unoccupied
+  branch as `recoverable:closed-pr-N` when its tip is exactly the head of
+  closed (or merged) PR N, which GitHub keeps and can restore from that PR; a
+  branch pushed to after its PR closed is kept. Both rules are opt-in; without
+  them unmerged work is kept.
   Local and remote branch deletion require separate flags; remote deletion uses
   the originally audited SHA and runs push hooks.
 - `repo-nx` — run Nx with portable cache and linked-worktree safeguards.
