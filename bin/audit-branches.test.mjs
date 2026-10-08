@@ -241,7 +241,7 @@ test("cleanup deletes a branch only at its closed PR's exact head, and only on r
     git("remote", "add", "origin", remote);
     git("push", "-u", "origin", "main");
     const heads = {};
-    for (const branch of ["at-closed-head", "moved-after-close", "reopened"]) {
+    for (const branch of ["at-closed-head", "moved-after-close", "reopened", "fork-named"]) {
       git("switch", "-c", branch, "main");
       fs.writeFileSync(path.join(repo, branch), "unmerged work\n");
       git("add", branch);
@@ -254,10 +254,16 @@ test("cleanup deletes a branch only at its closed PR's exact head, and only on r
     git("add", "later");
     git("commit", "-m", "later");
     git("switch", "main");
-    git("push", "origin", "at-closed-head", "moved-after-close", "reopened");
+    git("push", "origin", "at-closed-head", "moved-after-close", "reopened", "fork-named");
     git("fetch", "origin");
     const closed = JSON.stringify(
-      Object.entries(heads).map(([name, oid], number) => ({ number: number + 1, headRefName: name, headRefOid: oid })),
+      Object.entries(heads).map(([name, oid], number) => ({
+        number: number + 1,
+        headRefName: name,
+        headRefOid: oid,
+        // A fork's PR with this branch's name and tip restores into the fork.
+        isCrossRepository: name === "fork-named",
+      })),
     );
     fs.writeFileSync(
       path.join(bin, "gh"),
@@ -290,9 +296,10 @@ esac
     assert.match(report, /^SAFE\tremote\tat-closed-head\t[0-9a-f]+\trecoverable:closed-pr-1$/m);
     assert.match(report, /^KEEP\tremote\tmoved-after-close\t[0-9a-f]+\tunverified:unmerged$/m);
     assert.match(report, /^KEEP\tremote\treopened\t[0-9a-f]+\topen-pr$/m);
+    assert.match(report, /^KEEP\tremote\tfork-named\t[0-9a-f]+\tunverified:unmerged$/m);
     const left = onRemote();
     assert.ok(!left.includes("at-closed-head"));
-    for (const name of ["moved-after-close", "reopened"]) assert.ok(left.includes(name), `${name} must be retained`);
+    for (const name of ["moved-after-close", "reopened", "fork-named"]) assert.ok(left.includes(name), `${name} must be retained`);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

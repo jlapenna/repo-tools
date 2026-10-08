@@ -70,10 +70,12 @@ cleanup_no_pr_abandoned() {
 # Opt-in: closed PRs (merged ones included) whose head may still be a branch.
 # GitHub keeps every PR's last head and offers "Restore branch" on a closed
 # PR, so a branch whose tip is exactly that head loses nothing when deleted.
+# Only same-repository PRs count: a fork's PR can reuse a branch name and
+# point at a commit it copied, and it restores into the fork, not here.
 cleanup_load_closed_prs() {
   local repo=$1 closed
   CLEANUP_CLOSED_PRS=''
-  closed=$(cd "$repo" && gh pr list --state closed --limit 1000 --json number,headRefName,headRefOid) || return 1
+  closed=$(cd "$repo" && gh pr list --state closed --limit 1000 --json number,headRefName,headRefOid,isCrossRepository) || return 1
   CLEANUP_CLOSED_PRS=$(jq -ce 'if type == "array" then . else error("invalid closed PR data") end' <<<"$closed") || return 1
 }
 
@@ -83,7 +85,7 @@ cleanup_closed_pr_head() {
   local branch=$1 tip=$2 number
   [[ -n ${CLEANUP_CLOSED_PRS:-} ]] || return 1
   number=$(jq -r --arg branch "$branch" --arg tip "$tip" 'first(.[] |
-    select(.headRefName == $branch and .headRefOid == $tip) | .number) // empty' <<<"$CLEANUP_CLOSED_PRS")
+    select(.isCrossRepository == false and .headRefName == $branch and .headRefOid == $tip) | .number) // empty' <<<"$CLEANUP_CLOSED_PRS")
   [[ -n $number ]] || return 1
   echo "recoverable:closed-pr-$number"
 }
