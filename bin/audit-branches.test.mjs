@@ -217,3 +217,83 @@ esac
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("cleanup deletes a branch only at its closed PR's exact head, and only on request", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "branch-closed-pr-test-"));
+  const repo = path.join(root, "repo"),
+    remote = path.join(root, "remote.git"),
+    bin = path.join(root, "bin");
+  for (const dir of [repo, bin]) fs.mkdirSync(dir);
+  const env = {
+    ...process.env,
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_CONFIG_GLOBAL: "/dev/null",
+    PATH: bin + ":" + process.env.PATH,
+  };
+  const git = (...args) =>
+    execFileSync("git", args, { cwd: repo, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  try {
+    git("init", "--bare", remote);
+    git("init", "-b", "main");
+    git("config", "user.name", "Fixture");
+    git("config", "user.email", "fixture@example.invalid");
+    git("commit", "--allow-empty", "-m", "base");
+    git("remote", "add", "origin", remote);
+    git("push", "-u", "origin", "main");
+    const heads = {};
+    for (const branch of ["at-closed-head", "moved-after-close", "reopened"]) {
+      git("switch", "-c", branch, "main");
+      fs.writeFileSync(path.join(repo, branch), "unmerged work\n");
+      git("add", branch);
+      git("commit", "-m", branch);
+      heads[branch] = git("rev-parse", "HEAD");
+    }
+    // Pushed again after its PR closed: that commit exists only on the branch.
+    git("switch", "moved-after-close");
+    fs.writeFileSync(path.join(repo, "later"), "later work\n");
+    git("add", "later");
+    git("commit", "-m", "later");
+    git("switch", "main");
+    git("push", "origin", "at-closed-head", "moved-after-close", "reopened");
+    git("fetch", "origin");
+    const closed = JSON.stringify(
+      Object.entries(heads).map(([name, oid], number) => ({ number: number + 1, headRefName: name, headRefOid: oid })),
+    );
+    fs.writeFileSync(
+      path.join(bin, "gh"),
+      `#!/bin/sh
+case "$1 $2 $3 $4" in
+"api "*) printf '%s\\n' '[[{"head":{"ref":"reopened"}}]]';;
+"pr list --state closed") [ -z "$FAIL_CLOSED" ] || exit 1; printf '%s\\n' '${closed}';;
+"pr list "*) echo '[]';;
+*) exit 2;;
+esac
+`,
+      { mode: 0o755 },
+    );
+    const script = fileURLToPath(new URL("./audit-branches.sh", import.meta.url));
+    const run = (args, extraEnv = {}) =>
+      execFileSync("bash", [script, ...args], {
+        cwd: repo,
+        env: { ...env, ...extraEnv },
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+    const onRemote = () => git("--git-dir", remote, "branch", "--format=%(refname:short)").split("\n");
+
+    run(["--delete-remote"]);
+    assert.ok(onRemote().includes("at-closed-head"), "the closed-PR rule is opt-in");
+    assert.throws(() => run(["--delete-remote", "--closed-pr-heads"], { FAIL_CLOSED: "1" }));
+    assert.ok(onRemote().includes("at-closed-head"), "a failed closed-PR lookup is not recoverability");
+
+    const report = run(["--delete-remote", "--closed-pr-heads"]);
+    assert.match(report, /^SAFE\tremote\tat-closed-head\t[0-9a-f]+\trecoverable:closed-pr-1$/m);
+    assert.match(report, /^KEEP\tremote\tmoved-after-close\t[0-9a-f]+\tunverified:unmerged$/m);
+    assert.match(report, /^KEEP\tremote\treopened\t[0-9a-f]+\topen-pr$/m);
+    const left = onRemote();
+    assert.ok(!left.includes("at-closed-head"));
+    for (const name of ["moved-after-close", "reopened"]) assert.ok(left.includes(name), `${name} must be retained`);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

@@ -124,9 +124,12 @@ kill another session to turn KEEP into SAFE.
 Standalone local/remote branches use `repo-audit-branches`; its `--delete`
 and `--delete-remote` flags are independent. Remote removal binds the push to the
 audited SHA and runs hooks. A closed PR or gone upstream is not proof that
-unmerged work may be discarded. The one age rule is the checker's own: a
+unmerged work may be discarded. The checker has two opt-in exceptions: a
 branch that never had a PR (nor did its upstream name) is abandoned once its
-tip is older than the opt-in `--no-pr-days N`.
+tip is older than `--no-pr-days N`, and with `--closed-pr-heads` a branch
+whose tip is exactly a closed PR's head is deleted, since GitHub keeps that
+head and can restore the branch from the PR. A branch pushed to after its PR
+closed is kept.
 
 Explicit abandonment of your own unmerged work is a separate user-authorized
 operation, not "merged" cleanup. Inspect its exact content and scope, then use
