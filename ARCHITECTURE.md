@@ -31,6 +31,7 @@ repository policy, check names, deployment rules, and product behavior.
 | Testing policy | `testing-policy` skill and reference | documented examples |
 | Plugin topology | `.claude-plugin/`, `.agents/`, `plugins/` manifests | `plugins/manifests.test.mjs` |
 | ESLint rules | `eslint/` | build, consumer contract, Vitest rules |
+| Shared Renovate preset | `renovate-preset.json` (`github>jlapenna/repo-tools//renovate-preset`) | `renovate-preset.test.mjs` |
 | Public interface inventory | package and skill manifests | generated `docs/interfaces.md` check |
 
 ## Runtime-Neutral Boundary

@@ -1,6 +1,6 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["github>jlapenna/agent-lcars//renovate-preset"],
+  "extends": ["github>jlapenna/repo-tools//renovate-preset"],
   "packageRules": [
     {
       "description": "pnpm is pinned exactly via packageManager (pnpm@11.24.0); a major bump changes install and lockfile semantics for the whole workspace, so hold it for a deliberate toolchain upgrade rather than a bot PR",
