@@ -88,63 +88,122 @@ if [ "${1:-}" = "reset" ] &&
   fi
 fi
 
-# Self-hosted Nx remote cache (the same spark server CI uses). The vars live
-# in the gitignored .nx-remote-cache.env — written by the repo's setup script
-# (sprinkles' setup-repo.sh, agent-lcars' tools/setup-nx-remote-cache.sh) —
-# rather than .env.local, so that ONLY this wrapper enables them, and only
-# after a fast reachability probe: nx fails open on an unreachable server but
-# pays ~45s of request timeouts per task write (measured), which would tax
-# laptops off the VPN. Explicit env (CI sets these directly) wins and skips
-# the probe.
+# Self-hosted Nx remote cache (the same server CI uses). The vars live in the
+# gitignored .nx-remote-cache.env -- written by the repo's setup script
+# (sprinkles' setup-repo.sh, agent-lcars' tools/setup-nx-remote-cache.sh) --
+# or in the account-wide ${XDG_CONFIG_HOME:-$HOME/.config}/nx/remote-cache.env
+# that workstation reconciliation writes. Only this wrapper enables them, and
+# only after a fast probe: nx fails open on an unreachable server but pays
+# ~45s of request timeouts per task write (measured), which would tax laptops
+# off the VPN. Explicit env (CI sets these directly) wins and skips the probe.
 #
 # Linked worktrees do not inherit ignored files, and a worktree created by a
-# bare `git worktree add` never runs setup-worktree.sh — so fall back to the
+# bare `git worktree add` never runs setup-worktree.sh -- so fall back to the
 # primary checkout's copy instead of requiring every worktree to hold its own.
-# That keeps ONE credential on disk and makes a rotation in the primary reach
-# every worktree immediately, with no stale copy able to win over it.
+#
+# Nx also fails open on a rejected token, so a stale file degrades every build
+# to local recomputation with no error. Each candidate is therefore checked
+# for both a live server and an accepted token, and a broken one falls through
+# to the next with a warning. A repository file left pointing at a retired
+# host name (spark.lan after the picard rename) used to shadow a working
+# account-wide credential silently for a month.
+rc_default_url="${NX_REMOTE_CACHE_URL:-http://nx-cache.lan.jlapenna.net:3123}"
+
+# Prints the HTTP status of an authenticated probe. The path is not a valid
+# cache hash, so the server answers 404 (invalid_path) after auth succeeds and
+# the probe never shows up as a cache hit or miss. The token goes through a
+# curl config on stdin so it never appears in argv.
+rc_auth_status() {
+  local escaped LC_ALL=C
+  [[ "$2" != *[![:print:]]* ]] || { echo invalid; return; }
+  escaped="${2//\\/\\\\}"
+  escaped="${escaped//\"/\\\"}"
+  printf 'header = "Authorization: Bearer %s"\n' "$escaped" |
+    curl --disable --config - -s -o /dev/null -w '%{http_code}' --max-time 1 \
+      "$1/v1/cache/authprobe000000000000000000000" 2>/dev/null || true
+}
+
+rc_setup_hint() {
+  if [ -x ./tools/setup-nx-remote-cache.sh ]; then
+    echo "./tools/setup-nx-remote-cache.sh"
+  elif [ -x ./tools/setup-repo.sh ]; then
+    echo "./tools/setup-repo.sh"
+  else
+    echo "your workstation reconciliation (homegit)"
+  fi
+}
+
 if [ -z "${NX_SELF_HOSTED_REMOTE_CACHE_SERVER:-}" ]; then
-  rc_env=""
+  rc_candidates=()
   if [ -f .nx-remote-cache.env ]; then
-    rc_env=".nx-remote-cache.env"
+    rc_candidates+=(".nx-remote-cache.env")
   else
     rc_common_dir="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
     if [ -n "$rc_common_dir" ] &&
       [ -f "$(dirname "$rc_common_dir")/.nx-remote-cache.env" ]; then
-      rc_env="$(dirname "$rc_common_dir")/.nx-remote-cache.env"
+      rc_candidates+=("$(dirname "$rc_common_dir")/.nx-remote-cache.env")
     fi
   fi
-
-  # Workstation reconciliation can bootstrap one account-wide credential.
-  # Explicit environment and repository configuration remain overrides; a
-  # newly cloned repository or bare worktree needs no per-repo secret copy.
-  if [ -z "$rc_env" ] && [ -f "${XDG_CONFIG_HOME:-$HOME/.config}/nx/remote-cache.env" ]; then
-    rc_env="${XDG_CONFIG_HOME:-$HOME/.config}/nx/remote-cache.env"
+  if [ -f "${XDG_CONFIG_HOME:-$HOME/.config}/nx/remote-cache.env" ]; then
+    rc_candidates+=("${XDG_CONFIG_HOME:-$HOME/.config}/nx/remote-cache.env")
   fi
 
-  if [ -n "$rc_env" ]; then
+  rc_loaded=""
+  rc_problems=()
+  for rc_env in "${rc_candidates[@]}"; do
     rc_server="$(sed -n 's/^NX_SELF_HOSTED_REMOTE_CACHE_SERVER=//p' "$rc_env" | tail -1)"
-    if [ -n "$rc_server" ] &&
-      curl -sf --max-time 0.4 -o /dev/null "$rc_server/healthz" 2>/dev/null; then
+    if [ -z "$rc_server" ] ||
+      ! curl -sf --max-time 0.4 -o /dev/null "$rc_server/healthz" 2>/dev/null; then
+      rc_problems+=("$rc_env: server ${rc_server:-<unset>} does not answer")
+      continue
+    fi
+    rc_token="$(
       set -a
       # shellcheck source=/dev/null
       . "$rc_env"
-      set +a
+      printf '%s' "${NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN:-}"
+    )"
+    rc_status="$(rc_auth_status "$rc_server" "$rc_token")"
+    unset rc_token
+    case "$rc_status" in
+      404 | 200) ;;
+      401 | 403 | invalid)
+        rc_problems+=("$rc_env: $rc_server rejects its token (HTTP $rc_status)")
+        continue
+        ;;
+      *)
+        # Answered healthz but not the probe: treat as transient, not stale.
+        rc_problems+=("$rc_env: $rc_server auth probe returned '${rc_status:-no answer}'")
+        continue
+        ;;
+    esac
+    set -a
+    # shellcheck source=/dev/null
+    . "$rc_env"
+    set +a
+    rc_loaded="$rc_env"
+    break
+  done
+
+  # Off the LAN/VPN nothing answers, and staying quiet is correct. When the
+  # fleet cache does answer, any skipped or missing credential is a real
+  # misconfiguration that would otherwise only show up as slow builds.
+  if [ -z "$rc_loaded" ] || [ "${#rc_problems[@]}" -gt 0 ]; then
+    if curl -sf --max-time 0.4 -o /dev/null "$rc_default_url/healthz" 2>/dev/null; then
+      for rc_problem in "${rc_problems[@]}"; do
+        echo "⚠️  Nx remote cache: skipped $rc_problem" >&2
+      done
+      if [ -z "$rc_loaded" ]; then
+        if [ "${#rc_candidates[@]}" -eq 0 ]; then
+          echo "⚠️  Nx remote cache is reachable but no credential is configured;" >&2
+        else
+          echo "⚠️  Nx remote cache is reachable but no configured credential works;" >&2
+        fi
+        echo "   builds will recompute locally. Fix: $(rc_setup_hint)" >&2
+      else
+        echo "   Using $rc_loaded instead. Fix or delete the broken file." >&2
+      fi
     fi
-  elif curl -sf --max-time 0.4 -o /dev/null \
-    "${NX_REMOTE_CACHE_URL:-http://nx-cache.lan.jlapenna.net:3123}/healthz" 2>/dev/null; then
-    # No credential anywhere, but the cache server is right there answering.
-    # Say so once per invocation: the setup script is one-time init, so a
-    # checkout created before its cache block existed (sprinkles#2442,
-    # 2026-07-10) never got a credential and nothing would ever tell you --
-    # Nx just recomputes everything locally and the build is merely "slow".
-    # That cost a 35-minute Verify timeout on sprinkles#4262 before anyone
-    # noticed.
-    setup_hint="./tools/setup-repo.sh"
-    if [ -x ./tools/setup-nx-remote-cache.sh ]; then
-      setup_hint="./tools/setup-nx-remote-cache.sh"
-    fi
-    echo "⚠️  Nx remote cache is reachable but no credential is configured;" >&2
-    echo "   builds will recompute locally. Fix: $setup_hint" >&2
   fi
 fi
 
