@@ -185,13 +185,16 @@ run the shared guard and are rejected from the primary checkout or `main`.
 
 ## Skills
 
-The Codex plugin exposes five authoritative skills:
+The plugin exposes the authoritative skills listed in the generated inventory:
 
 - `worktree-hygiene` covers safe creation, use, and teardown in shared
   repository checkouts.
 - `github-ci-monitor` covers `repo-watch-run` and `repo-watch-prs`, including
   protected auto-merge attention states.
 - `testing-policy` guides test, CI-check, and control-flag decisions.
+- `harness-maintenance` applies observed feedback to documentation, skills,
+  context routes, and their owning contracts. Consumers keep local truth and
+  authorization; structural checks do not prove better worker behavior.
 - `land-pr` carries a local change or existing pull request through the
   complete delivery lifecycle: commit, push, PR, CI and review, protected
   merge, post-merge verification, and worktree/branch cleanup.

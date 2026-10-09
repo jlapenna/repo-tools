@@ -11,6 +11,7 @@ Use the smallest source that owns the question.
 | Monitor CI and auto-merge | [`../plugins/repo-tools/skills/github-ci-monitor/SKILL.md`](../plugins/repo-tools/skills/github-ci-monitor/SKILL.md) |
 | Carry a PR through merge | [`../plugins/repo-tools/skills/land-pr/SKILL.md`](../plugins/repo-tools/skills/land-pr/SKILL.md) |
 | Choose proportionate tests and checks | [`../plugins/repo-tools/skills/testing-policy/SKILL.md`](../plugins/repo-tools/skills/testing-policy/SKILL.md) |
+| Maintain agent context, documentation, and skills | [`../plugins/repo-tools/skills/harness-maintenance/SKILL.md`](../plugins/repo-tools/skills/harness-maintenance/SKILL.md) |
 | Maintain Renovate updates | [`../plugins/repo-tools/skills/renovate-maintenance/SKILL.md`](../plugins/repo-tools/skills/renovate-maintenance/SKILL.md) |
 
 Command implementation and regression tests live in `bin/`; shared ESLint
