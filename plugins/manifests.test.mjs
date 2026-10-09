@@ -53,6 +53,23 @@ test('codex and claude marketplaces describe the same plugins', () => {
   assert.deepEqual(names(runtimes.codex.marketplace), names(runtimes.claude.marketplace));
 });
 
+// The installer rejects more than three starter prompts; directory listing
+// validation also bounds the subtitle and prompt lengths. Consumer: pnpm test.
+// https://developers.openai.com/plugins/deploy/submission-errors
+test('Codex discovery metadata fits the supported listing limits', () => {
+  const metadata = readJson('plugins/repo-tools/.codex-plugin/plugin.json').interface;
+  assert.ok(metadata.shortDescription.trim().length > 0);
+  assert.ok([...metadata.shortDescription].length <= 30);
+  assert.ok(Array.isArray(metadata.defaultPrompt));
+  assert.ok(metadata.defaultPrompt.length <= 3);
+  for (const prompt of metadata.defaultPrompt) {
+    assert.equal(typeof prompt, 'string');
+    assert.ok(prompt.trim().length > 0);
+    assert.ok([...prompt].length <= 128);
+    assert.doesNotMatch(prompt, /[\r\n]/);
+  }
+});
+
 test('OpenCode configured skill source is the same well-formed repo-tools skill set', () => {
   const skillRoot = join(root, opencode.skills);
   assert.ok(existsSync(skillRoot), `OpenCode skill source ${opencode.skills} does not exist`);
