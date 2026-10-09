@@ -1,7 +1,7 @@
 {
   "name": "repo-tools",
-  "version": "1.5.0",
-  "description": "General repository-management commands and skills for safe worktrees, CI monitoring, PR delivery, and Renovate maintenance.",
+  "version": "1.5.1",
+  "description": "General repository-management commands and skills for safe worktrees, CI monitoring, testing policy, PR delivery, harness maintenance, and Renovate maintenance.",
   "author": {
     "name": "Joe LaPenna",
     "url": "https://github.com/jlapenna"
@@ -17,6 +17,7 @@
     "renovate",
     "testing",
     "worktree",
-    "repository-management"
+    "repository-management",
+    "harness-maintenance"
   ]
 }
