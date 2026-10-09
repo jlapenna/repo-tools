@@ -1,7 +1,7 @@
 {
   "name": "repo-tools",
-  "version": "1.5.0",
-  "description": "General repository-management commands and skills for safe worktrees, CI monitoring, testing policy, PR delivery, and Renovate maintenance.",
+  "version": "1.5.1",
+  "description": "General repository-management commands and skills for safe worktrees, CI monitoring, testing policy, PR delivery, harness maintenance, and Renovate maintenance.",
   "author": {
     "name": "Joe LaPenna",
     "url": "https://github.com/jlapenna"
@@ -17,13 +17,14 @@
     "renovate",
     "testing",
     "worktree",
-    "repository-management"
+    "repository-management",
+    "harness-maintenance"
   ],
   "skills": "./skills/",
   "interface": {
     "displayName": "Repo Tools",
-    "shortDescription": "Safe worktree, CI-monitoring, testing-policy, PR-delivery, and Renovate-maintenance guidance.",
-    "longDescription": "Loads authoritative worktree-hygiene, GitHub CI-monitoring, testing-policy, PR-delivery (land-pr), and Renovate-maintenance skills for general repository management.",
+    "shortDescription": "Safe worktree, CI, testing, PR-delivery, harness-maintenance, and Renovate guidance.",
+    "longDescription": "Loads authoritative worktree-hygiene, GitHub CI-monitoring, testing-policy, PR-delivery (land-pr), harness-maintenance, and Renovate-maintenance skills for general repository management.",
     "developerName": "Joe LaPenna",
     "category": "Productivity",
     "capabilities": [
@@ -36,6 +37,7 @@
       "Watch this pull request through CI and protected auto-merge.",
       "Decide whether this test or CI check protects an observable contract.",
       "Land this pull request through review, merge, and cleanup.",
+      "Improve this repository’s documentation and skills from observed workflow failures.",
       "Process this repository's Renovate update queue safely."
     ]
   }
