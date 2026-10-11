@@ -33,6 +33,20 @@ web routes, and heading anchors are not checked. Nx inventories include only
 explicit targets, not inferred targets. These are source contracts, not runtime
 health checks.
 
+- `repo-adopt [--target DIR] [--hooks auto|pre-commit|husky|none] [--repo-tools-rev SHA] [--check] [--force]`
+  — idempotently install this package's generic conventions into a
+  repository: the `repo-require-worktree` commit and push guards (merged into
+  an existing `.pre-commit-config.yaml` pinned to a rev, or seeded
+  `.husky/pre-commit` and `.husky/pre-push` when the repository uses
+  `package.json` without pre-commit), a `renovate.json` extending the shared
+  preset (never modified once present), and a marker-delimited `AGENTS.md`
+  section routing to the `worktree-hygiene` and `land-pr` skills by URL.
+  Output is TSV (`action<TAB>file`, then `note<TAB>guidance`). `--check`
+  writes nothing, never reaches the network, and exits 1 on drift; a second
+  run after apply is a no-op. An existing Husky hook without the guard is
+  reported as `locally-owned` with guidance; `--force` replaces it and re-pins
+  an existing pre-commit entry. The rev defaults to `git ls-remote` of
+  repo-tools `main`, resolved only when a pin is written.
 - `repo-adopt-agent-identity [<repo>] [--dry-run] [--force]` — give existing
   linked worktrees the agent commit identity. Setting it at creation only
   helps worktrees made afterwards, and a busy checkout can hold dozens that
