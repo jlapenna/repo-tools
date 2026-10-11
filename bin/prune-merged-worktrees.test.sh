@@ -72,6 +72,7 @@ set -euo pipefail
 printf '%s\n' "$1" >> "$HOOK_CALLS"
 [[ ${REFUSE_HOOK:-false} != true ]] || { echo 'REFUSING: cache is in use' >&2; exit "${HOOK_REFUSAL_STATUS:-1}"; }
 "$2" "$1"
+exit "${HOOK_POST_REMOVE_STATUS:-0}"
 HOOK
 chmod +x "$scratch/hook"
 export HOOK_CALLS="$scratch/calls"
@@ -113,4 +114,20 @@ rc 0 --delete --session-only
 for name in manual dirty locked live open unmerged; do [[ -d ${!name} ]]; done
 rc 0 --delete "$manual"
 [[ ! -e $manual && -d $repo ]]
+
+# A failing consumer hook remains a failure even after it removed the target.
+# Preserve the exact branch for recovery, for both named and sweep callers.
+for hook_status in 1 75; do
+  post="$repo/.claude/worktrees/post-$hook_status"
+  wt "post-$hook_status" "$post"
+  if [[ $hook_status == 1 ]]; then
+    HOOK_POST_REMOVE_STATUS=$hook_status rc 1 --delete --remove-hook "$scratch/hook" "$post"
+  else
+    HOOK_POST_REMOVE_STATUS=$hook_status rc 1 --session-only --delete --remove-hook "$scratch/hook"
+  fi
+  [[ ! -e $post ]]
+  git -C "$repo" show-ref --verify --quiet "refs/heads/post-$hook_status"
+  grep -Eq "^FAILED.*remove-hook exited $hook_status after removal; branch kept" "$scratch/report"
+  ! grep -Eq '^REMOVED' "$scratch/report"
+done
 echo 'repo-prune-merged-worktrees: ok'
