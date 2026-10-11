@@ -1,9 +1,9 @@
 ---
-name: unattended-work
+name: autonomous-work
 description: Complete an authorized task without optional questions when the user says they are unavailable, AFK, unable to answer, or asks to keep working autonomously. Resolve routine ambiguity from evidence and reversible defaults, continue independent work around blockers, and report any unfinished actions. Use for hands-off execution of a bounded task, not to start an unsolicited backlog, schedule work, or grant new permissions.
 ---
 
-# Unattended work
+# Autonomous work
 
 Carry the requested task as far as its existing authorization allows. Treat
 the user's unavailability as an execution constraint: do not send optional
@@ -24,7 +24,7 @@ autonomously authorizes routine choices within the task; it does not authorize
 unrequested publication, deployment, deletion, spending, or messages to others.
 Do not ask again about an operation the user already authorized.
 
-Keep unattended execution active for this task while the user is unavailable.
+Keep autonomous execution active for this task while the user is unavailable.
 Incorporate incoming corrections and status requests as steering; continue
 unless they ask to stop or change the objective. On resumption or compaction,
 recover scope, decisions, completed work, and pending actions before proceeding.

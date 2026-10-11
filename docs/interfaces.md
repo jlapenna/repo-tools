@@ -31,10 +31,10 @@ Nx-inferred targets are intentionally not listed. Runtime status is not inferred
 
 | Name | Source |
 | --- | --- |
+| autonomous-work | [plugins/repo-tools/skills/autonomous-work/SKILL.md](../plugins/repo-tools/skills/autonomous-work/SKILL.md) |
 | github-ci-monitor | [plugins/repo-tools/skills/github-ci-monitor/SKILL.md](../plugins/repo-tools/skills/github-ci-monitor/SKILL.md) |
 | harness-maintenance | [plugins/repo-tools/skills/harness-maintenance/SKILL.md](../plugins/repo-tools/skills/harness-maintenance/SKILL.md) |
 | land-pr | [plugins/repo-tools/skills/land-pr/SKILL.md](../plugins/repo-tools/skills/land-pr/SKILL.md) |
 | renovate-maintenance | [plugins/repo-tools/skills/renovate-maintenance/SKILL.md](../plugins/repo-tools/skills/renovate-maintenance/SKILL.md) |
 | testing-policy | [plugins/repo-tools/skills/testing-policy/SKILL.md](../plugins/repo-tools/skills/testing-policy/SKILL.md) |
-| unattended-work | [plugins/repo-tools/skills/unattended-work/SKILL.md](../plugins/repo-tools/skills/unattended-work/SKILL.md) |
 | worktree-hygiene | [plugins/repo-tools/skills/worktree-hygiene/SKILL.md](../plugins/repo-tools/skills/worktree-hygiene/SKILL.md) |

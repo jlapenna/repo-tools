@@ -30,7 +30,7 @@ repository policy, check names, deployment rules, and product behavior.
 | PR delivery workflow | `land-pr` skill | skill validation and real protected consumers |
 | Testing policy | `testing-policy` skill and reference | documented examples |
 | Harness context and skill maintenance | `harness-maintenance` skill | native documentation checks and outcome evidence from consumers |
-| Unattended execution within granted scope | `unattended-work` skill | task-native verification and observed agent use |
+| Autonomous execution within granted scope | `autonomous-work` skill | task-native verification and observed agent use |
 | Plugin topology | `.claude-plugin/`, `.agents/`, `plugins/` manifests | `plugins/manifests.test.mjs` |
 | ESLint rules | `eslint/` | build, consumer contract, Vitest rules |
 | Shared Renovate preset | `renovate-preset.json` (`github>jlapenna/repo-tools//renovate-preset`) | `renovate-preset.test.mjs` |

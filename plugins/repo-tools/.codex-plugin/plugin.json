@@ -1,7 +1,7 @@
 {
   "name": "repo-tools",
   "version": "1.5.2",
-  "description": "General repository-management commands and skills for safe worktrees, CI monitoring, testing policy, PR delivery, harness maintenance, unattended work, and Renovate maintenance.",
+  "description": "General repository-management commands and skills for safe worktrees, CI monitoring, testing policy, PR delivery, harness maintenance, autonomous work, and Renovate maintenance.",
   "author": {
     "name": "Joe LaPenna",
     "url": "https://github.com/jlapenna"
@@ -19,13 +19,13 @@
     "worktree",
     "repository-management",
     "harness-maintenance",
-    "unattended-work"
+    "autonomous-work"
   ],
   "skills": "./skills/",
   "interface": {
     "displayName": "Repo Tools",
     "shortDescription": "Repository & harness workflows",
-    "longDescription": "Loads authoritative worktree-hygiene, GitHub CI-monitoring, testing-policy, PR-delivery (land-pr), harness-maintenance, unattended-work, and Renovate-maintenance skills for general repository management.",
+    "longDescription": "Loads authoritative worktree-hygiene, GitHub CI-monitoring, testing-policy, PR-delivery (land-pr), harness-maintenance, autonomous-work, and Renovate-maintenance skills for general repository management.",
     "developerName": "Joe LaPenna",
     "category": "Productivity",
     "capabilities": [

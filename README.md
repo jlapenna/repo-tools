@@ -222,7 +222,7 @@ The plugin exposes the authoritative skills listed in the generated inventory:
 - `harness-maintenance` applies observed feedback to documentation, skills,
   context routes, and their owning contracts. Consumers keep local truth and
   authorization; structural checks do not prove better worker behavior.
-- `unattended-work` completes authorized tasks when the user is unavailable:
+- `autonomous-work` completes authorized tasks when the user is unavailable:
   resolve optional questions from evidence and reversible defaults, continue
   independent work around blockers, and report any unfinished actions. It is
   self-contained and needs no scheduler or agent runtime. Invoke it explicitly
