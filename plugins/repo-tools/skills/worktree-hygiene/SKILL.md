@@ -105,8 +105,8 @@ Use the shared evidence checker rather than reconstructing merge proof in shell.
 From outside the target worktree:
 
 ```bash
-repo-sweep-worktrees --repo <primary> --path <worktree> --base origin/main
-repo-sweep-worktrees --repo <primary> --path <worktree> --base origin/main --delete
+repo-prune-merged-worktrees --repo <primary> --base origin/main <worktree>
+repo-prune-merged-worktrees --repo <primary> --base origin/main --delete <worktree>
 ```
 
 The report is TSV: verdict, path, branch, reason. The command combines paginated
@@ -116,7 +116,16 @@ process checks. Apply rechecks ownership and HEAD, delegates removal to
 branch tip. Missing GitHub evidence is KEEP, not permission. No fetch is implicit;
 refresh the base only when the user's task permits it.
 
-Use `--path` for task-scoped cleanup. Omitting it audits every linked worktree;
+`repo-prune-merged-worktrees` uses the same evidence/removal engine as
+`repo-sweep-worktrees`, with a nonzero result when a requested single-target
+removal is refused. Locked worktrees are retained. Use `--session-only` when
+the requested sweep covers only `.claude/worktrees` and `.codex/worktrees`.
+Repositories with associated cache or container ownership must pass their
+documented `--remove-hook` adapter in both audit and apply commands. The hook
+holds consumer resource locks, calls the supplied safe remover, and cleans up
+its own resources after successful removal; it never runs during an audit.
+
+Name the worktree for task-scoped cleanup. Omitting it audits every linked worktree;
 a repository-wide `--delete` requires that broader cleanup scope. A dry run never
 removes anything. Stop task-owned background watchers before cleanup, and do not
 kill another session to turn KEEP into SAFE.

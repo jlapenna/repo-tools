@@ -2,7 +2,7 @@
 # Sweep the linked worktrees of a repository: remove the ones whose work has
 # landed and that nothing is using; report everything else.
 #
-# Usage: repo-sweep-worktrees [--repo <checkout>] [--base <ref>] [--path <worktree>] [--delete]
+# Usage: repo-sweep-worktrees [--repo <checkout>] [--base <ref>] [--path <worktree>] [--under <directory>] [--remove-hook <executable>] [--delete]
 #
 # A worktree is SAFE to remove only when all of these hold:
 #   - its tree is clean (no uncommitted or untracked-but-tracked-path changes);
@@ -24,11 +24,15 @@ REPO=""
 BASE=""
 DELETE=false
 ONLY_PATH=""
+REMOVE_HOOK=""
+UNDER=()
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --repo) [ "$#" -ge 2 ] || { echo "--repo requires a path" >&2; exit 64; }; REPO="$2"; shift ;;
     --base) [ "$#" -ge 2 ] || { echo "--base requires a ref" >&2; exit 64; }; BASE="$2"; shift ;;
     --path) [ "$#" -ge 2 ] || exit 64; ONLY_PATH=$(realpath -e -- "$2"); shift ;;
+    --under) [ "$#" -ge 2 ] || exit 64; UNDER+=("$(realpath -m -- "$2")"); shift ;;
+    --remove-hook) [ "$#" -ge 2 ] || exit 64; REMOVE_HOOK=$(realpath -e -- "$2"); shift ;;
     --delete) DELETE=true ;;
     -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 64 ;;
@@ -42,6 +46,7 @@ source "$here/cleanup-evidence.sh"
 REMOVER="$here/safe-remove-worktree.sh"
 SCANNER="$here/scan-live-processes.sh"
 [ -x "$REMOVER" ] && [ -x "$SCANNER" ] || { echo "missing sibling scripts next to $0" >&2; exit 70; }
+[[ -z $REMOVE_HOOK || -x $REMOVE_HOOK ]] || { echo "remove hook is not executable: $REMOVE_HOOK" >&2; exit 64; }
 
 [ -n "$REPO" ] || REPO=$PWD
 COMMON=$(git -C "$REPO" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) ||
@@ -83,20 +88,33 @@ dirty_count() {
 
 emit() { printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4"; }
 
+in_scope() {
+  local candidate=$1 root
+  [[ -z $ONLY_PATH || $candidate == "$ONLY_PATH" ]] || return 1
+  ((${#UNDER[@]} > 0)) || return 0
+  for root in "${UNDER[@]}"; do
+    [[ $candidate == "$root"/* ]] && return 0
+  done
+  return 1
+}
+
 safe_paths=()
 safe_branches=()
 safe_heads=()
-path=""; head=""; branch=""
+path=""; head=""; branch=""; locked=false
 while IFS= read -r line; do
   case "$line" in
-    "worktree "*) path=${line#worktree }; head=""; branch="" ;;
+    "worktree "*) path=${line#worktree }; head=""; branch=""; locked=false ;;
     "HEAD "*) head=${line#HEAD } ;;
     "branch "*) branch=${line#branch refs/heads/} ;;
+    locked*) locked=true ;;
     "")
       [ -n "$path" ] || continue
-      if [ "$path" != "$PRIMARY" ] && { [[ -z $ONLY_PATH ]] || [[ $path == "$ONLY_PATH" ]]; }; then
+      if [ "$path" != "$PRIMARY" ] && in_scope "$path"; then
         if [ ! -d "$path" ]; then
           emit KEEP "$path" "$branch" "directory missing (git worktree prune)"
+        elif [ "$locked" = true ]; then
+          emit KEEP "$path" "$branch" "locked"
         elif dirty=$(dirty_count "$path") && [ "$dirty" -gt 0 ]; then
           emit KEEP "$path" "$branch" "dirty: $dirty uncommitted change(s)"
         elif live=$(live_count "$path") && [ "$live" -gt 0 ]; then
@@ -130,8 +148,17 @@ for i in $order; do
     emit KEEP "$p" "$b" 'unverified:plan-changed'; continue
   fi
   # The remover re-checks live processes and cleanliness right before acting.
-  out=$("$REMOVER" "$p" 2>&1) || true
+  hook_status=0
+  if [[ -n $REMOVE_HOOK ]]; then
+    out=$("$REMOVE_HOOK" "$p" "$REMOVER" 2>&1) || hook_status=$?
+  else
+    out=$("$REMOVER" "$p" 2>&1) || true
+  fi
+  [[ -z $out ]] || printf '%s\n' "$out" >&2
   if [ -e "$p" ]; then
+    if [[ $hook_status == 75 ]]; then
+      emit KEEP "$p" "$b" 'consumer-resources-in-use'; continue
+    fi
     reason=$(grep -m1 -E 'REFUSING|ERROR' <<<"$out" || echo "safe-remove-worktree failed")
     emit FAILED "$p" "$b" "$reason"
     continue
