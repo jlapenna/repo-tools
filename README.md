@@ -115,6 +115,11 @@ health checks.
   locks around that remover, and reclaims only its own resources afterward.
   Audits never invoke hooks. Consumer cache formats and Docker rules stay in
   the consumer adapter.
+  PR checkouts with temporary branch names pass `--merged-pr <GitHub-PR-URL>`
+  and one named worktree. This requires its exact HEAD to equal the merged PR
+  head, the merge commit to be on the selected origin base, and no open PR
+  ownership. The URL preserves upstream/fork routing; closed unmerged PRs and
+  unavailable metadata are kept. Apply rechecks the evidence before removal.
 - With `repo-sweep-worktrees`, use `--path <worktree>` to scope it to one
   completed task. Both
   the sweep and `repo-audit-branches [--base main] [--fetch] [--delete] [--delete-remote]`
