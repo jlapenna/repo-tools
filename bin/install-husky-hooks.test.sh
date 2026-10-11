@@ -35,7 +35,9 @@ bash "$here/install-husky-hooks.sh"
 shared="$(git config --get core.hooksPath)"
 [[ "$shared" == "$primary/.git/repo-tools-husky" ]]
 # Repeat setup is safe and does not replace the primary's tracked hook policy.
-bash "$here/install-husky-hooks.sh"
+# Run it through a symlink, as consumers do via node_modules/.bin.
+ln -s "$here/install-husky-hooks.sh" "$fixture/bin/repo-install-husky-hooks"
+repo-install-husky-hooks
 if git commit --allow-empty -qm 'must be refused' >"$fixture/out" 2>&1; then
   echo 'primary commit escaped its actual worktree guard' >&2; exit 1
 fi
