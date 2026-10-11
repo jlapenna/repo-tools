@@ -27,6 +27,9 @@
   ],
   "platformAutomerge": true,
   "rebaseWhen": "auto",
+  "pre-commit": {
+    "enabled": true
+  },
   "toolSettings": {
     "nodeMaxMemory": 1536
   },

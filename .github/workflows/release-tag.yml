@@ -1,0 +1,45 @@
+name: Release tag
+
+# Consumers pin `vX.Y.Z` tags (npm `github:jlapenna/repo-tools#vX.Y.Z`,
+# pre-commit `rev: vX.Y.Z`) because Renovate's npm and pre-commit managers
+# only look up git dependencies by tag. A `#main` or bare-SHA pin is never
+# updated, so consumers silently fell 60+ commits behind. Tag every version
+# `pnpm release` lands on main; the tag is the release.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - plugins/repo-tools/.claude-plugin/plugin.json
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Tag the released version
+        run: |
+          version="$(node -p "require('./plugins/repo-tools/.claude-plugin/plugin.json').version")"
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::plugin.json version '$version' is not X.Y.Z."
+            exit 1
+          fi
+          tag="v$version"
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            echo "$tag already exists at $(git rev-list -n 1 "$tag"); nothing to do."
+            exit 0
+          fi
+          git tag "$tag" "$GITHUB_SHA"
+          git push origin "refs/tags/$tag"
+          echo "Tagged $GITHUB_SHA as $tag."
