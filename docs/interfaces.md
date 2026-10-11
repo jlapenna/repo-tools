@@ -18,6 +18,7 @@ Nx-inferred targets are intentionally not listed. Runtime status is not inferred
 | repo-github-app-token | [bin/github-app-token.mjs](../bin/github-app-token.mjs) |
 | repo-install-husky-hooks | [bin/install-husky-hooks.sh](../bin/install-husky-hooks.sh) |
 | repo-nx | [bin/nx.sh](../bin/nx.sh) |
+| repo-prune-merged-worktrees | [bin/prune-merged-worktrees.sh](../bin/prune-merged-worktrees.sh) |
 | repo-require-worktree | [bin/require-feature-worktree.sh](../bin/require-feature-worktree.sh) |
 | repo-safe-remove-worktree | [bin/safe-remove-worktree.sh](../bin/safe-remove-worktree.sh) |
 | repo-scan-live-processes | [bin/scan-live-processes.sh](../bin/scan-live-processes.sh) |

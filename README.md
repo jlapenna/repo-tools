@@ -103,7 +103,20 @@ health checks.
   dirty, live, open-PR, and unverified worktrees are reported and kept. Run
   it from the primary checkout, on a schedule, as the backstop for sessions
   that never completed their own teardown.
-- Use `--path <worktree>` to scope that command to one completed task. Both
+- `repo-prune-merged-worktrees [--repo <checkout>] [--base <ref>] [--fetch]
+  [--delete] [--session-only] [<worktree-path>]` — the shared pruning entry
+  point, using the sweep's merge and ownership evidence. It audits by default;
+  `--delete` applies removal. A named target returns nonzero if it could not
+  be removed. `--session-only` preserves the original Sprinkles scope of
+  `.claude/worktrees` and `.codex/worktrees`; otherwise it covers all linked
+  worktrees. `--fetch` explicitly refreshes origin before checking ancestry.
+  A repository with associated resources may supply `--remove-hook <executable>`;
+  it receives the worktree path and safe-remover executable, holds its resource
+  locks around that remover, and reclaims only its own resources afterward.
+  Audits never invoke hooks. Consumer cache formats and Docker rules stay in
+  the consumer adapter.
+- With `repo-sweep-worktrees`, use `--path <worktree>` to scope it to one
+  completed task. Both
   the sweep and `repo-audit-branches [--base main] [--fetch] [--delete] [--delete-remote]`
   use the same fail-closed merge/ownership checker. Reports are TSV with stable
   reasons; missing ownership evidence preserves work. No fetch is implicit.
