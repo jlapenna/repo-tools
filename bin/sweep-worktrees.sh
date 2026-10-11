@@ -155,10 +155,18 @@ for i in $order; do
     out=$("$REMOVER" "$p" 2>&1) || true
   fi
   [[ -z $out ]] || printf '%s\n' "$out" >&2
-  if [ -e "$p" ]; then
-    if [[ $hook_status == 75 ]]; then
+  if [[ $hook_status != 0 ]]; then
+    if [[ $hook_status == 75 && -e "$p" ]]; then
       emit KEEP "$p" "$b" 'consumer-resources-in-use'; continue
     fi
+    if [[ ! -e "$p" ]]; then
+      emit FAILED "$p" "$b" "remove-hook exited $hook_status after removal; branch kept"
+    else
+      emit FAILED "$p" "$b" "remove-hook exited $hook_status; worktree and branch kept"
+    fi
+    continue
+  fi
+  if [ -e "$p" ]; then
     reason=$(grep -m1 -E 'REFUSING|ERROR' <<<"$out" || echo "safe-remove-worktree failed")
     emit FAILED "$p" "$b" "$reason"
     continue
