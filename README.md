@@ -186,7 +186,10 @@ and `plugins/repo-tools/.codex-plugin/plugin.json` — in one atomic step and
 commits the result. It validates all three files before writing any of
 them, so a missing file or malformed version leaves the release untouched
 rather than half-applied. Run it from a feature worktree, then push and open
-a PR as usual; it does not push or open the PR itself.
+a PR as usual; it does not push or open the PR itself. When the version
+change lands on `main`, the `Release tag` workflow tags that commit `vX.Y.Z`;
+that tag is what consumers pin and what Renovate offers them. A change merged
+without a release reaches consumers only with the next release.
 
 ## Pre-commit worktree guard
 
@@ -198,14 +201,19 @@ default_install_hook_types: [pre-commit, pre-push]
 
 repos:
   - repo: https://github.com/jlapenna/repo-tools
-    rev: main
+    rev: v1.5.3
     hooks:
       - id: repo-require-worktree
       - id: repo-require-worktree-push
 ```
 
-First-party consumers follow `main`; pre-commit caches hook environments, so
-reinstall/refresh the environment when updating shared tooling. Run
+First-party consumers pin a release tag: `rev: vX.Y.Z` here, and
+`"@jlapenna/repo-tools": "github:jlapenna/repo-tools#vX.Y.Z"` in npm
+consumers. Renovate's npm and pre-commit managers only look up git
+dependencies by tag, so a `main` or bare-SHA pin is never updated; the shared
+preset enables the pre-commit manager so both kinds of pin get bump PRs.
+Pre-commit caches hook environments, so reinstall/refresh the environment when
+updating shared tooling. Run
 `pre-commit install --install-hooks` after updating the configuration.
 Pre-commit skips its pre-push hooks for deletion-only pushes; content pushes
 run the shared guard and are rejected from the primary checkout or `main`.
