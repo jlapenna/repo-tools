@@ -28,7 +28,9 @@ mkdir -p "$target"
 # policy continues to come from the current worktree's tracked hook files.
 staging="$(mktemp -d "$target/.install.XXXXXX")"
 trap 'rm -rf "$staging"' EXIT
-cp "$(dirname "${BASH_SOURCE[0]}")/run-husky-hook.sh" "$staging/run-hook"
+# Resolve the symlink npm/pnpm put on node_modules/.bin; the runtime sits
+# beside the real script, not beside the link.
+cp "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/run-husky-hook.sh" "$staging/run-hook"
 chmod 0755 "$staging/run-hook"
 mv -f "$staging/run-hook" "$target/run-hook"
 cp "$bootstrap" "$staging/h"
