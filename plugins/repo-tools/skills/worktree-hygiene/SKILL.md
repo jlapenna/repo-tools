@@ -77,9 +77,11 @@ non-trivial setup step beyond `git clone` (a bootstrap/setup script, a
 package install, a hook-generation step), re-run it in the new worktree
 before trusting builds/tests/hooks there — don't assume a worktree is
 equivalent to the primary checkout just because the source files are
-identical. Check the project's own docs/skills for what that setup step is;
-this skill only covers the git/process mechanics that are the same
-regardless of language or stack.
+identical. If `tools/setup-worktree.sh` exists, run it from the new
+worktree root (it is idempotent and refuses to run in the primary
+checkout); otherwise fall back to the project's documented setup step
+(docs/skills). This skill only covers the git/process mechanics that are
+the same regardless of language or stack.
 
 **If using codebase-memory graph tools, index the new worktree first.** A freshly created
 worktree is a new path the `/codebase-memory-mcp` index does not yet know
