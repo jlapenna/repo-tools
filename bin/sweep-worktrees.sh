@@ -25,6 +25,7 @@ BASE=""
 DELETE=false
 ONLY_PATH=""
 REMOVE_HOOK=""
+MERGED_PR=""
 UNDER=()
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -33,12 +34,14 @@ while [ "$#" -gt 0 ]; do
     --path) [ "$#" -ge 2 ] || exit 64; ONLY_PATH=$(realpath -e -- "$2"); shift ;;
     --under) [ "$#" -ge 2 ] || exit 64; UNDER+=("$(realpath -m -- "$2")"); shift ;;
     --remove-hook) [ "$#" -ge 2 ] || exit 64; REMOVE_HOOK=$(realpath -e -- "$2"); shift ;;
+    --merged-pr) [ "$#" -ge 2 ] || exit 64; MERGED_PR=$2; shift ;;
     --delete) DELETE=true ;;
     -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 64 ;;
   esac
   shift
 done
+[[ -z $MERGED_PR || ( -n $ONLY_PATH && $MERGED_PR =~ ^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/[1-9][0-9]*$ ) ]] || exit 64
 
 here=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)
 # shellcheck source=bin/cleanup-evidence.sh
@@ -59,7 +62,18 @@ fi
 git -C "$PRIMARY" rev-parse -q --verify "$BASE^{commit}" >/dev/null || { echo "unknown base ref: $BASE" >&2; exit 1; }
 
 BASE=$(git -C "$PRIMARY" rev-parse "$BASE^{commit}")
-cleanup_load_prs "$PRIMARY" || echo '# PR data unavailable; keeping unverified worktrees' >&2
+PR_ROUTE='{owner}/{repo}'
+[[ -z $MERGED_PR ]] || PR_ROUTE=${MERGED_PR#https://github.com/}
+PR_ROUTE=${PR_ROUTE%/pull/*}
+cleanup_load_prs "$PRIMARY" "$PR_ROUTE" || echo '# PR data unavailable; keeping unverified worktrees' >&2
+
+worktree_evidence() {
+  if [[ -n $MERGED_PR ]]; then
+    cleanup_pr_checkout_evidence "$PRIMARY" "$BASE" "$1" "$2" "$MERGED_PR"
+  else
+    cleanup_evidence "$PRIMARY" "$BASE" "$1" "$2"
+  fi
+}
 
 live_count() { "$SCANNER" "$1" 2>/dev/null | grep -cE '^[0-9]+ ' || true; }
 
@@ -120,7 +134,7 @@ while IFS= read -r line; do
         elif live=$(live_count "$path") && [ "$live" -gt 0 ]; then
           emit KEEP "$path" "$branch" "live: $live process(es) with cwd inside"
         else
-          if reason=$(cleanup_evidence "$PRIMARY" "$BASE" "$branch" "$head"); then
+          if reason=$(worktree_evidence "$branch" "$head"); then
             emit SAFE "$path" "$branch" "$reason"
             safe_paths+=("$path"); safe_branches+=("$branch"); safe_heads+=("$head")
           else
@@ -142,8 +156,8 @@ order=$(for i in "${!safe_paths[@]}"; do printf '%s\t%s\n' "$(tr -cd '/' <<<"${s
 for i in $order; do
   p=${safe_paths[$i]}; b=${safe_branches[$i]}
   h=${safe_heads[$i]}
-  if ! cleanup_load_prs "$PRIMARY" ||
-    ! cleanup_evidence "$PRIMARY" "$BASE" "$b" "$h" >/dev/null ||
+  if ! cleanup_load_prs "$PRIMARY" "$PR_ROUTE" ||
+    ! worktree_evidence "$b" "$h" >/dev/null ||
     [[ $(git -C "$p" rev-parse HEAD) != "$h" ]]; then
     emit KEEP "$p" "$b" 'unverified:plan-changed'; continue
   fi
