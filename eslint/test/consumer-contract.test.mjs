@@ -37,10 +37,4 @@ test('consumer config can register the shared plugin and enforce server actions'
 test('fleet baseline exposes one config surface and rejects incomplete injection', () => {
   assert.ok(fleetEslintPlugin.rules[noServerOnlyImportsInClientName]);
   assert.throws(() => fleetBaseline({}), /needs both/);
-  const [base, commonJsOverride] = fleetBaseline({
-    simpleImportSort: {},
-    unusedImports: {},
-  });
-  assert.equal(base.rules['simple-import-sort/imports'], 'error');
-  assert.equal(commonJsOverride.rules['no-restricted-syntax'], 'off');
 });

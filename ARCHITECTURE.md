@@ -33,7 +33,7 @@ repository policy, check names, deployment rules, and product behavior.
 | Autonomous execution within granted scope | `autonomous-work` skill | task-native verification and observed agent use |
 | Plugin topology | `.claude-plugin/`, `.agents/`, `plugins/` manifests | `plugins/manifests.test.mjs` |
 | ESLint rules | `eslint/` | build, consumer contract, Vitest rules |
-| Shared Renovate preset | `renovate-preset.json` (`github>jlapenna/repo-tools//renovate-preset`) | `renovate-preset.test.mjs` |
+| Shared Renovate preset | `renovate-preset.json` (`github>jlapenna/repo-tools//renovate-preset`) | Renovate config validation in consumers |
 | Public interface inventory | package and skill manifests | generated `docs/interfaces.md` check |
 
 ## Runtime-Neutral Boundary
