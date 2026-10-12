@@ -131,6 +131,9 @@ health checks.
   permissions and must not be published because they may contain local secrets.
   Apply rechecks activity, ownership, HEAD, cleanliness, and live processes.
   Consumer resource adapters are required just as for merged cleanup.
+  The supplied remover rechecks the archived files inside the adapter's locked
+  transaction. A resource refusal leaves the checkout intact and discards its
+  prepared archive/ref so retries do not accumulate duplicate backups.
 - When the owner explicitly authorizes retirement of every checkout older than
   a window, use `--park-inactive --idle-hours 36 --delete` instead. This parks
   qualifying checkouts regardless of merge or PR status, always preserves

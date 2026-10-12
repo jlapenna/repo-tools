@@ -177,6 +177,13 @@ alone does not retain a checkout in this explicitly selected mode; recent
 writes, live processes, locks, dirty/nested trees, and consumer resource
 refusals still do. Retiring the local checkout does not abandon or finish its
 implementation issue.
+
+Resource adapters must invoke the supplied remover while holding their lock.
+For parking, that remover also compares the archive to the current local files
+inside the locked transaction. A resource refusal discards its prepared
+snapshot and ref only while the original checkout remains intact; partial
+removal failures retain recovery evidence.
+
 ## Syncing the primary checkout after a merge
 
 Treat syncing the primary checkout to the latest remote base as the final

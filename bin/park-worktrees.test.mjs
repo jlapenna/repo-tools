@@ -151,6 +151,36 @@ test('initialized submodule history is retained until it can be archived indepen
   assert.equal(existsSync(f.path),true);assert.deepEqual(f.archives(),[]);
 });
 
+test('a resource lock checks ignored files again immediately before removal',t=>{
+  const f=fixture(t);
+  const input=join(f.path,'.env'),hook=join(f.root,'remove-hook');
+  writeFileSync(input,'original private input\n');
+  writeFileSync(hook,'#!/bin/bash\nset -euo pipefail\nexec 9>"$1.resource-lock"\nflock 9\nprintf "changed under lock\\n" > "$1/.env"\n"$2" "$1"\n',{mode:0o755});
+  const r=f.prune('--park-unmerged','--remove-hook',hook,'--delete');
+  assert.equal(r.status,1,r.stderr+r.stdout);assert.match(r.stdout,/KEEP.*parking-refused/);
+  assert.equal(readFileSync(input,'utf8'),'changed under lock\n');
+  assert.deepEqual(f.archives(),[]);
+  assert.equal(f.git('for-each-ref','--format=%(refname)','refs/parked-worktrees'),'');
+  // The same locked transaction succeeds when the input stays unchanged.
+  writeFileSync(hook,'#!/bin/bash\nset -euo pipefail\nexec 9>"$1.resource-lock"\nflock 9\n"$2" "$1"\n',{mode:0o755});
+  const parked=f.prune('--park-unmerged','--remove-hook',hook,'--delete');
+  assert.equal(parked.status,0,parked.stderr+parked.stdout);assert.match(parked.stdout,/PARKED/);
+  assert.equal(f.restore(f.archives()[0]).status,0);
+  assert.equal(readFileSync(input,'utf8'),'changed under lock\n');
+});
+
+test('repeated resource refusals do not accumulate snapshots or protected refs',t=>{
+  const f=fixture(t),hook=join(f.root,'refuse-hook');
+  writeFileSync(hook,'#!/bin/sh\nexit 75\n',{mode:0o755});
+  for(let attempt=0;attempt<3;attempt++) {
+    const r=f.prune('--park-unmerged','--remove-hook',hook,'--delete');
+    assert.equal(r.status,1);assert.match(r.stdout,/KEEP.*parking-refused/);
+    assert.equal(existsSync(f.path),true);assert.deepEqual(f.archives(),[]);
+    assert.equal(f.git('for-each-ref','--format=%(refname)','refs/parked-worktrees'),'');
+    assert.equal(f.git('-C',f.path,'rev-parse','HEAD'),f.head);
+  }
+});
+
 test('restore refuses corrupted archives and preserves a branch moved since parking',t=>{
   const f=fixture(t);assert.equal(f.prune('--park-unmerged','--delete').status,0);
   const [archive]=f.archives();const packed=join(archive,'files.tar.gz'),saved=readFileSync(packed);

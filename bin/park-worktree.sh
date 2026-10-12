@@ -69,7 +69,38 @@ jq -n --arg primary "$primary" --arg common "$common" --arg path "$worktree" \
 printf 'repo-restore-worktree %q\n' "$archive" > "$archive/restore.sh"
 check_snapshot || exit 75
 if [[ -n $hook ]]; then
-  "$hook" "$worktree" "$here/safe-remove-worktree.sh"
+  # The consumer calls this guard while holding its resource lock. Recompare
+  # ignored local inputs at that point, not before waiting for the lock.
+  guard="$archive/remove-snapshot.sh"
+  {
+    printf '#!/usr/bin/env bash\nset -euo pipefail\n'
+    printf 'worktree=%q\nexpected=%q\nbranch=%q\nidle_hours=%q\nhere=%q\narchive=%q\n' \
+      "$worktree" "$expected" "$branch" "$idle_hours" "$here" "$archive"
+    printf 'source "$here/worktree-idle.sh"\n'
+    declare -f check_snapshot
+    printf '%s\n' \
+      '[[ ${1:-} == "$worktree" ]] || exit 75' \
+      'tar -dzf "$archive/files.tar.gz" -C "$worktree" >/dev/null || { echo "snapshot changed under resource lock" >&2; exit 75; }' \
+      'check_snapshot || exit 75' \
+      'exec "$here/safe-remove-worktree.sh" "$@"'
+  } > "$guard"
+  chmod 700 "$guard"
+  status=0
+  "$hook" "$worktree" "$guard" || status=$?
+  if (( status != 0 )); then
+    # A documented refusal leaves the checkout intact. Do not accumulate a
+    # new backup and protected ref on every retry. Keep evidence on partial
+    # removals or other errors, where the backup may be the only copy.
+    if (( status == 75 )) && [[ -d $worktree && -e $worktree/.git ]] &&
+      [[ $(git -C "$worktree" rev-parse HEAD) == "$expected" ]] &&
+      git --git-dir="$common" worktree list --porcelain | grep -Fqx "worktree $worktree"; then
+      git -C "$primary" update-ref -d "$ref" "$expected"
+      rm -rf -- "$archive"
+    else
+      echo "removal failed; archive retained: $archive" >&2
+    fi
+    exit "$status"
+  fi
 else
   "$here/safe-remove-worktree.sh" "$worktree"
 fi
