@@ -70,10 +70,17 @@ trusted production state or physical hardware, read
 - Prefer changing Renovate configuration or repository code in a separate,
   human-owned PR when the fix is not part of the generated dependency diff.
   Do not casually force-push or hand-edit a bot-owned branch.
+- Keep minor, patch, and digest updates, including 0.x minors, on automerge;
+  the repository's tests and CI are the gate that judges them. When such an
+  update breaks something, fix the code and add or repair the check that
+  should have caught it (for example, build the image for every shipped
+  architecture in PR CI) instead of pinning the dependency or narrowing
+  automerge. Major updates keep the shared preset's draft, no-automerge policy.
 - Trace dashboard warnings to the exact extracted file and dependency. If the
   source is genuinely retired, remove the dead configuration and its obsolete
-  exceptions instead of hiding it with a broad ignore rule. If it remains
-  intentional, document and narrowly exclude it.
+  exceptions instead of hiding it with a broad ignore rule. If the source
+  remains intentional, document and narrowly exclude that source; this does not
+  extend to excluding minor or patch updates from automerge.
 - When a warning depends on hosted Renovate behavior, confirm the next managed
   refresh clears it. A local lookup is useful evidence but is not the hosted
   acceptance result.
