@@ -117,11 +117,6 @@ health checks.
   locks around that remover, and reclaims only its own resources afterward.
   Audits never invoke hooks. Consumer cache formats and Docker rules stay in
   the consumer adapter.
-  PR checkouts with temporary branch names pass `--merged-pr <GitHub-PR-URL>`
-  and one named worktree. This requires its exact HEAD to equal the merged PR
-  head, the merge commit to be on the selected origin base, and no open PR
-  ownership. The URL preserves upstream/fork routing; closed unmerged PRs and
-  unavailable metadata are kept. Apply rechecks the evidence before removal.
 - For explicitly authorized disk cleanup of inactive unmerged work, add
   `--park-unmerged --idle-hours 36 --delete`. A successful result is `PARKED`,
   not a claim that the work merged. File/directory modification times and

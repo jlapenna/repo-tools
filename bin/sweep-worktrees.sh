@@ -25,7 +25,6 @@ BASE=""
 DELETE=false
 ONLY_PATH=""
 REMOVE_HOOK=""
-MERGED_PR=""
 PARK_UNMERGED=false
 PARK_INACTIVE=false
 IDLE_HOURS=0
@@ -37,7 +36,6 @@ while [ "$#" -gt 0 ]; do
     --path) [ "$#" -ge 2 ] || exit 64; ONLY_PATH=$(realpath -e -- "$2"); shift ;;
     --under) [ "$#" -ge 2 ] || exit 64; UNDER+=("$(realpath -m -- "$2")"); shift ;;
     --remove-hook) [ "$#" -ge 2 ] || exit 64; REMOVE_HOOK=$(realpath -e -- "$2"); shift ;;
-    --merged-pr) [ "$#" -ge 2 ] || exit 64; MERGED_PR=$2; shift ;;
     --delete) DELETE=true ;;
     --park-unmerged) PARK_UNMERGED=true ;;
     --park-inactive) PARK_INACTIVE=true ;;
@@ -47,10 +45,9 @@ while [ "$#" -gt 0 ]; do
   esac
   shift
 done
-[[ $PARK_INACTIVE == false || ( $IDLE_HOURS -gt 0 && -z $MERGED_PR ) ]] || {
-  echo '--park-inactive requires a positive --idle-hours window and no --merged-pr' >&2; exit 64;
+[[ $PARK_INACTIVE == false || ( $IDLE_HOURS -gt 0 ) ]] || {
+  echo '--park-inactive requires a positive --idle-hours window' >&2; exit 64;
 }
-[[ -z $MERGED_PR || ( -n $ONLY_PATH && $MERGED_PR =~ ^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/[1-9][0-9]*$ ) ]] || exit 64
 
 here=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)
 # shellcheck source=bin/cleanup-evidence.sh
@@ -74,11 +71,8 @@ fi
 git -C "$PRIMARY" rev-parse -q --verify "$BASE^{commit}" >/dev/null || { echo "unknown base ref: $BASE" >&2; exit 1; }
 
 BASE=$(git -C "$PRIMARY" rev-parse "$BASE^{commit}")
-PR_ROUTE='{owner}/{repo}'
-[[ -z $MERGED_PR ]] || PR_ROUTE=${MERGED_PR#https://github.com/}
-PR_ROUTE=${PR_ROUTE%/pull/*}
 if [[ $PARK_INACTIVE != true ]]; then
-  cleanup_load_prs "$PRIMARY" "$PR_ROUTE" || echo '# PR data unavailable; keeping unverified worktrees' >&2
+  cleanup_load_prs "$PRIMARY" || echo '# PR data unavailable; keeping unverified worktrees' >&2
 fi
 
 worktree_evidence() {
@@ -87,9 +81,6 @@ worktree_evidence() {
   # merge. Local inactivity/occupancy and preservation are its authority; PRs
   # and branches remain available. No GitHub lookup or write is needed.
   if [[ $PARK_INACTIVE == true ]]; then echo parkable:inactive; return 0; fi
-  if [[ -n $MERGED_PR ]]; then
-    cleanup_pr_checkout_evidence "$PRIMARY" "$BASE" "$1" "$2" "$MERGED_PR"
-  else
     if reason=$(cleanup_evidence "$PRIMARY" "$BASE" "$1" "$2"); then
       echo "$reason"; return 0
     fi
@@ -119,7 +110,6 @@ worktree_evidence() {
       echo parkable:unmerged; return 0
     fi
     echo "$reason"; return 1
-  fi
 }
 
 live_count() { "$SCANNER" "$1" 2>/dev/null | grep -cE '^[0-9]+ ' || true; }
@@ -205,7 +195,7 @@ order=$(for i in "${!safe_paths[@]}"; do printf '%s\t%s\n' "$(tr -cd '/' <<<"${s
 for i in $order; do
   p=${safe_paths[$i]}; b=${safe_branches[$i]}
   h=${safe_heads[$i]}
-  if { [[ $PARK_INACTIVE != true ]] && ! cleanup_load_prs "$PRIMARY" "$PR_ROUTE"; } ||
+  if { [[ $PARK_INACTIVE != true ]] && ! cleanup_load_prs "$PRIMARY"; } ||
     ! current_reason=$(worktree_evidence "$b" "$h") ||
     [[ $(git -C "$p" rev-parse HEAD) != "$h" ]] ||
     ! cleanup_worktree_idle "$p" "$b" "$IDLE_HOURS" >/dev/null; then

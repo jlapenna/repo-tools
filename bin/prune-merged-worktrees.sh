@@ -8,7 +8,7 @@ usage() {
   cat <<'USAGE'
 Usage: repo-prune-merged-worktrees [--repo <checkout>] [--base <ref>]
        [--fetch] [--delete] [--session-only] [--remove-hook <executable>]
-       [--merged-pr <GitHub-PR-URL>] [<worktree-path>]
+       [<worktree-path>]
        [--park-unmerged|--park-inactive] [--idle-hours N]
 
 Default: report only, using current local refs. --fetch refreshes origin first.
@@ -31,7 +31,7 @@ checkout/ref activity within N hours, checked again before removal.
 --idle-hours window. It archives even an open-PR or already-merged checkout,
 always keeps branches/history, and performs no GitHub reads or writes.
 Local writes, live processes, dirty/locked/nested checkouts and resource
-adapter refusals still keep it. It cannot be combined with --merged-pr.
+adapter refusals still keep it. 
 
 An optional remove hook receives <worktree-path> <safe-remover-executable> after
 merge/ownership verification. It may hold consumer resource locks, invoke the
@@ -39,9 +39,6 @@ provided remover, then clean up consumer-owned resources. A refusal must leave
 the worktree in place; exit 75 reports a normal resource-related KEEP, while
 other failures report FAILED. No hook runs in report-only mode.
 
---merged-pr binds one named target to an exact merged PR head, regardless of
-its local branch name. The URL selects the GitHub repository; its merge must
-be on the selected origin base branch. Closed unmerged PRs are always kept.
 USAGE
 }
 
@@ -52,19 +49,17 @@ delete=false
 fetch=false
 session_only=false
 hook=""
-merged_pr=""
 park_unmerged=false
 park_inactive=false
 idle_hours=0
 while (($#)); do
   case "$1" in
-    --repo|--base|--remove-hook|--merged-pr)
+    --repo|--base|--remove-hook)
       (($# >= 2)) || { usage >&2; exit 2; }
       case "$1" in
         --repo) repo=$2 ;;
         --base) base=$2 ;;
         --remove-hook) hook=$2 ;;
-        --merged-pr) merged_pr=$2 ;;
       esac
       shift ;;
     --fetch) fetch=true ;;
@@ -80,11 +75,8 @@ while (($#)); do
   esac
   shift
 done
-[[ $park_inactive == false || ( $idle_hours -gt 0 && -z $merged_pr ) ]] || {
-  echo '--park-inactive requires a positive --idle-hours window and no --merged-pr' >&2; exit 2;
-}
-[[ -z $merged_pr || ( -n $target && $merged_pr =~ ^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/[1-9][0-9]*$ ) ]] || {
-  echo '--merged-pr requires a GitHub PR URL and one named worktree' >&2; exit 2;
+[[ $park_inactive == false || ( $idle_hours -gt 0 ) ]] || {
+  echo '--park-inactive requires a positive --idle-hours window' >&2; exit 2;
 }
 
 # Canonicalize relative arguments before using the primary checkout.
@@ -119,7 +111,6 @@ args=(--repo "$primary")
 [[ -z $base ]] || args+=(--base "$base")
 [[ -z $target ]] || args+=(--path "$target")
 [[ -z $hook ]] || args+=(--remove-hook "$hook")
-[[ -z $merged_pr ]] || args+=(--merged-pr "$merged_pr")
 [[ $park_unmerged != true ]] || args+=(--park-unmerged)
 [[ $park_inactive != true ]] || args+=(--park-inactive)
 args+=(--idle-hours "$idle_hours")
