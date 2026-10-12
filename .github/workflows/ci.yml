@@ -18,12 +18,20 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+        with:
+          # The pull_request merge commit plus its first parent (the base tip),
+          # for the plugin-version check below.
+          fetch-depth: 2
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Plugin version does not decrease
+        # A rebased release commit can become a downgrade of main's version.
+        if: github.event_name == 'pull_request'
+        run: node scripts/release.mjs --check-base HEAD^1
       - run: pnpm test
       - run: pnpm run test:cleanup
       - run: pnpm run test:docs
