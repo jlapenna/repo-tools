@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 
-import { release } from './release.mjs';
+import { checkAgainstBase, compareVersions, release } from './release.mjs';
 
 const FIXTURES = {
   '.claude-plugin/marketplace.json': { metadata: { version: '1.0.0' } },
@@ -67,13 +67,99 @@ test('bumps every manifest to the same version and commits atomically', () => {
   });
 });
 
-test('does not require the three files to already agree on a version', () => {
+function setVersions(dir, version) {
+  for (const [path, contents] of Object.entries(FIXTURES)) {
+    const manifest = structuredClone(contents);
+    if (manifest.metadata) {
+      manifest.metadata.version = version;
+    } else {
+      manifest.version = version;
+    }
+    writeFileSync(join(dir, path), `${JSON.stringify(manifest, null, 2)}\n`);
+  }
+}
+
+function assertUntouched(dir, version = '1.0.0') {
+  assert.deepEqual(Object.values(readVersions(dir)), [version, version, version]);
+  const status = execFileSync('git', ['status', '--porcelain'], { cwd: dir }).toString();
+  assert.equal(status, '');
+}
+
+test('refuses manifests that disagree and names each version', () => {
   withFixtureCwd((dir) => {
     const path = 'plugins/repo-tools/.codex-plugin/plugin.json';
     writeFileSync(join(dir, path), `${JSON.stringify({ name: 'repo-tools', version: '0.9.9-drifted' }, null, 2)}\n`);
-    release('2.0.0');
-    const versions = readVersions(dir);
-    assert.deepEqual(Object.values(versions), ['2.0.0', '2.0.0', '2.0.0']);
+    execFileSync('git', ['commit', '-qam', 'drift'], { cwd: dir });
+    assert.throws(() => release('2.0.0'), /disagree.*\.codex-plugin\/plugin\.json=0\.9\.9-drifted/);
+    assert.deepEqual(Object.values(readVersions(dir)), ['1.0.0', '1.0.0', '0.9.9-drifted']);
+  });
+});
+
+for (const [requested, kind] of [
+  ['0.9.9', 'a lower version'],
+  ['1.0.0', 'an equal version'],
+  ['1.0.0+build.7', 'an equal-precedence version (build metadata)'],
+  ['1.0.0-rc.1', 'a prerelease of the current version'],
+]) {
+  test(`refuses ${kind} and leaves every file untouched`, () => {
+    withFixtureCwd((dir) => {
+      assert.throws(
+        () => release(requested),
+        (error) => error.message.includes(`requested version ${requested}`) && error.message.includes('current version 1.0.0'),
+      );
+      assertUntouched(dir);
+    });
+  });
+}
+
+test('accepts a greater version, including a prerelease of a greater core', () => {
+  withFixtureCwd((dir) => {
+    release('1.0.1-rc.1');
+    assertUntouched(dir, '1.0.1-rc.1');
+    assert.throws(() => release('1.0.1-beta'), /requested version 1\.0\.1-beta is not greater than the current version 1\.0\.1-rc\.1/);
+    release('1.0.1-rc.2');
+    release('1.0.1');
+    assertUntouched(dir, '1.0.1');
+  });
+});
+
+test('orders versions by semver precedence', () => {
+  const ordered = [
+    '1.0.0-alpha',
+    '1.0.0-alpha.1',
+    '1.0.0-alpha.beta',
+    '1.0.0-beta',
+    '1.0.0-beta.2',
+    '1.0.0-beta.11',
+    '1.0.0-rc.1',
+    '1.0.0',
+    '1.0.1',
+    '1.2.0',
+    '1.10.0',
+    '2.0.0',
+  ];
+  for (let i = 0; i < ordered.length; i += 1) {
+    for (let j = 0; j < ordered.length; j += 1) {
+      assert.equal(compareVersions(ordered[i], ordered[j]), Math.sign(i - j), `${ordered[i]} vs ${ordered[j]}`);
+    }
+  }
+  assert.equal(compareVersions('1.0.0+a', '1.0.0+b'), 0);
+});
+
+test('base check refuses a working tree that decreases the base version', () => {
+  withFixtureCwd((dir) => {
+    execFileSync('git', ['tag', 'base'], { cwd: dir });
+    assert.deepEqual(checkAgainstBase('base'), { base: '1.0.0', head: '1.0.0' });
+    setVersions(dir, '1.1.0');
+    assert.deepEqual(checkAgainstBase('base'), { base: '1.0.0', head: '1.1.0' });
+    setVersions(dir, '0.9.0');
+    assert.throws(() => checkAgainstBase('base'), /working-tree version 0\.9\.0 is lower than the base version 1\.0\.0/);
+    setVersions(dir, '1.0.0');
+    writeFileSync(
+      join(dir, 'plugins/repo-tools/.codex-plugin/plugin.json'),
+      `${JSON.stringify({ name: 'repo-tools', version: '1.1.0' }, null, 2)}\n`,
+    );
+    assert.throws(() => checkAgainstBase('base'), /working-tree manifests disagree/);
   });
 });
 

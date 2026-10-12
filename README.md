@@ -226,7 +226,11 @@ manifest — `.claude-plugin/marketplace.json`, `plugins/repo-tools/.claude-plug
 and `plugins/repo-tools/.codex-plugin/plugin.json` — in one atomic step and
 commits the result. It validates all three files before writing any of
 them, so a missing file or malformed version leaves the release untouched
-rather than half-applied. Run it from a feature worktree, then push and open
+rather than half-applied. It refuses a version that is not strictly greater
+(by semver precedence) than the current one, and refuses manifests that
+disagree with each other. CI applies the same non-decreasing check to every
+pull request against its base, catching a release that became a downgrade
+after a rebase. Run it from a feature worktree, then push and open
 a PR as usual; it does not push or open the PR itself. When the version
 change lands on `main`, the `Release tag` workflow tags that commit `vX.Y.Z`;
 that tag is what consumers pin and what Renovate offers them. A change merged
