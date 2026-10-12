@@ -17,9 +17,11 @@
 // Unmarked legacy takeover comments ("Session takeover", "implementing this
 // now") count only while younger than --stale-after.
 //
-// Only trusted authors can claim: repository owners, members, collaborators,
-// and GitHub App bots. Anyone else's PRs and comments are ignored, so a
-// drive-by comment cannot block an issue. A marker's last-active never counts
+// Only trusted authors can claim: repository owners, members and
+// collaborators, plus bot logins named with --trust-bot or the comma-separated
+// REPO_CLAIM_TRUSTED_BOTS. Anyone else's PRs and comments are ignored, so a
+// drive-by comment cannot block an issue. A PR's activity is its head commit
+// date, not updatedAt, which any commenter can bump. A marker's last-active never counts
 // as later than the comment's own last edit, so a forged future timestamp
 // cannot keep a claim alive. A PR in another repository must name the issue
 // as owner/repo#N; its bare #N means an issue in its own repository.
@@ -28,7 +30,7 @@
 // listed branch instead of starting over), free (no claim evidence).
 //
 // Usage:
-//   repo-claim-status <owner/repo#N> [--json] [--stale-after 60m] [--pr-stale-after 24h]
+//   repo-claim-status <owner/repo#N> [--json] [--stale-after 60m] [--pr-stale-after 24h] [--trust-bot <login>]...
 //   repo-claim-status <owner/repo#N> --heartbeat --owner <label> [--branch <name>] [--note <text>]
 // Exit codes (check mode): 0 free or closed, 10 live, 11 stale, 2 usage, 1 error.
 import { execFileSync } from 'node:child_process';
@@ -40,8 +42,8 @@ const LEGACY = /session takeover|implementing this now|taking (this|it) over|^\s
 const EXIT = { free: 0, closed: 0, live: 10, stale: 11 };
 const TRUSTED = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
 
-export function trusted(author, association) {
-  return TRUSTED.has(association) || /\[bot\]$/.test(author ?? '');
+export function trusted(author, association, trustedBots = []) {
+  return TRUSTED.has(association) || trustedBots.includes(author ?? '');
 }
 
 export function parseDuration(text) {
@@ -84,29 +86,30 @@ function referencesIssue(body, target, sameRepo) {
 
 // Pure classification over fetched GitHub state; `data` is the shape returned
 // by fetchIssueState. Kept separate so tests need no network.
-export function classify(data, target, { now = Date.now(), staleAfterMs = 3_600_000, prStaleAfterMs = 86_400_000 } = {}) {
+export function classify(data, target, { now = Date.now(), staleAfterMs = 3_600_000, prStaleAfterMs = 86_400_000, trustedBots = [] } = {}) {
   if (data.state === 'CLOSED') return { status: 'closed', evidence: [{ kind: 'issue', detail: 'issue is closed' }] };
   const evidence = [];
   const seen = new Set();
   for (const pr of data.pullRequests) {
-    if (pr.state !== 'OPEN' || seen.has(pr.url) || !trusted(pr.author, pr.authorAssociation)) continue;
+    if (pr.state !== 'OPEN' || seen.has(pr.url) || !trusted(pr.author, pr.authorAssociation, trustedBots)) continue;
     const sameRepo = (pr.repository ?? `${target.owner}/${target.repo}`).toLowerCase() === `${target.owner}/${target.repo}`.toLowerCase();
     if (!pr.closing && !referencesIssue(`${pr.title}\n${pr.body}`, target, sameRepo)) continue;
     seen.add(pr.url);
-    const ageMs = now - Date.parse(pr.updatedAt);
+    const activeAt = pr.headCommittedAt ?? pr.updatedAt;
+    const ageMs = now - Date.parse(activeAt);
     evidence.push({
       kind: 'pull-request',
       live: ageMs <= prStaleAfterMs,
       url: pr.url,
       branch: pr.headRefName,
       draft: pr.isDraft,
-      lastActive: pr.updatedAt,
-      detail: `${pr.isDraft ? 'draft ' : ''}PR ${pr.url} on ${pr.headRefName}, updated ${pr.updatedAt}`,
+      lastActive: activeAt,
+      detail: `${pr.isDraft ? 'draft ' : ''}PR ${pr.url} on ${pr.headRefName}, last commit ${activeAt}`,
     });
   }
   let newestMarker;
   for (const comment of data.comments) {
-    if (!trusted(comment.author, comment.authorAssociation)) continue;
+    if (!trusted(comment.author, comment.authorAssociation, trustedBots)) continue;
     const marker = parseMarker(comment.body);
     if (marker) {
       const claimed = Date.parse(marker['last-active'] ?? '');
@@ -146,7 +149,7 @@ function gh(args, input) {
   return execFileSync('gh', args, { encoding: 'utf8', input, stdio: [input ? 'pipe' : 'ignore', 'pipe', 'pipe'] });
 }
 
-const PR = 'url state isDraft headRefName updatedAt title body authorAssociation author{login} repository{nameWithOwner}';
+const PR = 'url state isDraft headRefName updatedAt title body authorAssociation author{login} repository{nameWithOwner} commits(last:1){nodes{commit{committedDate}}}';
 const QUERY = `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){issue(number:$number){
   state
   closedByPullRequestsReferences(first:20,includeClosedPrs:false){nodes{${PR}}}
@@ -159,7 +162,7 @@ export function fetchIssueState(target, run = gh) {
   const raw = run(['api', 'graphql', '-f', `query=${QUERY}`, '-F', `owner=${target.owner}`, '-F', `repo=${target.repo}`, '-F', `number=${target.number}`]);
   const issue = JSON.parse(raw).data?.repository?.issue;
   if (!issue) throw new Error(`issue not found: ${target.owner}/${target.repo}#${target.number}`);
-  const flat = (pr) => ({ ...pr, author: pr.author?.login, repository: pr.repository?.nameWithOwner });
+  const flat = ({ commits, ...pr }) => ({ ...pr, author: pr.author?.login, repository: pr.repository?.nameWithOwner, headCommittedAt: commits?.nodes?.[0]?.commit?.committedDate });
   const closing = issue.closedByPullRequestsReferences.nodes.map((pr) => ({ ...flat(pr), closing: true }));
   const linked = issue.timelineItems.nodes.map((node) => node.source ?? node.subject).filter((pr) => pr?.url).map(flat);
   return {
@@ -183,7 +186,8 @@ export function heartbeat(target, { owner, branch, note }, { run = gh, now = new
 }
 
 function parseArgs(argv) {
-  const opts = { json: false, heartbeat: false, staleAfter: '60m', prStaleAfter: '24h' };
+  const envBots = (process.env.REPO_CLAIM_TRUSTED_BOTS ?? '').split(',').map((b) => b.trim()).filter(Boolean);
+  const opts = { json: false, heartbeat: false, staleAfter: '60m', prStaleAfter: '24h', trustedBots: envBots };
   const rest = [];
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -198,6 +202,7 @@ function parseArgs(argv) {
     else if (arg === '--note') opts.note = value();
     else if (arg === '--stale-after') opts.staleAfter = value();
     else if (arg === '--pr-stale-after') opts.prStaleAfter = value();
+    else if (arg === '--trust-bot') opts.trustedBots.push(value());
     else if (arg === '-h' || arg === '--help') opts.help = true;
     else if (arg.startsWith('-')) throw new Error(`unknown option: ${arg}`);
     else rest.push(arg);
@@ -227,6 +232,7 @@ function main(argv) {
   const result = classify(fetchIssueState(target), target, {
     staleAfterMs: parseDuration(opts.staleAfter),
     prStaleAfterMs: parseDuration(opts.prStaleAfter),
+    trustedBots: opts.trustedBots,
   });
   if (opts.json) {
     process.stdout.write(`${JSON.stringify(result)}\n`);
@@ -239,7 +245,7 @@ function main(argv) {
 }
 
 function readUsage() {
-  return 'usage: repo-claim-status <owner/repo#N> [--json] [--stale-after 60m] [--pr-stale-after 24h]\n' +
+  return 'usage: repo-claim-status <owner/repo#N> [--json] [--stale-after 60m] [--pr-stale-after 24h] [--trust-bot <login>]...\n' +
     '       repo-claim-status <owner/repo#N> --heartbeat --owner <label> [--branch <name>] [--note <text>]';
 }
 

@@ -99,7 +99,7 @@ test('a live PR keeps the claim live even when comments are old', () => {
 
 const fakeIssue = (comments = []) => JSON.stringify({ data: { repository: { issue: {
   state: 'OPEN',
-  closedByPullRequestsReferences: { nodes: [{ ...pr(), author: { login: 'dev' }, repository: { nameWithOwner: 'acme/app' } }] },
+  closedByPullRequestsReferences: { nodes: [{ ...pr(), author: { login: 'dev' }, repository: { nameWithOwner: 'acme/app' }, commits: { nodes: [{ commit: { committedDate: ago(7) } }] } }] },
   timelineItems: { nodes: [{ source: { ...pr({ url: 'https://github.com/acme/app/pull/8', body: 'Refs #42' }), author: { login: 'dev' }, repository: { nameWithOwner: 'acme/app' } } }, { source: {} }] },
   comments: { nodes: comments.map((c) => ({ databaseId: c.id, url: c.url, body: c.body, createdAt: c.createdAt, updatedAt: c.updatedAt, authorAssociation: c.authorAssociation, author: { login: c.author } })) },
 } } } });
@@ -110,6 +110,8 @@ test('fetchIssueState merges closing and cross-referenced PRs', () => {
   assert.equal(data.pullRequests[0].closing, true);
   assert.equal(data.pullRequests[0].author, 'dev');
   assert.equal(data.pullRequests[1].repository, 'acme/app');
+  assert.equal(data.pullRequests[0].headCommittedAt, ago(7));
+  assert.equal('commits' in data.pullRequests[0], false);
 });
 
 test('heartbeat creates a marker, then refreshes the same comment', () => {
@@ -153,7 +155,10 @@ test('claims by untrusted authors are ignored; bots and collaborators count', ()
   assert.equal(classify(state({ comments: [drive] }), target, opts).status, 'free');
   assert.equal(classify(state({ pullRequests: [pr({ closing: true, author: 'rando', authorAssociation: 'CONTRIBUTOR' })] }), target, opts).status, 'free');
   const bot = comment('Session takeover: bot run', { author: 'agent-lcars[bot]', authorAssociation: 'NONE' });
-  assert.equal(classify(state({ comments: [bot] }), target, opts).status, 'live');
+  assert.equal(classify(state({ comments: [bot] }), target, opts).status, 'free');
+  assert.equal(classify(state({ comments: [bot] }), target, { ...opts, trustedBots: ['agent-lcars[bot]'] }).status, 'live');
+  const otherBot = comment('Session takeover: quoted', { author: 'github-actions[bot]', authorAssociation: 'NONE' });
+  assert.equal(classify(state({ comments: [otherBot] }), target, { ...opts, trustedBots: ['agent-lcars[bot]'] }).status, 'free');
   assert.equal(classify(state({ pullRequests: [pr({ closing: true, authorAssociation: 'COLLABORATOR' })] }), target, opts).status, 'live');
 });
 
@@ -169,4 +174,11 @@ test('a PR in another repository must qualify the issue reference', () => {
   assert.equal(classify(state({ pullRequests: [foreign('Refs #42')] }), target, opts).status, 'free');
   assert.equal(classify(state({ pullRequests: [foreign('Refs acme/app#42')] }), target, opts).status, 'live');
   assert.equal(classify(state({ pullRequests: [pr({ body: 'Refs acme/app#42' })] }), target, opts).status, 'live');
+});
+
+test('PR liveness follows its head commit, not comment-driven updatedAt', () => {
+  const bumped = pr({ closing: true, updatedAt: ago(1), headCommittedAt: ago(30 * 60) });
+  const result = classify(state({ pullRequests: [bumped] }), target, opts);
+  assert.equal(result.status, 'stale');
+  assert.equal(classify(state({ pullRequests: [pr({ closing: true, headCommittedAt: ago(30) })] }), target, opts).status, 'live');
 });
