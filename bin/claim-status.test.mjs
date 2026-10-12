@@ -182,3 +182,10 @@ test('PR liveness follows its head commit, not comment-driven updatedAt', () => 
   assert.equal(result.status, 'stale');
   assert.equal(classify(state({ pullRequests: [pr({ closing: true, headCommittedAt: ago(30) })] }), target, opts).status, 'live');
 });
+
+test('a future-dated head commit cannot outlive the PR server timestamp', () => {
+  const forged = pr({ closing: true, updatedAt: ago(30 * 60), headCommittedAt: '2099-01-01T00:00:00Z' });
+  const result = classify(state({ pullRequests: [forged] }), target, opts);
+  assert.equal(result.status, 'stale');
+  assert.equal(result.evidence[0].lastActive, new Date(NOW - 30 * 3_600_000).toISOString());
+});

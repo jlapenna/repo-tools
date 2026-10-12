@@ -21,7 +21,8 @@
 // collaborators, plus bot logins named with --trust-bot or the comma-separated
 // REPO_CLAIM_TRUSTED_BOTS. Anyone else's PRs and comments are ignored, so a
 // drive-by comment cannot block an issue. A PR's activity is its head commit
-// date, not updatedAt, which any commenter can bump. A marker's last-active never counts
+// date clamped to updatedAt: commenters can bump updatedAt and committers can
+// forge committedDate, but neither alone can extend a claim. A marker's last-active never counts
 // as later than the comment's own last edit, so a forged future timestamp
 // cannot keep a claim alive. A PR in another repository must name the issue
 // as owner/repo#N; its bare #N means an issue in its own repository.
@@ -95,7 +96,13 @@ export function classify(data, target, { now = Date.now(), staleAfterMs = 3_600_
     const sameRepo = (pr.repository ?? `${target.owner}/${target.repo}`).toLowerCase() === `${target.owner}/${target.repo}`.toLowerCase();
     if (!pr.closing && !referencesIssue(`${pr.title}\n${pr.body}`, target, sameRepo)) continue;
     seen.add(pr.url);
-    const activeAt = pr.headCommittedAt ?? pr.updatedAt;
+    // committedDate is client-set and can be forged into the future; updatedAt
+    // is server-set and moves on every push. The earlier of the two is the
+    // latest moment the author provably pushed, and a comment-only bump of
+    // updatedAt cannot raise it past the real commit.
+    const committed = Date.parse(pr.headCommittedAt ?? '');
+    const updated = Date.parse(pr.updatedAt);
+    const activeAt = new Date(Number.isNaN(committed) ? updated : Math.min(committed, updated)).toISOString();
     const ageMs = now - Date.parse(activeAt);
     evidence.push({
       kind: 'pull-request',
