@@ -6,6 +6,90 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
+test("named cleanup isolates the selected branch and reports refused deletion", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "branch-scope-test-"));
+  const repo = path.join(root, "repo"), remote = path.join(root, "remote.git"), bin = path.join(root, "bin");
+  fs.mkdirSync(repo);
+  fs.mkdirSync(bin);
+  const env = { ...process.env, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null", PATH: bin + ":" + process.env.PATH };
+  const run = (...args) => execFileSync(args[0], args.slice(1), {
+    cwd: repo, env, encoding: "utf8", timeout: 10000, stdio: ["ignore", "pipe", "pipe"],
+  }).trim();
+  const script = fileURLToPath(new URL("./audit-branches.sh", import.meta.url));
+  const refuses = (...args) => assert.throws(() => run("bash", script, ...args),
+    (error) => Number.isInteger(error.status) && error.status !== 0);
+  try {
+    run("git", "init", "--bare", remote);
+    run("git", "init", "-b", "main");
+    run("git", "config", "user.name", "Fixture");
+    run("git", "config", "user.email", "fixture@example.invalid");
+    run("git", "commit", "--allow-empty", "-m", "base");
+    const base = run("git", "rev-parse", "HEAD");
+    run("git", "remote", "add", "origin", remote);
+    for (const branch of ["selected", "other"]) run("git", "branch", branch);
+    run("git", "push", "origin", "main", "selected", "other");
+    fs.writeFileSync(path.join(bin, "gh"), '#!/bin/sh\ncase "$1" in\napi) echo "[[]]";;\npr) echo "[]";;\n*) exit 2;;\nesac\n', { mode: 0o755 });
+
+    run("bash", script, "--branch", "selected", "--delete");
+    assert.throws(() => run("git", "rev-parse", "refs/heads/selected"));
+    assert.equal(run("git", "--git-dir", remote, "rev-parse", "refs/heads/selected"), base);
+    run("git", "branch", "selected", base);
+    run("bash", script, "--branch", "selected", "--delete-remote");
+    assert.throws(() => run("git", "--git-dir", remote, "rev-parse", "refs/heads/selected"));
+    run("bash", script, "--branch", "selected", "--delete-remote");
+    assert.equal(run("git", "rev-parse", "refs/heads/selected"), base);
+    assert.equal(run("git", "rev-parse", "refs/heads/other"), base);
+    assert.equal(run("git", "--git-dir", remote, "rev-parse", "refs/heads/other"), base);
+
+    // A still-checked-out merged branch is retained, with a refusal status.
+    run("git", "push", "origin", "selected");
+    // A missing tracking ref is not proof that the live branch is absent.
+    run("git", "update-ref", "-d", "refs/remotes/origin/selected");
+    refuses("--branch", "selected", "--delete-remote");
+    assert.equal(run("git", "--git-dir", remote, "rev-parse", "refs/heads/selected"), base);
+    run("git", "fetch", "origin");
+    run("git", "worktree", "add", path.join(root, "occupied"), "selected");
+    refuses("--branch", "selected", "--delete-remote");
+    assert.equal(run("git", "--git-dir", remote, "rev-parse", "refs/heads/selected"), base);
+
+    // Unmerged work and the base branch remain protected under a selector.
+    run("git", "switch", "-c", "unmerged");
+    fs.writeFileSync(path.join(repo, "work"), "unmerged\n");
+    run("git", "add", "work");
+    run("git", "commit", "-m", "unmerged");
+    const unmerged = run("git", "rev-parse", "HEAD");
+    run("git", "switch", "main");
+    run("git", "push", "origin", "unmerged");
+    refuses("--branch", "unmerged", "--delete-remote");
+    assert.equal(run("git", "--git-dir", remote, "rev-parse", "refs/heads/unmerged"), unmerged);
+    refuses("--branch", "main", "--delete-remote");
+    refuses("--branch", "", "--delete-remote");
+    refuses("--branch", "HEAD", "--delete-remote");
+    refuses("--branch", "--delete-remote");
+    refuses("--branch", "invalid name", "--delete-remote");
+    assert.equal(run("git", "--git-dir", remote, "rev-parse", "refs/heads/main"), base);
+    assert.equal(run("git", "--git-dir", remote, "rev-parse", "refs/heads/other"), base);
+
+    // Ownership appearing between audit and apply must also report refusal.
+    fs.writeFileSync(path.join(bin, "gh"), `#!/bin/sh
+case "$1" in
+api)
+  if test -f '${root}/queried'; then
+    echo '[[{"head":{"ref":"other"}}]]'
+  else
+    touch '${root}/queried'; echo '[[]]'
+  fi;;
+pr) echo '[]';;
+*) exit 2;;
+esac
+`, { mode: 0o755 });
+    refuses("--branch", "other", "--delete-remote");
+    assert.equal(run("git", "--git-dir", remote, "rev-parse", "refs/heads/other"), base);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("remote cleanup succeeds after auto-deletion but fails when the remote is unavailable", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "branch-auto-delete-test-"));
   const repo = path.join(root, "repo"), remote = path.join(root, "remote.git"), bin = path.join(root, "bin");

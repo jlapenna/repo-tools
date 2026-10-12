@@ -117,7 +117,7 @@ health checks.
   the consumer adapter.
 - With `repo-sweep-worktrees`, use `--path <worktree>` to scope it to one
   completed task. Both
-  the sweep and `repo-audit-branches [--base main] [--fetch] [--delete] [--delete-remote]`
+  the sweep and `repo-audit-branches [--base main] [--fetch] [--branch NAME] [--delete] [--delete-remote]`
   use the same fail-closed merge/ownership checker. Reports are TSV with stable
   reasons; missing ownership evidence preserves work. No fetch is implicit.
   `repo-audit-branches --no-pr-days N` also treats an unmerged, unoccupied branch as
@@ -132,6 +132,12 @@ health checks.
   the originally audited SHA and runs push hooks. A branch already absent from
   the live remote succeeds without an empty push; a failed remote lookup stops
   cleanup rather than claiming absence.
+  Use `--branch NAME` for task-scoped cleanup of that local/remote name. A named
+  deletion returns nonzero when the branch must be kept; the base and `HEAD`
+  cannot be selected. A missing tracking ref requires live absence proof or a
+  fetch before remote deletion. For a merged task whose worktree has already
+  been safely removed, run from the primary checkout:
+  `repo-audit-branches --base origin/main --fetch --branch <merged-head> --delete-remote`.
 - `repo-nx` — run Nx with portable cache and linked-worktree safeguards.
   Explicit environment wins, followed by a worktree/primary checkout's
   `.nx-remote-cache.env`, then the account-wide
