@@ -372,8 +372,6 @@ if [ -e "$WT_ABS" ]; then
   exit 5
 fi
 echo "done."
-echo "If that reported a locked working tree from a pid you've confirmed is dead,"
-echo "re-run: git --git-dir=\"$GIT_COMMON_DIR\" worktree remove \"$WT_ABS\" --force --force"
 case "$PWD" in
   "$WT_ABS" | "$WT_ABS"/*)
     echo "NOTE: your shell's cwd was inside the removed worktree and no longer exists."
