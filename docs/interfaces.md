@@ -14,7 +14,6 @@ Nx-inferred targets are intentionally not listed. Runtime status is not inferred
 | repo-check-dependencies | [bin/check-dependencies.sh](../bin/check-dependencies.sh) |
 | repo-check-runner-labels | [bin/check-runner-labels.mjs](../bin/check-runner-labels.mjs) |
 | repo-check-schedules | [bin/check-schedules.mjs](../bin/check-schedules.mjs) |
-| repo-claim-status | [bin/claim-status.mjs](../bin/claim-status.mjs) |
 | repo-docs | [bin/docs.mjs](../bin/docs.mjs) |
 | repo-github-app-token | [bin/github-app-token.mjs](../bin/github-app-token.mjs) |
 | repo-install-husky-hooks | [bin/install-husky-hooks.sh](../bin/install-husky-hooks.sh) |
