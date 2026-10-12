@@ -2,59 +2,20 @@
 # Shared, fail-closed cleanup evidence. Source from branch and worktree commands.
 # PR data is a snapshot, not permission: callers recheck before applying a plan.
 cleanup_load_prs() {
-  local repo=$1 route=${2:-'{owner}/{repo}'} open merged
+  local repo=$1 open merged
   CLEANUP_PRS=''
-  open=$(cd "$repo" && gh api --paginate --slurp "repos/$route/pulls?state=open&per_page=100") || return 1
+  open=$(cd "$repo" && gh api --paginate --slurp 'repos/{owner}/{repo}/pulls?state=open&per_page=100') || return 1
   open=$(jq -ce 'if type == "array" and all(.[]; type == "array") then
     [.[][] | if (.head.ref | type) == "string" then
       {headRefName: .head.ref, state: "OPEN"} else error("invalid open PR head") end]
     else error("invalid open PR pages") end' <<<"$open") || return 1
   # Missing older merged records is conservative: unproven squash heads stay.
-  local args=()
-  [[ $route == '{owner}/{repo}' ]] || args+=(--repo "$route")
-  merged=$(cd "$repo" && gh pr list "${args[@]}" --state merged --limit 1000 --json headRefName,headRefOid,mergeCommit) || return 1
+  merged=$(cd "$repo" && gh pr list --state merged --limit 1000 --json headRefName,headRefOid,mergeCommit) || return 1
   # Histories of 1000 PRs exceed Linux's per-argument limit. Keep bulk data
   # on stdin; --argjson would fail before jq could validate it.
   CLEANUP_PRS=$(printf '%s\n%s\n' "$open" "$merged" | jq -ces '
     if (.[1] | type) == "array" then .[0] + (.[1] | map(. + {state:"MERGED"}))
     else error("invalid merged PR data") end') || return 1
-}
-
-# Explicit provenance for a PR checkout whose local branch name differs from
-# the reviewed head. The URL owns routing; neither a temp branch nor a fork's
-# default remote may select the PR repository. Re-fetch on every apply check.
-cleanup_pr_checkout_evidence() {
-  local repo=$1 base=$2 branch=$3 tip=$4 url=$5 data head merge pr_base
-  [[ -n ${CLEANUP_PRS:-} ]] || { echo 'unverified:pr-data-unavailable'; return 1; }
-  if jq -e --arg branch "$branch" 'any(.[]; .headRefName == $branch and .state == "OPEN")' <<<"$CLEANUP_PRS" >/dev/null; then
-    echo 'open-pr'; return 1
-  fi
-  data=$(cd "$repo" && gh pr view "$url" --json url,state,baseRefName,headRefName,headRefOid,mergeCommit) || {
-    echo 'unverified:pr-data-unavailable'; return 1;
-  }
-  if ! jq -e --arg url "$url" --arg tip "$tip" '
-    .url == $url and .state == "MERGED" and .headRefOid == $tip and
-    (.baseRefName | type == "string" and length > 0) and
-    (.headRefName | type == "string" and length > 0) and
-    (.mergeCommit.oid | type == "string" and test("^[0-9a-f]{40}$"))
-  ' <<<"$data" >/dev/null; then
-    echo 'unverified:pr-head-not-merged'; return 1
-  fi
-  head=$(jq -r .headRefName <<<"$data")
-  if jq -e --arg head "$head" 'any(.[]; .headRefName == $head and .state == "OPEN")' <<<"$CLEANUP_PRS" >/dev/null; then
-    echo 'open-pr'; return 1
-  fi
-  pr_base=$(jq -r .baseRefName <<<"$data")
-  # Require the selected base to be the actual PR base, not an unrelated ref
-  # that merely contains a copied merge commit.
-  if [[ $(git -C "$repo" rev-parse --verify "refs/remotes/origin/$pr_base^{commit}" 2>/dev/null) != "$base" ]]; then
-    echo 'unverified:pr-base-mismatch'; return 1
-  fi
-  merge=$(jq -r .mergeCommit.oid <<<"$data")
-  if git -C "$repo" merge-base --is-ancestor "$merge" "$base" 2>/dev/null; then
-    echo 'landed:explicit-merged-pr-head'; return 0
-  fi
-  echo 'unverified:pr-merge-not-on-base'; return 1
 }
 
 cleanup_evidence() {
