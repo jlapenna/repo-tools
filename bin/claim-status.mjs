@@ -152,8 +152,18 @@ export function classify(data, target, { now = Date.now(), staleAfterMs = 3_600_
   return { status, evidence, ...(status === 'stale' && adopt ? { adoptBranch: adopt } : {}) };
 }
 
+// Report gh failures by gh's own message, not the (long) command line.
+export function ghError(error) {
+  const stderr = String(error?.stderr ?? '').trim().split('\n').filter(Boolean);
+  return new Error(stderr.at(-1)?.replace(/^gh:\s*/, '') || error?.message || 'gh failed');
+}
+
 function gh(args, input) {
-  return execFileSync('gh', args, { encoding: 'utf8', input, stdio: [input ? 'pipe' : 'ignore', 'pipe', 'pipe'] });
+  try {
+    return execFileSync('gh', args, { encoding: 'utf8', input, stdio: [input ? 'pipe' : 'ignore', 'pipe', 'pipe'] });
+  } catch (error) {
+    throw ghError(error);
+  }
 }
 
 const PR = 'url state isDraft headRefName updatedAt title body authorAssociation author{login} repository{nameWithOwner} commits(last:1){nodes{commit{committedDate}}}';
@@ -166,7 +176,15 @@ const QUERY = `query($owner:String!,$repo:String!,$number:Int!){repository(owner
   comments(last:100){nodes{databaseId url body createdAt updatedAt authorAssociation author{login}}}}}}`;
 
 export function fetchIssueState(target, run = gh) {
-  const raw = run(['api', 'graphql', '-f', `query=${QUERY}`, '-F', `owner=${target.owner}`, '-F', `repo=${target.repo}`, '-F', `number=${target.number}`]);
+  let raw;
+  try {
+    raw = run(['api', 'graphql', '-f', `query=${QUERY}`, '-F', `owner=${target.owner}`, '-F', `repo=${target.repo}`, '-F', `number=${target.number}`]);
+  } catch (error) {
+    if (/Could not resolve to an Issue/.test(error.message)) {
+      throw new Error(`${target.owner}/${target.repo}#${target.number} is not an issue (a pull request number, or it does not exist); claims are checked on the issue a PR references`);
+    }
+    throw error;
+  }
   const issue = JSON.parse(raw).data?.repository?.issue;
   if (!issue) throw new Error(`issue not found: ${target.owner}/${target.repo}#${target.number}`);
   const flat = ({ commits, ...pr }) => ({ ...pr, author: pr.author?.login, repository: pr.repository?.nameWithOwner, headCommittedAt: commits?.nodes?.[0]?.commit?.committedDate });
