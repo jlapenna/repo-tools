@@ -209,7 +209,7 @@ test('36-hour cutoff includes recent ignored-file writes and Git ref activity',t
   let r=f.prune('--park-unmerged','--idle-hours','36');
   assert.match(r.stdout,/KEEP.*recent:git-ref/);
   for(const log of [join(f.primary,'.git','logs','refs','heads','feature'),join(f.primary,'.git','worktrees','checkout','logs','HEAD')]) {
-    const text=readFileSync(log,'utf8').replace(/ \d+ \+0000\t/g,' '+Math.floor(old.getTime()/1000)+' +0000\t');
+    const text=readFileSync(log,'utf8').replace(/ \d+ ([+-]\d{4})\t/g,(_,zone)=>' '+Math.floor(old.getTime()/1000)+' '+zone+'\t');
     writeFileSync(log,text);
   }
   r=f.prune('--park-unmerged','--idle-hours','36');
