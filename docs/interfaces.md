@@ -27,7 +27,6 @@ Nx-inferred targets are intentionally not listed. Runtime status is not inferred
 | repo-set-tmux-task-title | [bin/set-tmux-task-title.mjs](../bin/set-tmux-task-title.mjs) |
 | repo-sweep-worktrees | [bin/sweep-worktrees.sh](../bin/sweep-worktrees.sh) |
 | repo-watch-prs | [bin/watch-prs.sh](../bin/watch-prs.sh) |
-| repo-watch-run | [bin/watch-run.cjs](../bin/watch-run.cjs) |
 
 ## Skills
 

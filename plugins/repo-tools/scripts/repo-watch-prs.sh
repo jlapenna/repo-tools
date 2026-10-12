@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Watch armed PRs until every one merges or any one needs attention.
 #
-# The single-run monitor (repo-watch-run) answers "did this CI run pass?";
+# GitHub CLI's `gh run watch` answers "did this CI run pass?";
 # this script answers the auto-merge lifecycle question an agent session
 # actually has after `gh pr merge --auto`: "did my PRs land, and if not,
 # what do I need to fix?" It polls each PR and exits the moment anything

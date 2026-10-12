@@ -95,18 +95,15 @@ test('OpenCode configured skill source is the same well-formed repo-tools skill 
   assert.deepEqual(opencodeSkills, marketplaceSkills);
 });
 
-test('repo-tools plugin bundles executable CI watchers referenced by its skills', () => {
+test('repo-tools plugin bundles the executable auto-merge watcher referenced by its skills', () => {
   const pluginRoot = join(root, 'plugins/repo-tools');
-  const watchRun = join(pluginRoot, 'scripts/repo-watch-run.cjs');
   const watchPrs = join(pluginRoot, 'scripts/repo-watch-prs.sh');
 
-  for (const script of [watchRun, watchPrs]) {
-    assert.ok(existsSync(script), `${script} must be bundled with the plugin`);
-    assert.ok(
-      statSync(script).mode & constants.X_OK,
-      `${script} must remain executable`,
-    );
-  }
+  assert.ok(existsSync(watchPrs), `${watchPrs} must be bundled with the plugin`);
+  assert.ok(
+    statSync(watchPrs).mode & constants.X_OK,
+    `${watchPrs} must remain executable`,
+  );
 
   const ciMonitor = readFileSync(
     join(pluginRoot, 'skills/github-ci-monitor/SKILL.md'),
@@ -116,16 +113,8 @@ test('repo-tools plugin bundles executable CI watchers referenced by its skills'
     join(pluginRoot, 'skills/land-pr/SKILL.md'),
     'utf8',
   );
-  assert.match(ciMonitor, /scripts\/repo-watch-run\.cjs/);
   assert.match(ciMonitor, /scripts\/repo-watch-prs\.sh/);
   assert.match(landPr, /scripts\/repo-watch-prs\.sh/);
-
-  const runUsage = spawnSync(process.execPath, [watchRun], {
-    cwd: pluginRoot,
-    encoding: 'utf8',
-  });
-  assert.equal(runUsage.status, 1);
-  assert.match(runUsage.stderr, /^Usage: repo-watch-run/m);
 
   const prsUsage = spawnSync('bash', [watchPrs], {
     cwd: pluginRoot,

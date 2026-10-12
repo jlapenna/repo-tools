@@ -93,7 +93,6 @@ health checks.
 - `repo-set-tmux-task-title [--force <title>]` — set an empty tmux window task
   title from a Codex `UserPromptSubmit` hook payload, without overwriting a
   pinned title; `--force` explicitly pins or replaces a title for manual use.
-- `repo-watch-run` — watch one workflow run for a pull request or branch.
 - `repo-safe-remove-worktree` — validate and safely remove a completed
   feature worktree, including clean worktrees with initialized submodules.
 - `repo-sweep-worktrees [--repo <checkout>] [--base <ref>] [--delete]` —
@@ -266,8 +265,8 @@ The plugin exposes the authoritative skills listed in the generated inventory:
 
 - `worktree-hygiene` covers safe creation, use, and teardown in shared
   repository checkouts.
-- `github-ci-monitor` covers `repo-watch-run` and `repo-watch-prs`, including
-  protected auto-merge attention states.
+- `github-ci-monitor` uses GitHub CLI for workflow runs and PR checks, and
+  `repo-watch-prs` for protected auto-merge attention states.
 - `testing-policy` guides test, CI-check, and control-flag decisions.
 - `harness-maintenance` applies observed feedback to documentation, skills,
   context routes, and their owning contracts. Consumers keep local truth and
@@ -284,10 +283,11 @@ The plugin exposes the authoritative skills listed in the generated inventory:
   with risk-based verification, sequential merges, combined-main validation,
   and explicit separation from deployment and production-state checks.
 
-The plugin bundles the two CI watcher scripts under `scripts/`, so
+The plugin bundles the auto-merge watcher under `scripts/`, so
 `github-ci-monitor` and `land-pr` work in a plugin-only installation. The npm
-package exposes the same implementations through the `repo-watch-run` and
-`repo-watch-prs` commands on `PATH`.
+package exposes the same implementation through `repo-watch-prs` on `PATH`.
+Workflow runs use `gh run list --commit <sha>` and `gh run watch <run-id>`;
+PR checks use `gh pr checks`. See the skill for run selection and exit status.
 
 ## Provider compatibility
 
