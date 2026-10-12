@@ -10,7 +10,7 @@
 // A claim is live when either:
 // - an open pull request is linked to the issue (closing reference, or a
 //   `Refs`/`Closes`/`Fixes`/`Resolves` line naming it) and was updated within
-//   --pr-stale-after (default 24h). A draft PR is the strongest claim: it is
+//   --pr-stale-after (default 4h). A draft PR is the strongest claim: it is
 //   visible to every executor and survives its author dying; or
 // - the newest `work-claim:v1` marker comment has a `last-active` within
 //   --stale-after (default 60m). Claimants refresh it with --heartbeat.
@@ -28,10 +28,14 @@
 // as owner/repo#N; its bare #N means an issue in its own repository.
 //
 // Statuses: closed, live, stale (claim evidence exists but is old; adopt the
-// listed branch instead of starting over), free (no claim evidence).
+// listed branch instead of starting over), free (no claim evidence). With
+// --self, the output adds the caller's next action (see nextAction). Pass
+// your session label (the heartbeat --owner) and your branch; interactive
+// sessions often share one login, so pass a login only when it identifies
+// this executor alone (a fleet bot whose prior attempts are its own).
 //
 // Usage:
-//   repo-claim-status <owner/repo#N> [--json] [--stale-after 60m] [--pr-stale-after 24h] [--trust-bot <login>]...
+//   repo-claim-status <owner/repo#N> [--json] [--stale-after 60m] [--pr-stale-after 4h] [--trust-bot <login>]... [--self <login-or-owner>]...
 //   repo-claim-status <owner/repo#N> --heartbeat --owner <label> [--branch <name>] [--note <text>]
 // Exit codes (check mode): 0 free or closed, 10 live, 11 stale, 2 usage, 1 error.
 import { execFileSync } from 'node:child_process';
@@ -87,7 +91,7 @@ function referencesIssue(body, target, sameRepo) {
 
 // Pure classification over fetched GitHub state; `data` is the shape returned
 // by fetchIssueState. Kept separate so tests need no network.
-export function classify(data, target, { now = Date.now(), staleAfterMs = 3_600_000, prStaleAfterMs = 86_400_000, trustedBots = [] } = {}) {
+export function classify(data, target, { now = Date.now(), staleAfterMs = 3_600_000, prStaleAfterMs = 4 * 3_600_000, trustedBots = [] } = {}) {
   if (data.state === 'CLOSED') return { status: 'closed', evidence: [{ kind: 'issue', detail: 'issue is closed' }] };
   const evidence = [];
   const seen = new Set();
@@ -107,6 +111,7 @@ export function classify(data, target, { now = Date.now(), staleAfterMs = 3_600_
     evidence.push({
       kind: 'pull-request',
       live: ageMs <= prStaleAfterMs,
+      author: pr.author,
       url: pr.url,
       branch: pr.headRefName,
       draft: pr.isDraft,
@@ -128,6 +133,7 @@ export function classify(data, target, { now = Date.now(), staleAfterMs = 3_600_
     } else if (LEGACY.test(comment.body ?? '')) {
       evidence.push({
         kind: 'legacy-comment',
+        author: comment.author,
         live: now - Date.parse(comment.createdAt) <= staleAfterMs,
         url: comment.url,
         lastActive: comment.createdAt,
@@ -140,6 +146,7 @@ export function classify(data, target, { now = Date.now(), staleAfterMs = 3_600_
     evidence.push({
       kind: 'heartbeat',
       live: now - Date.parse(lastActive) <= staleAfterMs,
+      author: comment.author,
       url: comment.url,
       owner: marker.owner,
       branch: marker.branch,
@@ -150,6 +157,35 @@ export function classify(data, target, { now = Date.now(), staleAfterMs = 3_600_
   const status = evidence.some((item) => item.live) ? 'live' : evidence.length ? 'stale' : 'free';
   const adopt = evidence.find((item) => item.kind === 'pull-request')?.branch ?? newestMarker?.marker.branch;
   return { status, evidence, ...(status === 'stale' && adopt ? { adoptBranch: adopt } : {}) };
+}
+
+// What a would-be claimant should do, given who it is. `self` lists the
+// caller's GitHub logins and heartbeat owner labels.
+// - proceed: nothing to respect; claim with an early draft PR or heartbeat.
+// - continue-own: every live claim is the caller's own (a prior attempt).
+// - adopt: the claim is stale; continue on its branch instead of a new one,
+//   and --heartbeat at once so a resuming previous owner stands down.
+// - stand-down: someone else is live; coordinate, do not start parallel work.
+// - none: the issue is closed.
+export function nextAction(result, self = []) {
+  const mine = new Set(self.map((name) => name.toLowerCase()));
+  // A heartbeat names its session, so only its owner label makes it mine. Many
+  // sessions push as one login, so a PR is mine by author or by my branch.
+  const isMine = (item) => {
+    const names = item.kind === 'heartbeat' ? [item.owner] : [item.author, item.branch];
+    return names.some((name) => name && mine.has(name.toLowerCase()));
+  };
+  if (result.status === 'closed') return { action: 'none' };
+  if (result.status === 'free') return { action: 'proceed' };
+  if (result.status === 'live') {
+    const foreign = result.evidence.filter((item) => item.live && !isMine(item));
+    if (foreign.length === 0) {
+      const own = result.evidence.find((item) => item.live && item.branch);
+      return { action: 'continue-own', ...(own ? { branch: own.branch } : {}) };
+    }
+    return { action: 'stand-down', liveClaims: foreign.map((item) => item.url) };
+  }
+  return result.adoptBranch ? { action: 'adopt', branch: result.adoptBranch } : { action: 'proceed' };
 }
 
 // Report gh failures by gh's own message, not the (long) command line.
@@ -212,7 +248,7 @@ export function heartbeat(target, { owner, branch, note }, { run = gh, now = new
 
 function parseArgs(argv) {
   const envBots = (process.env.REPO_CLAIM_TRUSTED_BOTS ?? '').split(',').map((b) => b.trim()).filter(Boolean);
-  const opts = { json: false, heartbeat: false, staleAfter: '60m', prStaleAfter: '24h', trustedBots: envBots };
+  const opts = { json: false, heartbeat: false, staleAfter: '60m', prStaleAfter: '4h', trustedBots: envBots, self: [] };
   const rest = [];
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -228,6 +264,7 @@ function parseArgs(argv) {
     else if (arg === '--stale-after') opts.staleAfter = value();
     else if (arg === '--pr-stale-after') opts.prStaleAfter = value();
     else if (arg === '--trust-bot') opts.trustedBots.push(value());
+    else if (arg === '--self') opts.self.push(value());
     else if (arg === '-h' || arg === '--help') opts.help = true;
     else if (arg.startsWith('-')) throw new Error(`unknown option: ${arg}`);
     else rest.push(arg);
@@ -259,18 +296,20 @@ function main(argv) {
     prStaleAfterMs: parseDuration(opts.prStaleAfter),
     trustedBots: opts.trustedBots,
   });
+  const next = opts.self.length ? nextAction(result, opts.self) : undefined;
   if (opts.json) {
-    process.stdout.write(`${JSON.stringify(result)}\n`);
+    process.stdout.write(`${JSON.stringify(next ? { ...result, next } : result)}\n`);
   } else {
     process.stdout.write(`${result.status}\n`);
     for (const item of result.evidence) process.stdout.write(`  ${item.live ? 'live ' : 'stale'} ${item.detail}\n`);
     if (result.adoptBranch) process.stdout.write(`  adopt: continue on ${result.adoptBranch} instead of starting a new branch\n`);
+    if (next) process.stdout.write(`next: ${next.action}${next.branch ? ` ${next.branch}` : ''}${next.liveClaims ? ` (${next.liveClaims.join(', ')})` : ''}\n`);
   }
   return EXIT[result.status];
 }
 
 function readUsage() {
-  return 'usage: repo-claim-status <owner/repo#N> [--json] [--stale-after 60m] [--pr-stale-after 24h] [--trust-bot <login>]...\n' +
+  return 'usage: repo-claim-status <owner/repo#N> [--json] [--stale-after 60m] [--pr-stale-after 4h] [--trust-bot <login>]... [--self <login-or-owner>]...\n' +
     '       repo-claim-status <owner/repo#N> --heartbeat --owner <label> [--branch <name>] [--note <text>]';
 }
 
