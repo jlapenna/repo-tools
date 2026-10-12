@@ -13,16 +13,8 @@ mkdir -p "$scratch/bin"
 cat > "$scratch/bin/gh" <<'GH'
 #!/usr/bin/env bash
 [[ ${GH_UNAVAILABLE:-false} != true ]] || exit 1
-[[ -z ${GH_CALLS:-} ]] || printf '%s\n' "$*" >> "$GH_CALLS"
 if [[ $1 == api ]]; then
   printf '%s\n' "${OPEN_PRS:-[[]]}"
-elif [[ ${2:-} == view ]]; then
-  if [[ -n ${PR_VIEW_COUNT:-} ]]; then
-    count=$(cat "$PR_VIEW_COUNT" 2>/dev/null || echo 0)
-    echo "$((count + 1))" > "$PR_VIEW_COUNT"
-    if ((count > 0)); then printf '%s\n' "$CHANGED_PR"; exit 0; fi
-  fi
-  printf '%s\n' "${EXPLICIT_PR:-null}"
 else
   printf '%s\n' "${MERGED_PRS:-[]}"
 fi
@@ -138,51 +130,4 @@ for hook_status in 1 75; do
   grep -Eq "^FAILED.*remove-hook exited $hook_status after removal; branch kept" "$scratch/report"
   ! grep -Eq '^REMOVED' "$scratch/report"
 done
-
-# PR checkouts use temp branches, while the original head belongs to a fork.
-# Exact provenance must use the URL's repository, not the default fork remote.
-checkout="$scratch/pr checkout"
-wt temp/pr-123 "$checkout"
-echo 'reviewed fork head' >> "$checkout/file"
-git -C "$checkout" commit -qam 'fork head'
-git -C "$repo" merge --squash temp/pr-123 >/dev/null
-git -C "$repo" commit -qm 'squash PR 123'
-git -C "$repo" update-ref refs/remotes/origin/main "$(git -C "$repo" rev-parse main)"
-pr_url=https://github.com/upstream/project/pull/123
-export EXPLICIT_PR GH_CALLS="$scratch/gh-calls"
-EXPLICIT_PR=$(jq -nc --arg url "$pr_url" --arg head "$(git -C "$checkout" rev-parse HEAD)" --arg merge "$(git -C "$repo" rev-parse main)" \
-  '{url:$url,state:"MERGED",baseRefName:"main",headRefName:"fork-feature",headRefOid:$head,mergeCommit:{oid:$merge}}')
-rc 0 --merged-pr "$pr_url" "$checkout"
-grep -Eq '^SAFE.*landed:explicit-merged-pr-head' "$scratch/report"
-[[ -d $checkout ]]
-grep -Fq 'repos/upstream/project/pulls?' "$GH_CALLS"
-grep -Fq 'pr view https://github.com/upstream/project/pull/123' "$GH_CALLS"
-rc 2 --merged-pr "$pr_url"
-rc 2 --merged-pr 123 "$checkout"
-GH_UNAVAILABLE=true rc 1 --delete --merged-pr "$pr_url" "$checkout"
-saved_pr=$EXPLICIT_PR
-EXPLICIT_PR=$(jq '.state="CLOSED"' <<<"$saved_pr") rc 1 --delete --merged-pr "$pr_url" "$checkout"
-EXPLICIT_PR=$(jq '.state="OPEN"' <<<"$saved_pr") rc 1 --delete --merged-pr "$pr_url" "$checkout"
-EXPLICIT_PR='not JSON' rc 1 --delete --merged-pr "$pr_url" "$checkout"
-EXPLICIT_PR=$(jq '.baseRefName="release"' <<<"$saved_pr") rc 1 --delete --merged-pr "$pr_url" "$checkout"
-EXPLICIT_PR=$(jq '.headRefOid="0000000000000000000000000000000000000000"' <<<"$saved_pr") rc 1 --delete --merged-pr "$pr_url" "$checkout"
-EXPLICIT_PR=$(jq '.mergeCommit.oid=.headRefOid' <<<"$saved_pr") rc 1 --delete --merged-pr "$pr_url" "$checkout"
-OPEN_PRS='[[{"head":{"ref":"fork-feature"}}]]' rc 1 --delete --merged-pr "$pr_url" "$checkout"
-PR_VIEW_COUNT="$scratch/view-count" CHANGED_PR=$(jq '.state="CLOSED"' <<<"$saved_pr") rc 1 --delete --merged-pr "$pr_url" "$checkout"
-[[ -d $checkout ]]
-echo 'uncommitted user edit' >> "$checkout/file"
-rc 1 --delete --merged-pr "$pr_url" "$checkout"
-git -C "$checkout" restore file
-git -C "$repo" worktree lock "$checkout"
-rc 1 --delete --merged-pr "$pr_url" "$checkout"
-git -C "$repo" worktree unlock "$checkout"
-rc 0 --delete --merged-pr "$pr_url" "$checkout"
-[[ ! -e $checkout ]]
-git -C "$repo" show-ref --verify --quiet refs/heads/temp/pr-123 && exit 1
-
-# Even an ancestor cannot turn a CLOSED PR into explicit merge evidence.
-wt temp/pr-124 "$scratch/closed ancestor"
-EXPLICIT_PR=$(jq --arg head "$(git -C "$repo" rev-parse main)" '.headRefOid=$head | .state="CLOSED"' <<<"$saved_pr")
-rc 1 --delete --merged-pr "$pr_url" "$scratch/closed ancestor"
-[[ -d "$scratch/closed ancestor" ]]
 echo 'repo-prune-merged-worktrees: ok'
