@@ -190,6 +190,32 @@ inside the locked transaction. A resource refusal discards its prepared
 snapshot and ref only while the original checkout remains intact; partial
 removal failures retain recovery evidence.
 
+## Standing worktree retention
+
+An owner's standing seven-day retention grant authorizes retirement of linked
+checkouts older than seven days within the approved repositories without asking
+for permission again. By then, work should have been pushed to a remote branch
+or its checkout removed. An unmerged tip or an open PR does not revoke that
+checkout-retirement authorization. This procedure does not itself grant access
+or expand the owner's approved scope.
+
+Measure seven days from the worktree's creation, not its HEAD commit date;
+recent edits do not make an old checkout new. Use reliable checkout creation
+evidence, such as the Git link file's filesystem birth time. Unknown creation
+age is not evidence of expiry. Explicit narrower instructions for a task win.
+
+Retain branches and exact committed history, including protected refs for
+detached HEADs, and preserve private local inputs in verified recovery archives.
+The rule does not authorize deleting remote branches or assuming every local
+commit was uploaded. Keep live or locked checkouts and preserve dirty work
+before removal; do not kill another session or force away unarchived edits.
+
+`repo-prune-merged-worktrees --park-inactive --idle-hours 168` implements a
+seven-day inactivity check, not a creation-age check. It can retire the subset
+that also meets that window using the verified archive/restore workflow; do not
+claim it implements the full creation-age rule. Retain the process, archive and
+consumer-resource guards described above.
+
 ## Syncing the primary checkout after a merge
 
 Treat syncing the primary checkout to the latest remote base as the final
