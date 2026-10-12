@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { classify, fetchIssueState, heartbeat, parseDuration, parseMarker, parseTarget, renderMarker } from './claim-status.mjs';
+import { classify, fetchIssueState, ghError, heartbeat, parseDuration, parseMarker, parseTarget, renderMarker } from './claim-status.mjs';
 
 const script = fileURLToPath(new URL('./claim-status.mjs', import.meta.url));
 const target = { owner: 'acme', repo: 'app', number: 42 };
@@ -188,4 +188,11 @@ test('a future-dated head commit cannot outlive the PR server timestamp', () => 
   const result = classify(state({ pullRequests: [forged] }), target, opts);
   assert.equal(result.status, 'stale');
   assert.equal(result.evidence[0].lastActive, new Date(NOW - 30 * 3_600_000).toISOString());
+});
+
+test('gh failures surface gh\'s message and a PR number gets a clear error', () => {
+  const failure = Object.assign(new Error('Command failed: gh api graphql -f query=...very long...'), { stderr: 'some noise\ngh: Could not resolve to an Issue with the number of 7.\n' });
+  assert.equal(ghError(failure).message, 'Could not resolve to an Issue with the number of 7.');
+  assert.throws(() => fetchIssueState(target, () => { throw ghError(failure); }), /acme\/app#42 is not an issue/);
+  assert.throws(() => fetchIssueState(target, () => { throw new Error('HTTP 502'); }), /HTTP 502/);
 });
