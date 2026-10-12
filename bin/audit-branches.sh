@@ -35,6 +35,10 @@ fi
 repo=$(git rev-parse --show-toplevel)
 [[ $fetch == false ]] || git fetch --prune origin
 base_sha=$(git rev-parse --verify "$base^{commit}")
+base_ref=$(git rev-parse --symbolic-full-name "$base")
+if [[ $named == true && ( $base_ref == "refs/heads/$selected_branch" || $base_ref == "refs/remotes/origin/$selected_branch" ) ]]; then
+  echo 'cannot select the base branch' >&2; exit 64
+fi
 cleanup_load_prs "$repo" || true
 [[ $closed_pr_heads == false ]] || cleanup_load_closed_prs "$repo" || true
 # Proven merged, or (when only unmerged) restorable from a closed PR, or never

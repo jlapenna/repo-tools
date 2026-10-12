@@ -63,6 +63,7 @@ test("named cleanup isolates the selected branch and reports refused deletion", 
     refuses("--branch", "unmerged", "--delete-remote");
     assert.equal(run("git", "--git-dir", remote, "rev-parse", "refs/heads/unmerged"), unmerged);
     refuses("--branch", "main", "--delete-remote");
+    refuses("--base", "refs/heads/main", "--branch", "main", "--delete-remote");
     refuses("--branch", "", "--delete-remote");
     refuses("--branch", "HEAD", "--delete-remote");
     refuses("--branch", "--delete-remote");
