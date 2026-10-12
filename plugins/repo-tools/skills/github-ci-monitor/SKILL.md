@@ -24,11 +24,17 @@ gh run list --commit "$expected_sha" --workflow CI --event push \
 ```
 
 Verify the returned SHA and event match the intended validation, then watch
-that exact run ID:
+that exact run ID within the owning task's remaining deadline. With GNU
+`timeout`, a 30-minute example budget is:
 
 ```bash
-gh run watch <run-id> --exit-status --compact --interval 30
+timeout 30m gh run watch <run-id> --exit-status --compact --interval 30
 ```
+
+Use the task's remaining budget rather than resetting it for each command.
+Where `timeout` is unavailable, use the harness's bounded execution and stop
+the task-owned watcher at the deadline. Timeout exit 124 means validation is
+still pending, not successful.
 
 No matching run means validation is not yet established. Check workflow
 creation within the task's deadline; do not fall back to an older branch run
@@ -39,6 +45,20 @@ ambiguous, use `gh api` to query the workflow's runs with `head_sha` and
 
 `--exit-status` makes a failed run return nonzero. Inspect failures with
 `gh run view <run-id> --log-failed` and continue the owning task's fix workflow.
+
+GitHub CLI's [run watcher](https://cli.github.com/manual/gh_run_watch) does not
+support fine-grained PAT authentication. With those credentials and Actions
+read permission, inspect the exact run through the
+[Actions API](https://docs.github.com/en/rest/actions/workflow-runs#get-a-workflow-run):
+
+```bash
+gh api repos/{owner}/{repo}/actions/runs/<run-id> \
+  --jq '{headSha: .head_sha, event, status, conclusion}'
+```
+
+Only a matching SHA/event with `completed` status and `success` conclusion is
+passing evidence. A nonterminal run remains pending; report the watch
+limitation and continue independent work within the task's deadline.
 
 For a PR's required checks rather than one workflow run, use:
 
