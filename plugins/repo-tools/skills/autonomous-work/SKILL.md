@@ -69,6 +69,14 @@ same blocker, expand into an unrelated backlog, or add a polling service to
 keep the session busy. Finish independent work before declaring the task
 blocked.
 
+Before handing back a next step or asking approval for routine follow-through,
+check its live state: PR and issue comments, workflow or deploy runs, or the
+resource's own status output. Another session may already have done it. If it
+is done, say so with the evidence. If it is pending and within the request, do
+it through the repository's procedure, including any required dry run. Leave a
+step to the user only when it needs their credentials or a decision only they
+can make, and name which.
+
 Send concise, nonblocking updates with what now works, consequential
 assumptions, and what remains. A status question from the user is not a reason
 to abandon the active task. Do not ask whether to continue.
