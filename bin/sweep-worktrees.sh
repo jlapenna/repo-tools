@@ -81,35 +81,35 @@ worktree_evidence() {
   # merge. Local inactivity/occupancy and preservation are its authority; PRs
   # and branches remain available. No GitHub lookup or write is needed.
   if [[ $PARK_INACTIVE == true ]]; then echo parkable:inactive; return 0; fi
-    if reason=$(cleanup_evidence "$PRIMARY" "$BASE" "$1" "$2"); then
-      echo "$reason"; return 0
+  if reason=$(cleanup_evidence "$PRIMARY" "$BASE" "$1" "$2"); then
+    echo "$reason"; return 0
+  fi
+  if [[ $PARK_UNMERGED == true && $reason == unverified:unmerged ]]; then
+    # Published work may use a different local name. Keep an upstream alias
+    # or a commit included in an open PR, even though parking preserves it.
+    local upstream known_tips known_json
+    upstream=$(git -C "$PRIMARY" config "branch.$1.merge" 2>/dev/null || true)
+    upstream=${upstream#refs/heads/}
+    if [[ -n $upstream ]] && jq -e --arg branch "$upstream" \
+      'any(.[]; .state=="OPEN" and .headRefName==$branch and
+        .headRepository!=null and .headRepository==.baseRepository)' <<<"$CLEANUP_PRS" >/dev/null; then
+      echo open-pr; return 1
     fi
-    if [[ $PARK_UNMERGED == true && $reason == unverified:unmerged ]]; then
-      # Published work may use a different local name. Keep an upstream alias
-      # or a commit included in an open PR, even though parking preserves it.
-      local upstream known_tips known_json
-      upstream=$(git -C "$PRIMARY" config "branch.$1.merge" 2>/dev/null || true)
-      upstream=${upstream#refs/heads/}
-      if [[ -n $upstream ]] && jq -e --arg branch "$upstream" \
-        'any(.[]; .state=="OPEN" and .headRefName==$branch and
-          .headRepository!=null and .headRepository==.baseRepository)' <<<"$CLEANUP_PRS" >/dev/null; then
-        echo open-pr; return 1
-      fi
-      # Query known refs once instead of spawning Git for every open PR.
-      # Large upstreams can have thousands of unrelated/unknown fork heads.
-      known_tips=$(git -C "$PRIMARY" for-each-ref --contains "$2" \
-        --format='%(objectname)' refs/heads/ refs/remotes/) || {
-        echo unverified:ref-ownership-check-failed; return 1;
-      }
-      known_json=$(printf '%s\n' "$known_tips" | jq -Rsc 'split("\n")|map(select(.!=""))')
-      if printf '%s\n%s\n' "$CLEANUP_PRS" "$known_json" | jq -es \
-        '.[0] as $prs | (.[1]|map({key:.,value:true})|from_entries) as $known |
-         any($prs[]; .state=="OPEN" and $known[.headRefOid // ""]==true)' >/dev/null; then
-        echo open-pr; return 1
-      fi
-      echo parkable:unmerged; return 0
+    # Query known refs once instead of spawning Git for every open PR.
+    # Large upstreams can have thousands of unrelated/unknown fork heads.
+    known_tips=$(git -C "$PRIMARY" for-each-ref --contains "$2" \
+      --format='%(objectname)' refs/heads/ refs/remotes/) || {
+      echo unverified:ref-ownership-check-failed; return 1;
+    }
+    known_json=$(printf '%s\n' "$known_tips" | jq -Rsc 'split("\n")|map(select(.!=""))')
+    if printf '%s\n%s\n' "$CLEANUP_PRS" "$known_json" | jq -es \
+      '.[0] as $prs | (.[1]|map({key:.,value:true})|from_entries) as $known |
+       any($prs[]; .state=="OPEN" and $known[.headRefOid // ""]==true)' >/dev/null; then
+      echo open-pr; return 1
     fi
-    echo "$reason"; return 1
+    echo parkable:unmerged; return 0
+  fi
+  echo "$reason"; return 1
 }
 
 live_count() { "$SCANNER" "$1" 2>/dev/null | grep -cE '^[0-9]+ ' || true; }

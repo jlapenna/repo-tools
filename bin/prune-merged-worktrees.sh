@@ -31,7 +31,7 @@ checkout/ref activity within N hours, checked again before removal.
 --idle-hours window. It archives even an open-PR or already-merged checkout,
 always keeps branches/history, and performs no GitHub reads or writes.
 Local writes, live processes, dirty/locked/nested checkouts and resource
-adapter refusals still keep it. 
+adapter refusals still keep it.
 
 An optional remove hook receives <worktree-path> <safe-remover-executable> after
 merge/ownership verification. It may hold consumer resource locks, invoke the
