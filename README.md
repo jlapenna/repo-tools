@@ -129,7 +129,9 @@ health checks.
   branch pushed to after its PR closed is kept. Both rules are opt-in; without
   them unmerged work is kept.
   Local and remote branch deletion require separate flags; remote deletion uses
-  the originally audited SHA and runs push hooks.
+  the originally audited SHA and runs push hooks. A branch already absent from
+  the live remote succeeds without an empty push; a failed remote lookup stops
+  cleanup rather than claiming absence.
 - `repo-nx` — run Nx with portable cache and linked-worktree safeguards.
   Explicit environment wins, followed by a worktree/primary checkout's
   `.nx-remote-cache.env`, then the account-wide

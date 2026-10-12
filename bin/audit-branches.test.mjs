@@ -5,6 +5,49 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+
+test("remote cleanup succeeds after auto-deletion but fails when the remote is unavailable", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "branch-auto-delete-test-"));
+  const repo = path.join(root, "repo"), remote = path.join(root, "remote.git"), bin = path.join(root, "bin");
+  fs.mkdirSync(repo);
+  fs.mkdirSync(bin);
+  const env = {
+    ...process.env,
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_CONFIG_GLOBAL: "/dev/null",
+    PATH: bin + ":" + process.env.PATH,
+  };
+  const run = (...args) => execFileSync(args[0], args.slice(1), {
+    cwd: repo, env, encoding: "utf8", timeout: 10000,
+    stdio: ["ignore", "pipe", "pipe"],
+  }).trim();
+  try {
+    run("git", "init", "--bare", remote);
+    run("git", "init", "-b", "main");
+    run("git", "config", "user.name", "Fixture");
+    run("git", "config", "user.email", "fixture@example.invalid");
+    run("git", "commit", "--allow-empty", "-m", "base");
+    const base = run("git", "rev-parse", "HEAD");
+    run("git", "remote", "add", "origin", remote);
+    run("git", "push", "-u", "origin", "main", `${base}:refs/heads/landed`);
+    // Model GitHub's auto-deletion without refreshing the local tracking ref.
+    run("git", "--git-dir", remote, "update-ref", "-d", "refs/heads/landed");
+    assert.equal(run("git", "rev-parse", "refs/remotes/origin/landed"), base);
+    fs.writeFileSync(path.join(repo, ".git/hooks/pre-push"), "#!/bin/sh\nexit 17\n", { mode: 0o755 });
+    fs.writeFileSync(path.join(bin, "gh"), '#!/bin/sh\ncase "$1" in\napi) echo "[[]]";;\npr) echo "[]";;\n*) exit 2;;\nesac\n', { mode: 0o755 });
+    const script = fileURLToPath(new URL("./audit-branches.sh", import.meta.url));
+    run("bash", script, "--base", "main", "--delete-remote");
+    assert.equal(run("git", "ls-remote", "--heads", "origin", "refs/heads/landed"), "");
+
+    // A lookup failure is unknown state, not proof the branch is absent.
+    fs.renameSync(remote, remote + ".offline");
+    assert.throws(() => run("bash", script, "--base", "main", "--delete-remote"));
+    assert.equal(run("git", "rev-parse", "refs/remotes/origin/landed"), base);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("cleanup retains closed, gone, reused, open and checked-out work; deletes proven merged heads", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "branch-audit-test-"));
   const repo = path.join(root, "repo"),
