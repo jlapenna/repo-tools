@@ -14,9 +14,13 @@ cat > "$scratch/bin/gh" <<'GH'
 #!/usr/bin/env bash
 [[ ${GH_UNAVAILABLE:-false} != true ]] || exit 1
 if [[ $1 == api ]]; then
-  printf '%s\n' "${OPEN_PRS:-[[]]}"
+  case "$4" in
+    */commits/*) tip=${4##*/commits/}; tip=${tip%%/*}
+      printf '%s\n' "${MERGED_PRS:-[]}" | jq --arg tip "$tip" '[[.[]|select(.headRefOid==$tip)|{state:"closed",head:{sha:.headRefOid},merged_at:"2026-08-25T00:00:00Z",merge_commit_sha:.mergeCommit.oid}]]';;
+    *) printf '%s\n' "${OPEN_PRS:-[[]]}";;
+  esac
 else
-  printf '%s\n' "${MERGED_PRS:-[]}"
+  exit 1
 fi
 GH
 chmod +x "$scratch/bin/gh"

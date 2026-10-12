@@ -36,7 +36,21 @@ function fixture(t,{detached=false,merged=false,oldCommits=false}={}) {
     git('merge','--squash',head);git('commit','-qm','squash');
     env.MERGED_PRS_JSON=JSON.stringify([{headRefName:'original-name',headRefOid:head,mergeCommit:{oid:git('rev-parse','HEAD')}}]);
   }
-  writeFileSync(join(bins,'gh'),'#!/bin/sh\nif [ "$FAIL_PR_LOOKUP" = yes ]; then exit 1; fi\nif [ "$1" = api ]; then printf \'[%s]\\n\' "$OPEN_PRS_JSON"; else printf \'%s\\n\' "$MERGED_PRS_JSON"; fi\n',{mode:0o755});
+  writeFileSync(join(bins,'gh'),`#!/bin/sh
+if [ "$FAIL_PR_LOOKUP" = yes ]; then exit 1; fi
+[ "$1" = api ] || exit 2
+case "$4" in
+  */commits/*)
+    if [ "$FAIL_ASSOCIATED" = yes ]; then
+      [ -z "$ASSOCIATED_ERROR_JSON" ] || printf '%s\\n' "$ASSOCIATED_ERROR_JSON"
+      exit 1
+    fi
+    if [ -n "$ASSOCIATED_PRS_JSON" ]; then printf '%s\\n' "$ASSOCIATED_PRS_JSON"; exit; fi
+    tip=\${4##*/commits/}; tip=\${tip%%/*}
+    printf '%s\\n' "$MERGED_PRS_JSON" | jq --arg tip "$tip" '[[.[] | select(.headRefOid==$tip) | {state:"closed",head:{sha:.headRefOid},merged_at:"2026-08-25T00:00:00Z",merge_commit_sha:.mergeCommit.oid}]]';;
+  *) printf '[%s]\\n' "$OPEN_PRS_JSON";;
+esac
+`,{mode:0o755});
   env.PATH=bins+':'+env.PATH;
   const prune=(...args)=>run('bash',[join(here,'prune-merged-worktrees.sh'),'--repo',primary,'--base','main',...args,path]);
   const restore=(archive,...args)=>run('bash',[join(here,'restore-worktree.sh'),archive,...args]);
@@ -47,11 +61,32 @@ function fixture(t,{detached=false,merged=false,oldCommits=false}={}) {
   return {root,primary,path,bins,env,run,git,head,prune,restore,archives};
 }
 
-test('renamed and detached exact merged heads are removable',t=>{
+test('old squash merges are discovered by commit for renamed and detached checkouts',t=>{
   for(const detached of [false,true]) {
     const f=fixture(t,{detached,merged:true});
     const r=f.prune('--delete');assert.equal(r.status,0,r.stderr+r.stdout);
     assert.match(r.stdout,/REMOVED/);assert.equal(existsSync(f.path),false);
+  }
+});
+
+test('associated PR evidence preserves mismatched, unmerged and unverifiable checkouts',t=>{
+  for(const kind of ['different-head','wrong-base','closed-unmerged','new-open','malformed','outage','unknown-commit','other-422']) {
+    const f=fixture(t,{merged:true});
+    const proof={state:'closed',head:{sha:f.head},merged_at:'2026-08-25T00:00:00Z',merge_commit_sha:f.git('rev-parse','main')};
+    if(kind==='different-head')proof.head.sha=f.git('rev-parse','main');
+    if(kind==='wrong-base')proof.merge_commit_sha=f.head;
+    if(kind==='closed-unmerged')proof.merged_at=null;
+    if(kind==='new-open'){proof.state='open';proof.merged_at=null;}
+    f.env.ASSOCIATED_PRS_JSON=kind==='malformed'?'[{"unexpected":true}]':JSON.stringify([[proof]]);
+    if(kind==='outage')f.env.FAIL_ASSOCIATED='yes';
+    if(kind==='unknown-commit'||kind==='other-422') {
+      f.env.FAIL_ASSOCIATED='yes';
+      f.env.ASSOCIATED_ERROR_JSON=JSON.stringify([{status:'422',message:kind==='unknown-commit'?'No commit found for SHA: '+f.head:'Validation failed'}]);
+    }
+    const r=f.prune('--delete');
+    assert.equal(r.status,1,r.stderr+r.stdout);
+    assert.equal(existsSync(f.path),true);
+    assert.equal(f.git('rev-parse','feature'),f.head);
   }
 });
 
