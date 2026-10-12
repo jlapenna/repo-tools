@@ -23,7 +23,7 @@ while (($#)); do
     --branch) [[ $# -ge 2 ]] || exit 64; selected_branch=$2; named=true; shift ;;
     --no-pr-days) [[ $# -ge 2 && $2 =~ ^[0-9]+$ ]] || exit 64; no_pr_days=$2; shift ;;
     --closed-pr-heads) closed_pr_heads=true ;;
-    -h|--help) sed -n '2,11p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,/^set /{ /^set /d; p; }' "$0"; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 64 ;;
   esac
   shift
