@@ -103,6 +103,12 @@ cleanup_delete_branch() {
   local repo=$1 branch=$2 tip=$3 remote=$4
   cleanup_branch_occupied "$repo" "$branch" && { echo 'occupied' >&2; return 1; }
   if [[ $remote == true ]]; then
+    # GitHub may already have deleted the branch while tracking refs are stale.
+    # An empty push still runs hooks, but carries no deletion for a worktree
+    # guard to recognize. Lookup failure must never be treated as absence.
+    local remote_head
+    remote_head=$(git -C "$repo" ls-remote --heads origin "refs/heads/$branch") || return 1
+    [[ -n $remote_head ]] || return 0
     git -C "$repo" push --force-with-lease="refs/heads/$branch:$tip" origin ":refs/heads/$branch"
   else
     # Compare-and-delete: never discard a newer tip. Do not use branch -D,

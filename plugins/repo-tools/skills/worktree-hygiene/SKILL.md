@@ -133,7 +133,13 @@ removes anything. Stop task-owned background watchers before cleanup, and do not
 kill another session to turn KEEP into SAFE.
 
 Standalone local/remote branches use `repo-audit-branches`; its `--delete`
-and `--delete-remote` flags are independent. Remote removal binds the push to the
+and `--delete-remote` flags are independent. After safe worktree teardown, use
+`repo-audit-branches --base origin/main --fetch --branch <merged-head> --delete-remote`
+from the primary checkout to finish only that task's remote cleanup. Capture
+the merged PR's head branch name before removing its worktree. Omit `--branch`
+only when repository-wide branch cleanup is authorized. Named deletion returns
+nonzero for a retained branch; an already absent remote succeeds only after a
+successful live lookup. Remote removal binds the push to the
 audited SHA and runs hooks. A closed PR or gone upstream is not proof that
 unmerged work may be discarded. The checker has two opt-in exceptions: a
 branch that never had a PR (nor did its upstream name) is abandoned once its
