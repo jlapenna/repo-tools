@@ -9,8 +9,8 @@ const target = { owner: 'acme', repo: 'app', number: 42 };
 const NOW = Date.parse('2026-10-12T12:00:00Z');
 const ago = (minutes) => new Date(NOW - minutes * 60_000).toISOString();
 const opts = { now: NOW, staleAfterMs: 60 * 60_000, prStaleAfterMs: 24 * 3_600_000 };
-const pr = (over = {}) => ({ url: 'https://github.com/acme/app/pull/7', state: 'OPEN', isDraft: true, headRefName: 'work/42', updatedAt: ago(5), title: 'wip', body: '', ...over });
-const comment = (body, over = {}) => ({ id: 1, url: 'https://github.com/acme/app/issues/42#c1', body, createdAt: ago(10), updatedAt: ago(10), author: 'bot', ...over });
+const pr = (over = {}) => ({ url: 'https://github.com/acme/app/pull/7', state: 'OPEN', isDraft: true, headRefName: 'work/42', updatedAt: ago(5), title: 'wip', body: '', author: 'dev', authorAssociation: 'MEMBER', repository: 'acme/app', ...over });
+const comment = (body, over = {}) => ({ id: 1, url: 'https://github.com/acme/app/issues/42#c1', body, createdAt: ago(10), updatedAt: ago(10), author: 'dev', authorAssociation: 'MEMBER', ...over });
 const state = (over = {}) => ({ state: 'OPEN', pullRequests: [], comments: [], ...over });
 
 test('parses targets and durations', () => {
@@ -64,7 +64,7 @@ test('an untouched PR goes stale and names the branch to adopt', () => {
 });
 
 test('a fresh heartbeat is live; an old one is stale', () => {
-  const fresh = comment(renderMarker({ owner: 'session-a', branch: 'feat/x', lastActive: ago(20) }));
+  const fresh = comment(renderMarker({ owner: 'session-a', branch: 'feat/x', lastActive: ago(20) }), { updatedAt: ago(20) });
   assert.equal(classify(state({ comments: [fresh] }), target, opts).status, 'live');
   const old = comment(renderMarker({ owner: 'session-a', branch: 'feat/x', lastActive: ago(90) }));
   const result = classify(state({ comments: [old] }), target, opts);
@@ -74,7 +74,7 @@ test('a fresh heartbeat is live; an old one is stale', () => {
 
 test('the newest heartbeat wins over older ones', () => {
   const old = comment(renderMarker({ owner: 'a', lastActive: ago(300) }), { id: 1 });
-  const fresh = comment(renderMarker({ owner: 'b', lastActive: ago(5) }), { id: 2 });
+  const fresh = comment(renderMarker({ owner: 'b', lastActive: ago(5) }), { id: 2, updatedAt: ago(5) });
   const result = classify(state({ comments: [old, fresh] }), target, opts);
   assert.equal(result.status, 'live');
   assert.equal(result.evidence.find((e) => e.kind === 'heartbeat').owner, 'b');
@@ -99,15 +99,17 @@ test('a live PR keeps the claim live even when comments are old', () => {
 
 const fakeIssue = (comments = []) => JSON.stringify({ data: { repository: { issue: {
   state: 'OPEN',
-  closedByPullRequestsReferences: { nodes: [pr()] },
-  timelineItems: { nodes: [{ source: pr({ url: 'https://github.com/acme/app/pull/8', body: 'Refs #42' }) }, { source: {} }] },
-  comments: { nodes: comments.map((c) => ({ databaseId: c.id, url: c.url, body: c.body, createdAt: c.createdAt, updatedAt: c.updatedAt, author: { login: c.author } })) },
+  closedByPullRequestsReferences: { nodes: [{ ...pr(), author: { login: 'dev' }, repository: { nameWithOwner: 'acme/app' } }] },
+  timelineItems: { nodes: [{ source: { ...pr({ url: 'https://github.com/acme/app/pull/8', body: 'Refs #42' }), author: { login: 'dev' }, repository: { nameWithOwner: 'acme/app' } } }, { source: {} }] },
+  comments: { nodes: comments.map((c) => ({ databaseId: c.id, url: c.url, body: c.body, createdAt: c.createdAt, updatedAt: c.updatedAt, authorAssociation: c.authorAssociation, author: { login: c.author } })) },
 } } } });
 
 test('fetchIssueState merges closing and cross-referenced PRs', () => {
   const data = fetchIssueState(target, () => fakeIssue());
   assert.equal(data.pullRequests.length, 2);
   assert.equal(data.pullRequests[0].closing, true);
+  assert.equal(data.pullRequests[0].author, 'dev');
+  assert.equal(data.pullRequests[1].repository, 'acme/app');
 });
 
 test('heartbeat creates a marker, then refreshes the same comment', () => {
@@ -144,4 +146,27 @@ test('CLI rejects bad usage with exit 2', () => {
   const help = spawnSync(process.execPath, [script, '--help'], { encoding: 'utf8' });
   assert.equal(help.status, 0);
   assert.match(help.stdout, /--heartbeat/);
+});
+
+test('claims by untrusted authors are ignored; bots and collaborators count', () => {
+  const drive = comment(renderMarker({ owner: 'spammer', lastActive: ago(1) }), { author: 'rando', authorAssociation: 'NONE', updatedAt: ago(1) });
+  assert.equal(classify(state({ comments: [drive] }), target, opts).status, 'free');
+  assert.equal(classify(state({ pullRequests: [pr({ closing: true, author: 'rando', authorAssociation: 'CONTRIBUTOR' })] }), target, opts).status, 'free');
+  const bot = comment('Session takeover: bot run', { author: 'agent-lcars[bot]', authorAssociation: 'NONE' });
+  assert.equal(classify(state({ comments: [bot] }), target, opts).status, 'live');
+  assert.equal(classify(state({ pullRequests: [pr({ closing: true, authorAssociation: 'COLLABORATOR' })] }), target, opts).status, 'live');
+});
+
+test('a forged future last-active counts only as far as the comment last edit', () => {
+  const forged = comment(renderMarker({ owner: 'a', lastActive: '2099-01-01T00:00:00Z' }), { updatedAt: ago(300) });
+  const result = classify(state({ comments: [forged] }), target, opts);
+  assert.equal(result.status, 'stale');
+  assert.equal(result.evidence[0].lastActive, new Date(NOW - 300 * 60_000).toISOString());
+});
+
+test('a PR in another repository must qualify the issue reference', () => {
+  const foreign = (body) => pr({ repository: 'other/tool', url: 'https://github.com/other/tool/pull/3', body });
+  assert.equal(classify(state({ pullRequests: [foreign('Refs #42')] }), target, opts).status, 'free');
+  assert.equal(classify(state({ pullRequests: [foreign('Refs acme/app#42')] }), target, opts).status, 'live');
+  assert.equal(classify(state({ pullRequests: [pr({ body: 'Refs acme/app#42' })] }), target, opts).status, 'live');
 });

@@ -17,6 +17,13 @@
 // Unmarked legacy takeover comments ("Session takeover", "implementing this
 // now") count only while younger than --stale-after.
 //
+// Only trusted authors can claim: repository owners, members, collaborators,
+// and GitHub App bots. Anyone else's PRs and comments are ignored, so a
+// drive-by comment cannot block an issue. A marker's last-active never counts
+// as later than the comment's own last edit, so a forged future timestamp
+// cannot keep a claim alive. A PR in another repository must name the issue
+// as owner/repo#N; its bare #N means an issue in its own repository.
+//
 // Statuses: closed, live, stale (claim evidence exists but is old; adopt the
 // listed branch instead of starting over), free (no claim evidence).
 //
@@ -31,6 +38,11 @@ import { fileURLToPath } from 'node:url';
 export const MARKER = /<!--\s*work-claim:v1\b([^>]*)-->/;
 const LEGACY = /session takeover|implementing this now|taking (this|it) over|^\s*claim(ed|ing)?\b/im;
 const EXIT = { free: 0, closed: 0, live: 10, stale: 11 };
+const TRUSTED = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
+
+export function trusted(author, association) {
+  return TRUSTED.has(association) || /\[bot\]$/.test(author ?? '');
+}
 
 export function parseDuration(text) {
   const match = /^(\d+)\s*(s|m|h|d)?$/.exec(String(text).trim());
@@ -64,8 +76,9 @@ export function renderMarker({ owner, branch, lastActive, note }) {
   return lines.join('\n');
 }
 
-function referencesIssue(body, target) {
-  const ref = `(?:${target.owner}/${target.repo})?#${target.number}\\b`;
+function referencesIssue(body, target, sameRepo) {
+  const qualified = `${target.owner}/${target.repo}`.replace(/[.]/g, '\\.');
+  const ref = `${sameRepo ? `(?:${qualified})?` : qualified}#${target.number}\\b`;
   return new RegExp(`\\b(?:refs?|closes?|closed|fix(?:es|ed)?|resolves?|resolved)[:\\s]+${ref}`, 'i').test(body ?? '');
 }
 
@@ -76,8 +89,9 @@ export function classify(data, target, { now = Date.now(), staleAfterMs = 3_600_
   const evidence = [];
   const seen = new Set();
   for (const pr of data.pullRequests) {
-    if (pr.state !== 'OPEN' || seen.has(pr.url)) continue;
-    if (!pr.closing && !referencesIssue(`${pr.title}\n${pr.body}`, target)) continue;
+    if (pr.state !== 'OPEN' || seen.has(pr.url) || !trusted(pr.author, pr.authorAssociation)) continue;
+    const sameRepo = (pr.repository ?? `${target.owner}/${target.repo}`).toLowerCase() === `${target.owner}/${target.repo}`.toLowerCase();
+    if (!pr.closing && !referencesIssue(`${pr.title}\n${pr.body}`, target, sameRepo)) continue;
     seen.add(pr.url);
     const ageMs = now - Date.parse(pr.updatedAt);
     evidence.push({
@@ -92,9 +106,12 @@ export function classify(data, target, { now = Date.now(), staleAfterMs = 3_600_
   }
   let newestMarker;
   for (const comment of data.comments) {
+    if (!trusted(comment.author, comment.authorAssociation)) continue;
     const marker = parseMarker(comment.body);
     if (marker) {
-      const lastActive = marker['last-active'] ?? comment.updatedAt;
+      const claimed = Date.parse(marker['last-active'] ?? '');
+      const edited = Date.parse(comment.updatedAt);
+      const lastActive = new Date(Number.isNaN(claimed) ? edited : Math.min(claimed, edited)).toISOString();
       if (!newestMarker || Date.parse(lastActive) > Date.parse(newestMarker.lastActive)) {
         newestMarker = { comment, marker, lastActive };
       }
@@ -129,24 +146,26 @@ function gh(args, input) {
   return execFileSync('gh', args, { encoding: 'utf8', input, stdio: [input ? 'pipe' : 'ignore', 'pipe', 'pipe'] });
 }
 
+const PR = 'url state isDraft headRefName updatedAt title body authorAssociation author{login} repository{nameWithOwner}';
 const QUERY = `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){issue(number:$number){
   state
-  closedByPullRequestsReferences(first:20,includeClosedPrs:false){nodes{url state isDraft headRefName updatedAt title body}}
+  closedByPullRequestsReferences(first:20,includeClosedPrs:false){nodes{${PR}}}
   timelineItems(last:100,itemTypes:[CROSS_REFERENCED_EVENT,CONNECTED_EVENT]){nodes{
-    ... on CrossReferencedEvent{source{... on PullRequest{url state isDraft headRefName updatedAt title body}}}
-    ... on ConnectedEvent{subject{... on PullRequest{url state isDraft headRefName updatedAt title body}}}}}
-  comments(last:100){nodes{databaseId url body createdAt updatedAt author{login}}}}}}`;
+    ... on CrossReferencedEvent{source{... on PullRequest{${PR}}}}
+    ... on ConnectedEvent{subject{... on PullRequest{${PR}}}}}}
+  comments(last:100){nodes{databaseId url body createdAt updatedAt authorAssociation author{login}}}}}}`;
 
 export function fetchIssueState(target, run = gh) {
   const raw = run(['api', 'graphql', '-f', `query=${QUERY}`, '-F', `owner=${target.owner}`, '-F', `repo=${target.repo}`, '-F', `number=${target.number}`]);
   const issue = JSON.parse(raw).data?.repository?.issue;
   if (!issue) throw new Error(`issue not found: ${target.owner}/${target.repo}#${target.number}`);
-  const closing = issue.closedByPullRequestsReferences.nodes.map((pr) => ({ ...pr, closing: true }));
-  const linked = issue.timelineItems.nodes.map((node) => node.source ?? node.subject).filter((pr) => pr?.url);
+  const flat = (pr) => ({ ...pr, author: pr.author?.login, repository: pr.repository?.nameWithOwner });
+  const closing = issue.closedByPullRequestsReferences.nodes.map((pr) => ({ ...flat(pr), closing: true }));
+  const linked = issue.timelineItems.nodes.map((node) => node.source ?? node.subject).filter((pr) => pr?.url).map(flat);
   return {
     state: issue.state,
     pullRequests: [...closing, ...linked],
-    comments: issue.comments.nodes.map((c) => ({ id: c.databaseId, url: c.url, body: c.body, createdAt: c.createdAt, updatedAt: c.updatedAt, author: c.author?.login })),
+    comments: issue.comments.nodes.map((c) => ({ id: c.databaseId, url: c.url, body: c.body, createdAt: c.createdAt, updatedAt: c.updatedAt, author: c.author?.login, authorAssociation: c.authorAssociation })),
   };
 }
 
