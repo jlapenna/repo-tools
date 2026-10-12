@@ -5,40 +5,57 @@ description: Watch GitHub Actions runs and armed auto-merge pull requests until 
 
 # GitHub CI Monitor
 
-Use the watcher scripts bundled with this plugin instead of hand-written
-polling loops or repository-local copies. Derive an absolute plugin root from
-the path used to read this file: it is two directories above this `SKILL.md`.
-The examples call that resolved path `$REPO_TOOLS_PLUGIN_ROOT`. Both scripts
-emit only state changes and a terminal verdict, so a long quiet run does not
-consume the caller's context.
-
-An npm installation of `@jlapenna/repo-tools` also exposes equivalent
-`repo-watch-run` and `repo-watch-prs` commands on `PATH`. Do not assume that
-package is installed when this skill came from the Codex or Claude plugin;
-the plugin-relative scripts below are always available with the skill.
+Use GitHub CLI for individual workflow runs and PR checks. Use the bundled
+auto-merge watcher when the question is whether a PR landed or needs attention.
+Do not add polling loops or repository-local watcher copies.
 
 ## Watch one workflow run
 
-`repo-watch-run.cjs` answers whether one workflow run passed:
+Resolve the intended commit before discovering a run: the just-pushed commit,
+the PR's `headRefOid` from `gh pr view`, or the actual merge commit for
+post-merge verification. A primary checkout may still be behind the merge.
+Filter by that SHA, the required workflow, and the expected event. For a push
+of the current checkout's commit:
 
 ```bash
-node "$REPO_TOOLS_PLUGIN_ROOT/scripts/repo-watch-run.cjs" [--workflow <name>] [--timeout <minutes>] <pr-number-or-branch>
+expected_sha=$(git rev-parse HEAD)
+gh run list --commit "$expected_sha" --workflow CI --event push \
+  --json databaseId,headSha,event,workflowName,status,conclusion,url
 ```
 
-Examples:
+Verify the returned SHA and event match the intended validation, then watch
+that exact run ID:
 
 ```bash
-node "$REPO_TOOLS_PLUGIN_ROOT/scripts/repo-watch-run.cjs" 885
-node "$REPO_TOOLS_PLUGIN_ROOT/scripts/repo-watch-run.cjs" --workflow CI main
+gh run watch <run-id> --exit-status --compact --interval 30
 ```
 
-It finds the latest matching run, reports status changes, prints focused
-failure logs, and exits nonzero on failure or timeout.
+No matching run means validation is not yet established. Check workflow
+creation within the task's deadline; do not fall back to an older branch run
+or treat absence as success. If several runs match, select the intended run
+explicitly. If branch/workflow discovery looks historical or
+ambiguous, use `gh api` to query the workflow's runs with `head_sha` and
+`event`, then verify the returned SHA and event before watching its ID.
+
+`--exit-status` makes a failed run return nonzero. Inspect failures with
+`gh run view <run-id> --log-failed` and continue the owning task's fix workflow.
+
+For a PR's required checks rather than one workflow run, use:
+
+```bash
+gh pr checks <pr-number> --required --watch --fail-fast --interval 30
+```
+
+Check results do not prove that the PR merged. If its head changes during
+verification, establish the required checks for the new head.
 
 ## Watch the protected auto-merge lifecycle
 
 After arming auto-merge, the real question is whether the pull request landed
-or needs intervention. Use:
+or needs intervention. Derive `$REPO_TOOLS_PLUGIN_ROOT` from the path used to
+read this file: it is two directories above this `SKILL.md`. An npm
+installation also exposes `repo-watch-prs` on `PATH`; the plugin-relative
+script needs no package install.
 
 ```bash
 bash "$REPO_TOOLS_PLUGIN_ROOT/scripts/repo-watch-prs.sh" [--strict] [--interval <seconds>] <pr> [<pr>...]
@@ -73,7 +90,7 @@ only when the owning task is intentionally abandoned or parked.
 
 ## Ownership boundary
 
-This skill and the `repo-watch-*` implementations are owned by public
+This skill and the `repo-watch-prs` implementation are owned by public
 [`jlapenna/repo-tools`](https://github.com/jlapenna/repo-tools). Consumer
 repositories may document their strict/non-strict branch policy and required
-check names, but must not copy this skill or either watcher implementation.
+check names, but must not copy this skill or the watcher implementation.

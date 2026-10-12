@@ -26,7 +26,7 @@ repository policy, check names, deployment rules, and product behavior.
 | --- | --- | --- |
 | CLI behavior | implementation in `bin/` | adjacent `*.test.*` scripts |
 | Safe worktree lifecycle | `worktree-hygiene` skill and removal commands | worktree and process tests |
-| CI monitoring | watcher commands and `github-ci-monitor` skill | watcher tests |
+| CI monitoring | GitHub CLI, auto-merge watcher, and `github-ci-monitor` skill | auto-merge watcher tests and exact-run consumer verification |
 | PR delivery workflow | `land-pr` skill | skill validation and real protected consumers |
 | Testing policy | `testing-policy` skill and reference | documented examples |
 | Harness context and skill maintenance | `harness-maintenance` skill | native documentation checks and outcome evidence from consumers |
