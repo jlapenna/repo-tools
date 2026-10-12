@@ -20,6 +20,7 @@ Nx-inferred targets are intentionally not listed. Runtime status is not inferred
 | repo-nx | [bin/nx.sh](../bin/nx.sh) |
 | repo-prune-merged-worktrees | [bin/prune-merged-worktrees.sh](../bin/prune-merged-worktrees.sh) |
 | repo-require-worktree | [bin/require-feature-worktree.sh](../bin/require-feature-worktree.sh) |
+| repo-restore-worktree | [bin/restore-worktree.sh](../bin/restore-worktree.sh) |
 | repo-safe-remove-worktree | [bin/safe-remove-worktree.sh](../bin/safe-remove-worktree.sh) |
 | repo-scan-live-processes | [bin/scan-live-processes.sh](../bin/scan-live-processes.sh) |
 | repo-set-tmux-task-title | [bin/set-tmux-task-title.mjs](../bin/set-tmux-task-title.mjs) |

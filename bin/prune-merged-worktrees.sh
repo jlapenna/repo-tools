@@ -9,6 +9,7 @@ usage() {
 Usage: repo-prune-merged-worktrees [--repo <checkout>] [--base <ref>]
        [--fetch] [--delete] [--session-only] [--remove-hook <executable>]
        [--merged-pr <GitHub-PR-URL>] [<worktree-path>]
+       [--park-unmerged|--park-inactive] [--idle-hours N]
 
 Default: report only, using current local refs. --fetch refreshes origin first.
 --delete removes only clean, idle, unlocked worktrees with verified landed work.
@@ -17,6 +18,20 @@ means that target was kept; invalid targets/options return 2. Sweep skips are
 normal. A failed removal returns 1 in either mode.
 --session-only restricts candidates to the primary checkout's
 .claude/worktrees and .codex/worktrees directories.
+
+--park-unmerged also permits clean, idle, unlocked unmerged worktrees without
+open PR ownership. With --delete, retain their branches, protect detached HEADs
+with a Git ref, and save a private verified archive before removing the checkout.
+Only ignored dependency/cache directories are omitted. Restore using the
+reported repo-restore-worktree command. Missing PR data still keeps work.
+--idle-hours N additionally requires no file/directory modifications or Git
+checkout/ref activity within N hours, checked again before removal.
+
+--park-inactive is explicit cold-checkout retirement, requiring a positive
+--idle-hours window. It archives even an open-PR or already-merged checkout,
+always keeps branches/history, and performs no GitHub reads or writes.
+Local writes, live processes, dirty/locked/nested checkouts and resource
+adapter refusals still keep it. It cannot be combined with --merged-pr.
 
 An optional remove hook receives <worktree-path> <safe-remover-executable> after
 merge/ownership verification. It may hold consumer resource locks, invoke the
@@ -38,6 +53,9 @@ fetch=false
 session_only=false
 hook=""
 merged_pr=""
+park_unmerged=false
+park_inactive=false
+idle_hours=0
 while (($#)); do
   case "$1" in
     --repo|--base|--remove-hook|--merged-pr)
@@ -51,6 +69,9 @@ while (($#)); do
       shift ;;
     --fetch) fetch=true ;;
     --delete) delete=true ;;
+    --park-unmerged) park_unmerged=true ;;
+    --park-inactive) park_inactive=true ;;
+    --idle-hours) [[ $# -ge 2 && $2 =~ ^[0-9]+$ ]] || { usage >&2; exit 2; }; idle_hours=$2; shift ;;
     --session-only) session_only=true ;;
     -h|--help) usage; exit 0 ;;
     --) shift; (($# == 1)) || { usage >&2; exit 2; }; target=$1; break ;;
@@ -59,6 +80,9 @@ while (($#)); do
   esac
   shift
 done
+[[ $park_inactive == false || ( $idle_hours -gt 0 && -z $merged_pr ) ]] || {
+  echo '--park-inactive requires a positive --idle-hours window and no --merged-pr' >&2; exit 2;
+}
 [[ -z $merged_pr || ( -n $target && $merged_pr =~ ^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/[1-9][0-9]*$ ) ]] || {
   echo '--merged-pr requires a GitHub PR URL and one named worktree' >&2; exit 2;
 }
@@ -96,6 +120,9 @@ args=(--repo "$primary")
 [[ -z $target ]] || args+=(--path "$target")
 [[ -z $hook ]] || args+=(--remove-hook "$hook")
 [[ -z $merged_pr ]] || args+=(--merged-pr "$merged_pr")
+[[ $park_unmerged != true ]] || args+=(--park-unmerged)
+[[ $park_inactive != true ]] || args+=(--park-inactive)
+args+=(--idle-hours "$idle_hours")
 [[ $delete != true ]] || args+=(--delete)
 report=$("$here/sweep-worktrees.sh" "${args[@]}")
 printf '%s\n' "$report"
@@ -104,7 +131,7 @@ if awk -F '\t' '$1 == "FAILED" { found=1 } END { exit !found }' <<<"$report"; th
   exit 1
 fi
 if [[ -n $target ]] && ! awk -F '\t' -v target="$target" '
-  $1 == "REMOVED" && $2 == target { found=1 } END { exit !found }
+  ($1 == "REMOVED" || $1 == "PARKED") && $2 == target { found=1 } END { exit !found }
 ' <<<"$report"; then
   exit 1
 fi

@@ -7,7 +7,9 @@ cleanup_load_prs() {
   open=$(cd "$repo" && gh api --paginate --slurp "repos/$route/pulls?state=open&per_page=100") || return 1
   open=$(jq -ce 'if type == "array" and all(.[]; type == "array") then
     [.[][] | if (.head.ref | type) == "string" then
-      {headRefName: .head.ref, state: "OPEN"} else error("invalid open PR head") end]
+      {headRefName: .head.ref, headRefOid: .head.sha,
+       headRepository: .head.repo.full_name, baseRepository: .base.repo.full_name,
+       state: "OPEN"} else error("invalid open PR head") end]
     else error("invalid open PR pages") end' <<<"$open") || return 1
   # Missing older merged records is conservative: unproven squash heads stay.
   local args=()
@@ -26,7 +28,7 @@ cleanup_load_prs() {
 cleanup_pr_checkout_evidence() {
   local repo=$1 base=$2 branch=$3 tip=$4 url=$5 data head merge pr_base
   [[ -n ${CLEANUP_PRS:-} ]] || { echo 'unverified:pr-data-unavailable'; return 1; }
-  if jq -e --arg branch "$branch" 'any(.[]; .headRefName == $branch and .state == "OPEN")' <<<"$CLEANUP_PRS" >/dev/null; then
+  if jq -e --arg branch "$branch" --arg tip "$tip" 'any(.[]; .state == "OPEN" and (.headRefName == $branch or .headRefOid == $tip))' <<<"$CLEANUP_PRS" >/dev/null; then
     echo 'open-pr'; return 1
   fi
   data=$(cd "$repo" && gh pr view "$url" --json url,state,baseRefName,headRefName,headRefOid,mergeCommit) || {
@@ -60,7 +62,7 @@ cleanup_pr_checkout_evidence() {
 cleanup_evidence() {
   local repo=$1 base=$2 branch=$3 tip=$4 merge
   if [[ -z ${CLEANUP_PRS:-} ]]; then echo 'unverified:pr-data-unavailable'; return 1; fi
-  if jq -e --arg branch "$branch" 'any(.[]; .headRefName == $branch and .state == "OPEN")' <<<"$CLEANUP_PRS" >/dev/null; then
+  if jq -e --arg branch "$branch" --arg tip "$tip" 'any(.[]; .state == "OPEN" and (.headRefName == $branch or .headRefOid == $tip))' <<<"$CLEANUP_PRS" >/dev/null; then
     echo 'open-pr'; return 1
   fi
   if git -C "$repo" merge-base --is-ancestor "$tip" "$base" 2>/dev/null; then
@@ -70,8 +72,11 @@ cleanup_evidence() {
     if git -C "$repo" merge-base --is-ancestor "$merge" "$base" 2>/dev/null; then
       echo 'landed:merged-pr-head'; return 0
     fi
-  done < <(jq -r --arg branch "$branch" --arg tip "$tip" '.[] |
-    select(.state == "MERGED" and .headRefName == $branch and .headRefOid == $tip) |
+  # A renamed branch or detached review checkout still has the exact reviewed
+  # commit. The merge on the selected base proves landing; the local name does
+  # not add provenance. Never accept a merely equivalent tree or newer tip.
+  done < <(jq -r --arg tip "$tip" '.[] |
+    select(.state == "MERGED" and .headRefOid == $tip) |
     .mergeCommit.oid // empty' <<<"$CLEANUP_PRS")
   echo 'unverified:unmerged'; return 1
 }

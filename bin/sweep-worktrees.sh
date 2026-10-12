@@ -26,6 +26,9 @@ DELETE=false
 ONLY_PATH=""
 REMOVE_HOOK=""
 MERGED_PR=""
+PARK_UNMERGED=false
+PARK_INACTIVE=false
+IDLE_HOURS=0
 UNDER=()
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -36,16 +39,23 @@ while [ "$#" -gt 0 ]; do
     --remove-hook) [ "$#" -ge 2 ] || exit 64; REMOVE_HOOK=$(realpath -e -- "$2"); shift ;;
     --merged-pr) [ "$#" -ge 2 ] || exit 64; MERGED_PR=$2; shift ;;
     --delete) DELETE=true ;;
+    --park-unmerged) PARK_UNMERGED=true ;;
+    --park-inactive) PARK_INACTIVE=true ;;
+    --idle-hours) [[ $# -ge 2 && $2 =~ ^[0-9]+$ ]] || exit 64; IDLE_HOURS=$2; shift ;;
     -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 64 ;;
   esac
   shift
 done
+[[ $PARK_INACTIVE == false || ( $IDLE_HOURS -gt 0 && -z $MERGED_PR ) ]] || {
+  echo '--park-inactive requires a positive --idle-hours window and no --merged-pr' >&2; exit 64;
+}
 [[ -z $MERGED_PR || ( -n $ONLY_PATH && $MERGED_PR =~ ^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/[1-9][0-9]*$ ) ]] || exit 64
 
 here=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)
 # shellcheck source=bin/cleanup-evidence.sh
 source "$here/cleanup-evidence.sh"
+source "$here/worktree-idle.sh"
 REMOVER="$here/safe-remove-worktree.sh"
 SCANNER="$here/scan-live-processes.sh"
 [ -x "$REMOVER" ] && [ -x "$SCANNER" ] || { echo "missing sibling scripts next to $0" >&2; exit 70; }
@@ -57,7 +67,9 @@ COMMON=$(git -C "$REPO" rev-parse --path-format=absolute --git-common-dir 2>/dev
 RECORDS=$(git --git-dir="$COMMON" worktree list --porcelain)
 PRIMARY=$(printf '%s\n' "$RECORDS" | sed -n 's/^worktree //p' | head -n 1)
 if [ -z "$BASE" ]; then
-  if git -C "$PRIMARY" rev-parse -q --verify origin/main >/dev/null 2>&1; then BASE=origin/main; else BASE=main; fi
+  if [[ $PARK_INACTIVE == true ]]; then BASE=HEAD
+  elif git -C "$PRIMARY" rev-parse -q --verify origin/main >/dev/null 2>&1; then BASE=origin/main
+  else BASE=main; fi
 fi
 git -C "$PRIMARY" rev-parse -q --verify "$BASE^{commit}" >/dev/null || { echo "unknown base ref: $BASE" >&2; exit 1; }
 
@@ -65,13 +77,48 @@ BASE=$(git -C "$PRIMARY" rev-parse "$BASE^{commit}")
 PR_ROUTE='{owner}/{repo}'
 [[ -z $MERGED_PR ]] || PR_ROUTE=${MERGED_PR#https://github.com/}
 PR_ROUTE=${PR_ROUTE%/pull/*}
-cleanup_load_prs "$PRIMARY" "$PR_ROUTE" || echo '# PR data unavailable; keeping unverified worktrees' >&2
+if [[ $PARK_INACTIVE != true ]]; then
+  cleanup_load_prs "$PRIMARY" "$PR_ROUTE" || echo '# PR data unavailable; keeping unverified worktrees' >&2
+fi
 
 worktree_evidence() {
+  local reason
+  # Explicit cold-checkout retirement does not discard Git history or claim a
+  # merge. Local inactivity/occupancy and preservation are its authority; PRs
+  # and branches remain available. No GitHub lookup or write is needed.
+  if [[ $PARK_INACTIVE == true ]]; then echo parkable:inactive; return 0; fi
   if [[ -n $MERGED_PR ]]; then
     cleanup_pr_checkout_evidence "$PRIMARY" "$BASE" "$1" "$2" "$MERGED_PR"
   else
-    cleanup_evidence "$PRIMARY" "$BASE" "$1" "$2"
+    if reason=$(cleanup_evidence "$PRIMARY" "$BASE" "$1" "$2"); then
+      echo "$reason"; return 0
+    fi
+    if [[ $PARK_UNMERGED == true && $reason == unverified:unmerged ]]; then
+      # Published work may use a different local name. Keep an upstream alias
+      # or a commit included in an open PR, even though parking preserves it.
+      local upstream known_tips known_json
+      upstream=$(git -C "$PRIMARY" config "branch.$1.merge" 2>/dev/null || true)
+      upstream=${upstream#refs/heads/}
+      if [[ -n $upstream ]] && jq -e --arg branch "$upstream" \
+        'any(.[]; .state=="OPEN" and .headRefName==$branch and
+          .headRepository!=null and .headRepository==.baseRepository)' <<<"$CLEANUP_PRS" >/dev/null; then
+        echo open-pr; return 1
+      fi
+      # Query known refs once instead of spawning Git for every open PR.
+      # Large upstreams can have thousands of unrelated/unknown fork heads.
+      known_tips=$(git -C "$PRIMARY" for-each-ref --contains "$2" \
+        --format='%(objectname)' refs/heads/ refs/remotes/) || {
+        echo unverified:ref-ownership-check-failed; return 1;
+      }
+      known_json=$(printf '%s\n' "$known_tips" | jq -Rsc 'split("\n")|map(select(.!=""))')
+      if printf '%s\n%s\n' "$CLEANUP_PRS" "$known_json" | jq -es \
+        '.[0] as $prs | (.[1]|map({key:.,value:true})|from_entries) as $known |
+         any($prs[]; .state=="OPEN" and $known[.headRefOid // ""]==true)' >/dev/null; then
+        echo open-pr; return 1
+      fi
+      echo parkable:unmerged; return 0
+    fi
+    echo "$reason"; return 1
   fi
 }
 
@@ -133,6 +180,8 @@ while IFS= read -r line; do
           emit KEEP "$path" "$branch" "dirty: $dirty uncommitted change(s)"
         elif live=$(live_count "$path") && [ "$live" -gt 0 ]; then
           emit KEEP "$path" "$branch" "live: $live process(es) with cwd inside"
+        elif ! idle_reason=$(cleanup_worktree_idle "$path" "$branch" "$IDLE_HOURS"); then
+          emit KEEP "$path" "$branch" "$idle_reason"
         else
           if reason=$(worktree_evidence "$branch" "$head"); then
             emit SAFE "$path" "$branch" "$reason"
@@ -156,10 +205,25 @@ order=$(for i in "${!safe_paths[@]}"; do printf '%s\t%s\n' "$(tr -cd '/' <<<"${s
 for i in $order; do
   p=${safe_paths[$i]}; b=${safe_branches[$i]}
   h=${safe_heads[$i]}
-  if ! cleanup_load_prs "$PRIMARY" "$PR_ROUTE" ||
-    ! worktree_evidence "$b" "$h" >/dev/null ||
-    [[ $(git -C "$p" rev-parse HEAD) != "$h" ]]; then
+  if { [[ $PARK_INACTIVE != true ]] && ! cleanup_load_prs "$PRIMARY" "$PR_ROUTE"; } ||
+    ! current_reason=$(worktree_evidence "$b" "$h") ||
+    [[ $(git -C "$p" rev-parse HEAD) != "$h" ]] ||
+    ! cleanup_worktree_idle "$p" "$b" "$IDLE_HOURS" >/dev/null; then
     emit KEEP "$p" "$b" 'unverified:plan-changed'; continue
+  fi
+  if [[ $current_reason == parkable:* ]]; then
+    park_status=0
+    out=$("$here/park-worktree.sh" "$p" "$h" "$REMOVE_HOOK" "$IDLE_HOURS" 2>&1) || park_status=$?
+    if [[ $park_status == 75 && -e $p ]]; then
+      emit KEEP "$p" "$b" 'parking-refused:snapshot-or-resources-changed'
+    elif [[ $park_status != 0 ]]; then
+      printf '%s\n' "$out" >&2
+      emit FAILED "$p" "$b" 'parking failed; inspect retained archive and worktree'
+    else
+      archive=$(tail -n 1 <<<"$out")
+      emit PARKED "$p" "$b" "branch retained; restore with repo-restore-worktree $archive"
+    fi
+    continue
   fi
   # The remover re-checks live processes and cleanliness right before acting.
   hook_status=0

@@ -51,7 +51,9 @@ for name in claude codex manual dirty locked live open unmerged squash; do
 done
 echo wip >> "$dirty/file"
 git -C "$repo" worktree lock --reason active "$locked"
-(cd "$live" && exec sleep 60) & live_pid=$!
+# The fixture must stay alive through all pruning calls even on a busy host.
+# Its EXIT trap owns termination; a short expiry invalidates the live guard.
+(cd "$live" && exec sleep 3600) & live_pid=$!
 for _ in {1..100}; do
   [[ $(readlink "/proc/$live_pid/cwd" 2>/dev/null) != "$live" ]] || break
   sleep 0.02
