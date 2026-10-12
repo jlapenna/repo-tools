@@ -275,6 +275,46 @@ function pathMappingsFromConfig(configPath, scopeRoot) {
     };
   });
 }
+function exportTarget(entry, conditions) {
+  if (typeof entry === "string") return entry;
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+    return void 0;
+  }
+  const conditional = entry;
+  for (const condition of conditions) {
+    if (!(condition in conditional)) continue;
+    const target = exportTarget(conditional[condition], conditions);
+    if (target) return target;
+  }
+  return void 0;
+}
+function packageExportMappings(workspaceRoot, projects, customConditions) {
+  const conditions = [...customConditions, "import", "default"];
+  const mappings = [];
+  const seenPackages = /* @__PURE__ */ new Set();
+  for (const project of projects) {
+    const packagePath = path.join(project.root, "package.json");
+    if (seenPackages.has(packagePath)) continue;
+    seenPackages.add(packagePath);
+    const packageJson = readJsonIfExists(packagePath);
+    if (!packageJson?.name || packageJson.exports === void 0) continue;
+    const { exports } = packageJson;
+    const entries = typeof exports === "string" || exports !== null && typeof exports === "object" && !Object.keys(exports).some((key) => key.startsWith(".")) ? [[".", exports]] : Object.entries(exports);
+    for (const [subpath, entry] of entries) {
+      if (subpath === "./package.json") continue;
+      const target = exportTarget(entry, conditions);
+      if (!target) continue;
+      mappings.push({
+        alias: subpath === "." ? packageJson.name : `${packageJson.name}/${subpath.replace(/^\.\//u, "")}`,
+        baseDirectory: project.root,
+        configPath: packagePath,
+        scopeRoot: workspaceRoot,
+        targets: [target]
+      });
+    }
+  }
+  return mappings;
+}
 function discoverPathMappings(workspaceRoot, projects) {
   const baseConfig = path.join(workspaceRoot, "tsconfig.base.json");
   const rootConfig = fileExists(baseConfig) ? baseConfig : path.join(workspaceRoot, "tsconfig.json");
@@ -286,6 +326,10 @@ function discoverPathMappings(workspaceRoot, projects) {
     seenConfigs.add(configPath);
     mappings.push(...pathMappingsFromConfig(configPath, project.root));
   }
+  const customConditions = readJsonIfExists(rootConfig)?.compilerOptions?.customConditions ?? [];
+  mappings.push(
+    ...packageExportMappings(workspaceRoot, projects, customConditions)
+  );
   return mappings;
 }
 function matchAlias(alias, source) {
