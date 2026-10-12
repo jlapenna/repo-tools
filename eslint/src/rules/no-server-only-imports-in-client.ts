@@ -59,6 +59,7 @@ interface JsonProjectConfiguration {
 }
 
 interface PackageJson {
+  exports?: unknown;
   name?: string;
   nx?: {
     tags?: string[];
@@ -68,6 +69,7 @@ interface PackageJson {
 interface Tsconfig {
   compilerOptions?: {
     baseUrl?: string;
+    customConditions?: string[];
     paths?: Record<string, unknown>;
   };
 }
@@ -344,6 +346,72 @@ function pathMappingsFromConfig(
   });
 }
 
+function exportTarget(
+  entry: unknown,
+  conditions: readonly string[],
+): string | undefined {
+  if (typeof entry === 'string') return entry;
+  if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+    return undefined;
+  }
+  const conditional = entry as Record<string, unknown>;
+  for (const condition of conditions) {
+    if (!(condition in conditional)) continue;
+    const target = exportTarget(conditional[condition], conditions);
+    if (target) return target;
+  }
+  return undefined;
+}
+
+// A workspace package's `exports` map is the Nx-native replacement for a
+// tsconfig `paths` alias: TypeScript resolves it through the root
+// `customConditions` (Nx generates a source condition such as `@org/source`),
+// so each exported subpath is an explicit entry point exactly like an alias.
+function packageExportMappings(
+  workspaceRoot: string,
+  projects: ProjectBoundary[],
+  customConditions: readonly string[],
+): PathMapping[] {
+  const conditions = [...customConditions, 'import', 'default'];
+  const mappings: PathMapping[] = [];
+  const seenPackages = new Set<string>();
+
+  for (const project of projects) {
+    const packagePath = path.join(project.root, 'package.json');
+    if (seenPackages.has(packagePath)) continue;
+    seenPackages.add(packagePath);
+    const packageJson = readJsonIfExists<PackageJson>(packagePath);
+    if (!packageJson?.name || packageJson.exports === undefined) continue;
+
+    const { exports } = packageJson;
+    const entries: [string, unknown][] =
+      typeof exports === 'string' ||
+      (exports !== null &&
+        typeof exports === 'object' &&
+        !Object.keys(exports).some((key) => key.startsWith('.')))
+        ? [['.', exports]]
+        : Object.entries(exports as Record<string, unknown>);
+
+    for (const [subpath, entry] of entries) {
+      if (subpath === './package.json') continue;
+      const target = exportTarget(entry, conditions);
+      if (!target) continue;
+      mappings.push({
+        alias:
+          subpath === '.'
+            ? packageJson.name
+            : `${packageJson.name}/${subpath.replace(/^\.\//u, '')}`,
+        baseDirectory: project.root,
+        configPath: packagePath,
+        scopeRoot: workspaceRoot,
+        targets: [target],
+      });
+    }
+  }
+
+  return mappings;
+}
+
 function discoverPathMappings(
   workspaceRoot: string,
   projects: ProjectBoundary[],
@@ -361,6 +429,13 @@ function discoverPathMappings(
     seenConfigs.add(configPath);
     mappings.push(...pathMappingsFromConfig(configPath, project.root));
   }
+
+  const customConditions =
+    readJsonIfExists<Tsconfig>(rootConfig)?.compilerOptions?.customConditions ??
+    [];
+  mappings.push(
+    ...packageExportMappings(workspaceRoot, projects, customConditions),
+  );
 
   return mappings;
 }

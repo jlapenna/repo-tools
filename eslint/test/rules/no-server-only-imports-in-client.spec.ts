@@ -30,6 +30,7 @@ function createFixture(): string {
   writeFixture(workspaceRoot, 'tsconfig.base.json', {
     compilerOptions: {
       baseUrl: '.',
+      customConditions: ['@repo/source'],
       paths: {
         '@repo/server': ['packages/nested/server/src/index.ts'],
         '@repo/server/client': ['packages/nested/server/src/client/index.ts'],
@@ -97,6 +98,45 @@ function createFixture(): string {
     workspaceRoot,
     'packages/inferred/src/index.ts',
     'export const inferredSecret = true;\n',
+  );
+
+  // An Nx workspace package has no tsconfig alias: its exports map, resolved
+  // through the root customConditions, declares the explicit entry points.
+  writeFixture(workspaceRoot, 'packages/packaged/package.json', {
+    name: '@repo/packaged',
+    nx: { tags: ['platform:server'] },
+    exports: {
+      './package.json': './package.json',
+      '.': {
+        '@repo/source': './src/index.ts',
+        types: './dist/index.d.ts',
+        import: './dist/index.js',
+      },
+      './browser': {
+        '@repo/source': './src/browser/index.ts',
+        types: './dist/browser/index.d.ts',
+        import: './dist/browser/index.js',
+      },
+      './missing': {
+        '@repo/source': './src/missing/index.ts',
+        import: './dist/missing/index.js',
+      },
+    },
+  });
+  writeFixture(
+    workspaceRoot,
+    'packages/packaged/src/index.ts',
+    'export const packagedSecret = true;\n',
+  );
+  writeFixture(
+    workspaceRoot,
+    'packages/packaged/src/private.ts',
+    'export const packagedPrivate = true;\n',
+  );
+  writeFixture(
+    workspaceRoot,
+    'packages/packaged/src/browser/index.ts',
+    'export const packagedSafe = true;\n',
   );
 
   writeFixture(workspaceRoot, 'packages/mixed/project.json', {
@@ -203,6 +243,8 @@ describe('no-server-only-imports-in-client', () => {
     '@repo/mixed',
     '@repo/mixed/server',
     '@repo/inferred',
+    '@repo/packaged',
+    '@repo/packaged/private',
     '@web/server',
     './lib/secret',
     'server-only',
@@ -218,7 +260,11 @@ describe('no-server-only-imports-in-client', () => {
     });
   });
 
-  it.each(['@repo/missing', '@repo/server/client/missing'])(
+  it.each([
+    '@repo/missing',
+    '@repo/server/client/missing',
+    '@repo/packaged/missing',
+  ])(
     'fails closed when the workspace target for %s cannot be resolved',
     (source) => {
       const messages = lint(
@@ -248,6 +294,7 @@ describe('no-server-only-imports-in-client', () => {
     "'use client';\nexport { type Secret } from '@repo/server';\n",
     "'use client';\nimport { safe } from '@repo/server/client';\n",
     "'use client';\nimport { safe } from '@repo/mixed/browser';\n",
+    "'use client';\nimport { safe } from '@repo/packaged/browser';\n",
     "'use client';\nimport { safe } from './lib/safe-comment';\n",
     "'use client';\nimport React from 'react';\n",
     "'use client';\nimport { client } from '@third-party/server/client';\n",
