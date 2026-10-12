@@ -153,6 +153,9 @@ health checks.
   the sweep and `repo-audit-branches [--base main] [--fetch] [--branch NAME] [--delete] [--delete-remote]`
   use the same fail-closed merge/ownership checker. Reports are TSV with stable
   reasons; missing ownership evidence preserves work. No fetch is implicit.
+  Non-ancestor tips use GitHub's commit-associated PR lookup for exact squash
+  or rebase merge proof. Closed-PR recovery queries the candidate branch;
+  neither path scans a recent repository-wide PR history window.
   `repo-audit-branches --no-pr-days N` also treats an unmerged, unoccupied branch as
   `abandoned:no-pr-Nd` when no PR in any state exists for it or its upstream
   name or any remote-tracking branch containing its tip, and its tip is older

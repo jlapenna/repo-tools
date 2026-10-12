@@ -2,7 +2,7 @@
 # Shared, fail-closed cleanup evidence. Source from branch and worktree commands.
 # PR data is a snapshot, not permission: callers recheck before applying a plan.
 cleanup_load_prs() {
-  local repo=$1 open merged
+  local repo=$1 open
   CLEANUP_PRS=''
   open=$(cd "$repo" && gh api --paginate --slurp 'repos/{owner}/{repo}/pulls?state=open&per_page=100') || return 1
   open=$(jq -ce 'if type == "array" and all(.[]; type == "array") then
@@ -11,23 +11,42 @@ cleanup_load_prs() {
        headRepository: .head.repo.full_name, baseRepository: .base.repo.full_name,
        state: "OPEN"} else error("invalid open PR head") end]
     else error("invalid open PR pages") end' <<<"$open") || return 1
-  # Missing older merged records is conservative: unproven squash heads stay.
-  merged=$(cd "$repo" && gh pr list --state merged --limit 1000 --json headRefName,headRefOid,mergeCommit) || return 1
-  # Histories of 1000 PRs exceed Linux's per-argument limit. Keep bulk data
-  # on stdin; --argjson would fail before jq could validate it.
-  CLEANUP_PRS=$(printf '%s\n%s\n' "$open" "$merged" | jq -ces '
-    if (.[1] | type) == "array" then .[0] + (.[1] | map(. + {state:"MERGED"}))
-    else error("invalid merged PR data") end') || return 1
+  CLEANUP_PRS=$open
 }
 
 cleanup_evidence() {
-  local repo=$1 base=$2 branch=$3 tip=$4 merge
+  local repo=$1 base=$2 branch=$3 tip=$4 merge associated
   if [[ -z ${CLEANUP_PRS:-} ]]; then echo 'unverified:pr-data-unavailable'; return 1; fi
   if jq -e --arg branch "$branch" --arg tip "$tip" 'any(.[]; .state == "OPEN" and (.headRefName == $branch or .headRefOid == $tip))' <<<"$CLEANUP_PRS" >/dev/null; then
     echo 'open-pr'; return 1
   fi
   if git -C "$repo" merge-base --is-ancestor "$tip" "$base" 2>/dev/null; then
     echo 'landed:ancestor'; return 0
+  fi
+  # Only non-ancestor tips need squash/rebase evidence. Ask about that exact
+  # commit, not a bounded window of unrelated repository history.
+  associated=$(cd "$repo" && gh api --paginate --slurp "repos/{owner}/{repo}/commits/$tip/pulls?per_page=100" 2>/dev/null) || {
+    # GitHub explicitly reports an unpublished/unknown commit with this 422.
+    # It is not merge proof; ordinary cleanup retains it. Separate opt-in
+    # abandonment still requires fresh branch/upstream PR-absence evidence.
+    if jq -e --arg tip "$tip" 'type == "array" and length == 1 and
+      .[0].status == "422" and
+      .[0].message == ("No commit found for SHA: " + $tip)' <<<"$associated" >/dev/null 2>&1; then
+      echo 'unverified:unmerged'; return 1
+    fi
+    echo 'unverified:pr-data-unavailable'; return 1;
+  }
+  associated=$(jq -ce 'if type == "array" and all(.[]; type == "array") then
+    [.[][] | if (.head.sha | type) == "string" and
+      (.state == "open" or .state == "closed") and
+      (.merged_at == null or (.merged_at | type) == "string") and
+      (.merged_at == null or (.merge_commit_sha | type) == "string")
+      then . else error("invalid associated PR") end]
+    else error("invalid associated PR pages") end' <<<"$associated") || {
+    echo 'unverified:pr-data-unavailable'; return 1;
+  }
+  if jq -e 'any(.[]; .state == "open")' <<<"$associated" >/dev/null; then
+    echo 'open-pr'; return 1
   fi
   while IFS= read -r merge; do
     if git -C "$repo" merge-base --is-ancestor "$merge" "$base" 2>/dev/null; then
@@ -37,8 +56,8 @@ cleanup_evidence() {
   # commit. The merge on the selected base proves landing; the local name does
   # not add provenance. Never accept a merely equivalent tree or newer tip.
   done < <(jq -r --arg tip "$tip" '.[] |
-    select(.state == "MERGED" and .headRefOid == $tip) |
-    .mergeCommit.oid // empty' <<<"$CLEANUP_PRS")
+    select(.state == "closed" and .merged_at != null and .head.sha == $tip) |
+    .merge_commit_sha' <<<"$associated")
   echo 'unverified:unmerged'; return 1
 }
 
@@ -78,10 +97,18 @@ cleanup_no_pr_abandoned() {
 # Only same-repository PRs count: a fork's PR can reuse a branch name and
 # point at a commit it copied, and it restores into the fork, not here.
 cleanup_load_closed_prs() {
-  local repo=$1 closed
+  local repo=$1 branch=$2 closed encoded
   CLEANUP_CLOSED_PRS=''
-  closed=$(cd "$repo" && gh pr list --state closed --limit 1000 --json number,headRefName,headRefOid,isCrossRepository) || return 1
-  CLEANUP_CLOSED_PRS=$(jq -ce 'if type == "array" then . else error("invalid closed PR data") end' <<<"$closed") || return 1
+  encoded=$(jq -rn --arg branch "$branch" '$branch | @uri') || return 1
+  closed=$(cd "$repo" && gh api --paginate --slurp "repos/{owner}/{repo}/pulls?state=closed&head={owner}:$encoded&per_page=100") || return 1
+  CLEANUP_CLOSED_PRS=$(jq -ce 'if type == "array" and all(.[]; type == "array") then
+    [.[][] | if (.number | type) == "number" and (.head.ref | type) == "string" and
+      (.head.sha | type) == "string" and .state == "closed" then
+      {number, headRefName:.head.ref, headRefOid:.head.sha,
+       isCrossRepository:(.head.repo.full_name == null or
+         .head.repo.full_name != .base.repo.full_name)}
+      else error("invalid closed PR") end]
+    else error("invalid closed PR pages") end' <<<"$closed") || return 1
 }
 
 # A tip that moved after its PR closed carries commits GitHub never kept:

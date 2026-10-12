@@ -40,7 +40,6 @@ if [[ $named == true && ( $base_ref == "refs/heads/$selected_branch" || $base_re
   echo 'cannot select the base branch' >&2; exit 64
 fi
 cleanup_load_prs "$repo" || true
-[[ $closed_pr_heads == false ]] || cleanup_load_closed_prs "$repo" || true
 # Proven merged, or (when only unmerged) restorable from a closed PR, or never
 # proposed and older than the no-PR window. Any other evidence failure keeps
 # the branch.
@@ -50,7 +49,10 @@ audit_verdict() {
     echo "$reason"; return 0
   fi
   [[ $reason == unverified:unmerged ]] || { echo "$reason"; return 1; }
-  [[ $closed_pr_heads == false ]] || ! cleanup_closed_pr_head "$branch" "$tip" || return 0
+  if [[ $closed_pr_heads == true ]]; then
+    cleanup_load_closed_prs "$repo" "$branch" || { echo 'unverified:closed-pr-data-unavailable'; return 1; }
+    if cleanup_closed_pr_head "$branch" "$tip"; then return 0; fi
+  fi
   cleanup_no_pr_abandoned "$repo" "$kind" "$branch" "$tip" "$no_pr_days" || { echo "$reason"; return 1; }
 }
 plan=$(mktemp)
@@ -68,6 +70,8 @@ while read -r ref tip; do
   elif reason=$(audit_verdict "$kind" "$branch" "$tip"); then verdict=SAFE
   else verdict=KEEP; fi
   printf '%s\t%s\t%s\t%s\t%s\n' "$verdict" "$kind" "$branch" "$tip" "$reason"
+  if [[ $reason == unverified:closed-pr-data-unavailable ]] &&
+    { [[ $local_delete == true ]] || [[ $remote_delete == true ]]; }; then refused=true; fi
   if [[ $named == true && $verdict == KEEP ]] &&
     { [[ $kind == local && $local_delete == true ]] || [[ $kind == remote && $remote_delete == true ]]; }; then
     refused=true
@@ -75,17 +79,17 @@ while read -r ref tip; do
   [[ $verdict != SAFE ]] || printf '%s\t%s\t%s\n' "$kind" "$branch" "$tip" >> "$plan"
 done < <(git for-each-ref --format='%(refname) %(objectname)' refs/heads/ refs/remotes/origin/)
 [[ $local_delete == true || $remote_delete == true ]] || exit 0
-[[ $refused == false ]] || { echo 'selected branch deletion refused' >&2; exit 1; }
+[[ $refused == false ]] || { echo 'branch deletion refused' >&2; exit 1; }
 if [[ $named == true && $remote_delete == true && $remote_seen == false ]]; then
   remote_head=$(git -C "$repo" ls-remote --heads origin "refs/heads/$selected_branch") || exit 1
   [[ -z $remote_head ]] || { echo 'selected remote branch has no audited tracking ref; fetch before cleanup' >&2; exit 1; }
 fi
 cleanup_load_prs "$repo" || { echo 'PR recheck failed; nothing deleted' >&2; exit 1; }
-[[ $closed_pr_heads == false ]] || cleanup_load_closed_prs "$repo" || { echo 'closed PR recheck failed; nothing deleted' >&2; exit 1; }
 while read -r kind branch tip; do
   [[ $kind != local || $local_delete == true ]] || continue
   [[ $kind != remote || $remote_delete == true ]] || continue
-  if ! audit_verdict "$kind" "$branch" "$tip" >/dev/null; then
+  if ! reason=$(audit_verdict "$kind" "$branch" "$tip"); then
+    [[ $reason != unverified:closed-pr-data-unavailable ]] || { echo 'closed PR recheck failed' >&2; exit 1; }
     [[ $named == false ]] || { echo 'selected branch recheck refused deletion' >&2; exit 1; }
     continue
   fi

@@ -185,18 +185,19 @@ test("cleanup retains closed, gone, reused, open and checked-out work; deletes p
     git("config", "branch.gone.remote", "origin");
     git("config", "branch.gone.merge", "refs/heads/missing");
     git("worktree", "add", path.join(root, "occupied"), "checked-out");
-    const historyFile = path.join(root, "merged-prs.json");
-    fs.writeFileSync(historyFile, JSON.stringify([
-      {headRefName: "squashed", headRefOid: tips.squashed, mergeCommit: {oid: squash}},
-      {headRefName: "reused", headRefOid: base, mergeCommit: {oid: squash}},
-      ...Array.from({length: 998}, (_, index) => ({headRefName: `historic-${index}`, headRefOid: base, mergeCommit: {oid: squash}})),
-    ]));
-    assert.ok(fs.statSync(historyFile).size > 131072, "realistic 1000-PR history exceeds a single OS argument");
-    fs.writeFileSync(
-      path.join(bin, "gh"),
-      `#!/bin/sh\n[ -z "$FAIL_GH" ] || exit 1\ncase "$1" in\napi) printf '%s\\n' '[[],[{"head":{"ref":"open"}}]]';;\npr) cat '${historyFile}';;\n*) exit 2;;\nesac\n`,
-      { mode: 0o755 },
-    );
+    const evidenceFile = path.join(root, "associated-prs.json");
+    fs.writeFileSync(evidenceFile, JSON.stringify([[
+      {state: "closed", head: {sha: tips.squashed}, merged_at: "2026-08-25T00:00:00Z", merge_commit_sha: squash},
+      {state: "closed", head: {sha: base}, merged_at: "2026-08-25T00:00:00Z", merge_commit_sha: squash},
+    ]]));
+    fs.writeFileSync(path.join(bin, "gh"), `#!/bin/sh
+[ -z "$FAIL_GH" ] || exit 1
+[ "$1" = api ] || exit 2
+case "$4" in
+  */commits/*) cat '${evidenceFile}';;
+  *) printf '%s\\n' '[[],[{"head":{"ref":"open"}}]]';;
+esac
+`, {mode: 0o755});
     const script = fileURLToPath(new URL("./audit-branches.sh", import.meta.url));
     assert.throws(() => execFileSync("bash", [script, "--delete"], {
       cwd: repo, env: {...env, FAIL_GH: "1"}, stdio: ["ignore", "pipe", "pipe"],
@@ -313,7 +314,11 @@ test("cleanup abandons only old branches that never had a PR", () => {
       `#!/bin/sh
 [ -z "$FAIL_HEAD" ] || [ "$3" != --head ] || exit 1
 case "$1 $2" in
-"api "*) printf '%s\\n' '[[]]';;
+"api "*) case "$4" in
+  */commits/*) tip=\${4##*/commits/}; tip=\${tip%%/*}
+    jq -nc --arg tip "$tip" '[{status:"422",message:("No commit found for SHA: " + $tip)}]'; exit 1;;
+  *) printf '%s\\n' '[[]]';;
+esac;;
 "pr list") if [ "$3" = --head ]; then if [ -e '${prs}'/"$4" ]; then echo 1; else echo 0; fi; else echo '[]'; fi;;
 *) exit 2;;
 esac
@@ -384,27 +389,19 @@ test("cleanup deletes a branch only at its closed PR's exact head, and only on r
     git("switch", "main");
     git("push", "origin", "at-closed-head", "moved-after-close", "reopened", "fork-named");
     git("fetch", "origin");
-    const closed = JSON.stringify(
-      Object.entries(heads).map(([name, oid], number) => ({
-        number: number + 1,
-        headRefName: name,
-        headRefOid: oid,
-        // A fork's PR with this branch's name and tip restores into the fork.
-        isCrossRepository: name === "fork-named",
-      })),
-    );
-    fs.writeFileSync(
-      path.join(bin, "gh"),
-      `#!/bin/sh
-case "$1 $2 $3 $4" in
-"api "*) printf '%s\\n' '[[{"head":{"ref":"reopened"}}]]';;
-"pr list --state closed") [ -z "$FAIL_CLOSED" ] || exit 1; printf '%s\\n' '${closed}';;
-"pr list "*) echo '[]';;
-*) exit 2;;
+    const closed = JSON.stringify([Object.entries(heads).map(([name, oid], number) => ({
+      number: number + 1, state: "closed",
+      head: {ref: name, sha: oid, repo: {full_name: name === "fork-named" ? "fork/repo" : "owner/repo"}},
+      base: {repo: {full_name: "owner/repo"}},
+    }))]);
+    fs.writeFileSync(path.join(bin, "gh"), `#!/bin/sh
+[ "$1" = api ] || exit 2
+case "$4" in
+  *state=closed*) [ -z "$FAIL_CLOSED" ] || exit 1; printf '%s\\n' '${closed}';;
+  */commits/*) echo '[[]]';;
+  *) printf '%s\\n' '[[{"head":{"ref":"reopened"}}]]';;
 esac
-`,
-      { mode: 0o755 },
-    );
+`, {mode: 0o755});
     const script = fileURLToPath(new URL("./audit-branches.sh", import.meta.url));
     const run = (args, extraEnv = {}) =>
       execFileSync("bash", [script, ...args], {

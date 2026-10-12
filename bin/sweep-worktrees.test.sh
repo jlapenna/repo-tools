@@ -24,12 +24,18 @@ cd "$tmp"
 
 g() { git -c user.name=t -c user.email=t@t "$@"; }
 
-# A stub gh: `gh pr list ...` prints $GH_PRS_JSON; anything else fails.
+# GitHub boundary fixture: commit-associated PRs and the active-ownership list.
 mkdir -p "$tmp/bin"
 cat > "$tmp/bin/gh" <<'GH'
 #!/usr/bin/env bash
-if [ "$1" = pr ] && [ "$2" = list ]; then printf '%s\n' "${GH_PRS_JSON:-[]}" | jq '[.[]|select(.state=="MERGED")]'; exit 0; fi
-if [ "$1" = api ]; then printf '%s\n' "${GH_PRS_JSON:-[]}" | jq '[[.[]|select(.state=="OPEN")|{head:{ref:.headRefName}}]]'; exit 0; fi
+if [ "$1" = api ]; then
+  case "$4" in
+    */commits/*) tip=${4##*/commits/}; tip=${tip%%/*}
+      printf '%s\n' "${GH_PRS_JSON:-[]}" | jq --arg tip "$tip" '[[.[]|select(.state=="MERGED" and .headRefOid==$tip)|{state:"closed",head:{sha:.headRefOid},merged_at:"2026-08-25T00:00:00Z",merge_commit_sha:.mergeCommit.oid}]]';;
+    *) printf '%s\n' "${GH_PRS_JSON:-[]}" | jq '[[.[]|select(.state=="OPEN")|{head:{ref:.headRefName}}]]';;
+  esac
+  exit 0
+fi
 echo "gh stub: unsupported: $*" >&2; exit 1
 GH
 chmod +x "$tmp/bin/gh"
