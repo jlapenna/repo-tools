@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { classify, fetchIssueState, ghError, heartbeat, parseDuration, parseMarker, parseTarget, renderMarker } from './claim-status.mjs';
+import { classify, fetchIssueState, ghError, heartbeat, nextAction, parseDuration, parseMarker, parseTarget, renderMarker } from './claim-status.mjs';
 
 const script = fileURLToPath(new URL('./claim-status.mjs', import.meta.url));
 const target = { owner: 'acme', repo: 'app', number: 42 };
@@ -195,4 +195,30 @@ test('gh failures surface gh\'s message and a PR number gets a clear error', () 
   assert.equal(ghError(failure).message, 'Could not resolve to an Issue with the number of 7.');
   assert.throws(() => fetchIssueState(target, () => { throw ghError(failure); }), /acme\/app#42 is not an issue/);
   assert.throws(() => fetchIssueState(target, () => { throw new Error('HTTP 502'); }), /HTTP 502/);
+});
+
+test('nextAction: free proceeds, closed stops', () => {
+  assert.deepEqual(nextAction({ status: 'free', evidence: [] }, ['me']), { action: 'proceed' });
+  assert.deepEqual(nextAction({ status: 'closed', evidence: [] }, ['me']), { action: 'none' });
+});
+
+test('nextAction: my own live PR (by login or branch) continues; a foreign one stands down', () => {
+  const live = classify(state({ pullRequests: [pr({ closing: true, author: 'bot-user' })] }), target, opts);
+  assert.deepEqual(nextAction(live, ['bot-user']), { action: 'continue-own', branch: 'work/42' });
+  assert.deepEqual(nextAction(live, ['work/42']), { action: 'continue-own', branch: 'work/42' });
+  assert.deepEqual(nextAction(live, ['someone-else']), { action: 'stand-down', liveClaims: ['https://github.com/acme/app/pull/7'] });
+});
+
+test('nextAction: a foreign heartbeat on my branch still stands me down', () => {
+  const hb = comment(renderMarker({ owner: 'session-c', branch: 'work/42', lastActive: ago(5) }), { updatedAt: ago(5) });
+  const result = classify(state({ pullRequests: [pr({ closing: true })], comments: [hb] }), target, opts);
+  assert.equal(nextAction(result, ['session-o', 'work/42']).action, 'stand-down');
+  assert.equal(nextAction(result, ['session-c', 'work/42']).action, 'continue-own');
+});
+
+test('nextAction: stale with a branch adopts; stale without one proceeds', () => {
+  const stalePr = classify(state({ pullRequests: [pr({ closing: true, updatedAt: ago(25 * 60) })] }), target, opts);
+  assert.deepEqual(nextAction(stalePr, ['me']), { action: 'adopt', branch: 'work/42' });
+  const staleComment = classify(state({ comments: [comment('Session takeover: x', { createdAt: ago(300) })] }), target, opts);
+  assert.deepEqual(nextAction(staleComment, ['me']), { action: 'proceed' });
 });
