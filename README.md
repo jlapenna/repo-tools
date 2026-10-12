@@ -103,6 +103,8 @@ health checks.
   dirty, live, open-PR, and unverified worktrees are reported and kept. Run
   it from the primary checkout, on a schedule, as the backstop for sessions
   that never completed their own teardown.
+- Exact merged-head evidence also covers renamed branches and detached review
+  checkouts. An open PR with the same head still protects the checkout.
 - `repo-prune-merged-worktrees [--repo <checkout>] [--base <ref>] [--fetch]
   [--delete] [--session-only] [<worktree-path>]` — the shared pruning entry
   point, using the sweep's merge and ownership evidence. It audits by default;
@@ -115,6 +117,38 @@ health checks.
   locks around that remover, and reclaims only its own resources afterward.
   Audits never invoke hooks. Consumer cache formats and Docker rules stay in
   the consumer adapter.
+- For explicitly authorized disk cleanup of inactive unmerged work, add
+  `--park-unmerged --idle-hours 36 --delete`. A successful result is `PARKED`,
+  not a claim that the work merged. File/directory modification times and
+  worktree/branch reflogs must all be older than the cutoff; reads do not count.
+  Dirty, live, locked, nested, open-PR-owned, and unverifiable work stays.
+  Parking keeps the branch and creates a protected Git ref for the exact
+  commit, including detached HEADs. It saves and verifies a private compressed
+  checkout under the owning Git common directory's `parked-worktrees/` before
+  removal. Only ignored, untracked `node_modules`, `.nx`, `.next`, `.venv`,
+  `__pycache__`, and `.turbo` directories are omitted. Tracked files, other
+  ignored local inputs, and symlinks are preserved. Archives have private
+  permissions and must not be published because they may contain local secrets.
+  Apply rechecks activity, ownership, HEAD, cleanliness, and live processes.
+  Consumer resource adapters are required just as for merged cleanup.
+  The supplied remover rechecks the archived files inside the adapter's locked
+  transaction. A resource refusal leaves the checkout intact and discards its
+  prepared archive/ref so retries do not accumulate duplicate backups.
+- When the owner explicitly authorizes retirement of every checkout older than
+  a window, use `--park-inactive --idle-hours 36 --delete` instead. This parks
+  qualifying checkouts regardless of merge or PR status, always preserves
+  branches/history/files, and requires no GitHub access. It does not change PRs
+  or remote branches. A positive age window is mandatory; the same local
+  inactivity, occupancy, resource, and archive-verification checks still apply.
+  Scope the command to the authorized paths. Parking needs Linux process
+  evidence and GNU find/tar.
+- `repo-restore-worktree <archive-directory> [--path <new-path>]` verifies the
+  archive checksum and protected commit before recreating the checkout. It
+  restores the original branch when unchanged and available; otherwise it
+  uses detached HEAD without resetting an occupied or newer branch. Run the
+  repository's worktree setup command afterward to reinstall dependencies.
+  Each archive includes its manifest and exact restore command. Archives and
+  protected refs are retained until the owner explicitly disposes of them.
 - With `repo-sweep-worktrees`, use `--path <worktree>` to scope it to one
   completed task. Both
   the sweep and `repo-audit-branches [--base main] [--fetch] [--branch NAME] [--delete] [--delete-remote]`

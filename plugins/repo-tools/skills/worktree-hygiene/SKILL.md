@@ -153,6 +153,43 @@ operation, not "merged" cleanup. Inspect its exact content and scope, then use
 `repo-safe-remove-worktree <path> --dry-run` before removal. Never override a dirty,
 locked, occupied, or partially removed worktree merely to finish a checklist.
 Preserve disputed work and report the specific blocker.
+
+For authorized disk cleanup, unmerged work may be parked rather than discarded:
+
+```bash
+repo-prune-merged-worktrees --repo <primary> --park-unmerged --idle-hours 36 <worktree>
+repo-prune-merged-worktrees --repo <primary> --park-unmerged --idle-hours 36 --delete <worktree>
+```
+
+Use the user's specified inactivity window. Parking preserves the branch, a
+protected exact-commit ref, and a verified private archive of non-cache files;
+only ignored dependency/cache directories are omitted. It never calls unmerged
+work "landed." File/directory writes and checkout/ref activity count as touches,
+not reads. Recent, dirty, live, locked, nested, open-PR-owned, and unverifiable
+checkouts stay. Pass the consumer's documented resource adapter in audit and
+apply just as for merged removal. Do not bypass a refusal.
+
+The report supplies `repo-restore-worktree <archive-directory>`, also saved
+beside the private manifest. Reinstall dependencies through the repository's
+setup command after restoration. Do not share archives: ignored local inputs
+may contain credentials. Archive disposal is separate from checkout cleanup.
+
+If the owner authorizes retirement by inactivity regardless of PR status, use
+`--park-inactive --idle-hours 36` instead of `--park-unmerged`, restricted to
+the authorized paths. It needs a positive window and Linux process evidence,
+preserves every branch and exact commit, and archives non-cache local files.
+It performs no GitHub reads or writes and does not require a merge. An open PR
+alone does not retain a checkout in this explicitly selected mode; recent
+writes, live processes, locks, dirty/nested trees, and consumer resource
+refusals still do. Retiring the local checkout does not abandon or finish its
+implementation issue.
+
+Resource adapters must invoke the supplied remover while holding their lock.
+For parking, that remover also compares the archive to the current local files
+inside the locked transaction. A resource refusal discards its prepared
+snapshot and ref only while the original checkout remains intact; partial
+removal failures retain recovery evidence.
+
 ## Syncing the primary checkout after a merge
 
 Treat syncing the primary checkout to the latest remote base as the final
