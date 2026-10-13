@@ -226,11 +226,15 @@ if [ -z "${NODE_COMPILE_CACHE:-}" ]; then
   export NODE_COMPILE_CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/node-compile-cache"
 fi
 
-# Use pnpm exec to ensure we use the workspace-local nx version.
-if command -v pnpm >/dev/null 2>&1; then
-  exec pnpm exec nx --outputStyle=stream "$@"
-elif [ -f "./node_modules/.bin/nx" ]; then
+# Run the workspace-local nx binary directly when it is present. `pnpm exec`
+# stays resident as a waiting parent (~145 MiB RSS) for the whole Nx run, which
+# a memory-bounded CI runner pays on top of every task; Nx already puts
+# node_modules/.bin on PATH for the commands it runs. pnpm exec remains the
+# fallback, e.g. from a directory without node_modules.
+if [ -x "./node_modules/.bin/nx" ]; then
   exec ./node_modules/.bin/nx --outputStyle=stream "$@"
+elif command -v pnpm >/dev/null 2>&1; then
+  exec pnpm exec nx --outputStyle=stream "$@"
 else
   echo "CRITICAL: pnpm or nx NOT FOUND"
   exit 1
