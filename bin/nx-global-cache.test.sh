@@ -76,4 +76,13 @@ env PATH="$fixture/bin:$PATH" XDG_CONFIG_HOME="$fixture/config" TEST_HEALTH_STAT
   NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN=ci-fixture-token \
   TEST_EXPECTED_SERVER=http://explicit.invalid TEST_EXPECTED_TOKEN=ci-fixture-token \
   bash "$here/nx.sh" --version
+# A workspace-local nx binary runs directly, without a resident pnpm parent;
+# the fake pnpm above would exit 41 because no credential is expected here.
+mkdir -p node_modules/.bin
+printf '#!/bin/sh\necho direct-nx "$@"\n' > node_modules/.bin/nx
+chmod +x node_modules/.bin/nx
+out="$(env PATH="$fixture/bin:$PATH" XDG_CONFIG_HOME="$fixture/config" TEST_HEALTH_STATUS=7 \
+  TEST_EXPECTED_SERVER=unused TEST_EXPECTED_TOKEN=unused bash "$here/nx.sh" --version)"
+[[ "$out" == "direct-nx --outputStyle=stream --version" ]] || { echo "unexpected: $out" >&2; exit 45; }
+rm -r node_modules
 echo 'account-wide Nx cache fallback passed'
