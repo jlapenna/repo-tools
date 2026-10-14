@@ -1,6 +1,6 @@
 ---
 name: autonomous-work
-description: Complete an authorized task without optional questions when the user says they are unavailable, AFK, unable to answer, or asks to keep working autonomously. Resolve routine ambiguity from evidence and reversible defaults, continue independent work around blockers, and report any unfinished actions. Use for hands-off execution of a bounded task, not to start an unsolicited backlog, schedule work, or grant new permissions.
+description: Complete an authorized task without optional questions when the user says they are unavailable, AFK, unable to answer, "keep going", "don't ask me", or asks to keep working autonomously. Resolve routine ambiguity from evidence and reversible defaults, make judgment calls instead of handing back options, continue independent work around blockers, and check every item before reporting it as the user's. Use for hands-off execution of a bounded task, and again before writing the final report of an autonomous run. Do not use it to start an unsolicited backlog, schedule work, or grant new permissions.
 ---
 
 # Autonomous work
@@ -40,7 +40,15 @@ recover scope, decisions, completed work, and pending actions before proceeding.
 3. **Optional preferences:** use the existing default or a conservative,
    reversible assumption. State the assumption briefly and proceed; do not
    end the update with a question or request acknowledgment.
-4. **Consequential uncertainty:** if incompatible interpretations would change
+4. **Judgment calls and policy choices:** when there are several reasonable
+   options, pick one, say why in a sentence or two, and carry it out. If a
+   standing rule requires review before implementation (a spec-first or
+   design-review rule), the decision still belongs to you: write the
+   reviewable artifact with your choice filled in, publish it where the
+   reviewer will see it, and continue other work. A spec with a
+   recommendation is finished work; a list of options without a choice
+   hands your job back.
+5. **Consequential uncertainty:** if incompatible interpretations would change
    scope, destroy work, expose data, or require new authorization, defer the
    affected action. Prepare a concrete reviewable result where possible and
    continue work that does not depend on the missing decision.
@@ -73,9 +81,40 @@ Before handing back a next step or asking approval for routine follow-through,
 check its live state: PR and issue comments, workflow or deploy runs, or the
 resource's own status output. Another session may already have done it. If it
 is done, say so with the evidence. If it is pending and within the request, do
-it through the repository's procedure, including any required dry run. Leave a
-step to the user only when it needs their credentials or a decision only they
-can make, and name which.
+it through the repository's procedure, including any required dry run.
+
+## Before handing anything back
+
+A user who said they cannot answer questions gets nothing from an item
+labelled "your call", "needs your decision", "left for you", or "next action
+for you". Each of these turns into a question they have to stop and answer,
+which is exactly the interruption they ruled out. Before an item goes into your
+report as the user's, run it through these tests:
+
+1. **Can I do it with the tools and authorization I already hold?** Updating
+   a branch, rerunning a check, filing or commenting on an issue, cleaning up
+   your own artifacts, or following a documented procedure: do it now, then
+   report it as done.
+2. **Is it a choice between options?** Make the choice (step 4 above). If a
+   review gate applies, publish the artifact with the decision filled in. Then
+   report it as "spec posted with decision X, awaiting review", not "pick one".
+3. **Did I defer it earlier?** An item you set aside earlier in the session, or
+   one a compaction summary lists as left alone, gets these tests again. "I
+   left them alone" records a past choice; it is not a constraint.
+4. **Does someone else's label call it the user's decision?** A triage bot,
+   an issue body, or your own earlier note saying "needs <user>" is a guess
+   about ownership. Check it against what the user actually reserved.
+
+Only these stay with the user: their credentials or identity (logins,
+signing, 2FA), money or legal commitments, physical-world actions, actions the
+user explicitly reserved for themselves, and approvals a tool or policy
+enforces. For each one, name the specific missing authority. "This is a policy
+choice" is not on that list.
+
+When the response style asks for a closing next action, under autonomy that
+action is yours: the next thing you will do, or the event you are waiting on.
+A chore for the user belongs there only when it is one of the reserved items
+above.
 
 Send concise, nonblocking updates with what now works, consequential
 assumptions, and what remains. A status question from the user is not a reason
@@ -103,6 +142,11 @@ action with its unblock condition. Distinguish implemented, verified,
 published, and deployed results. Checks of skill formatting and links do not
 prove that an agent's future behavior improved.
 
+Sort remaining items into three groups: done, still in progress (yours, with
+what you are doing next), and blocked (reserved items only, each naming the
+missing authority). There is no fourth group of things for the user to decide.
+If you are about to write one, go back to "Before handing anything back".
+
 Examples of the decision boundary:
 
 - **“I'm AFK; fix the failing tests.”** Diagnose the failure, apply the scoped
@@ -114,3 +158,11 @@ Examples of the decision boundary:
 - **“Ship this change while I'm away.”** Follow the authorized delivery
   workflow. If deployment needs an unavailable approval or credential, finish
   the independent steps and report the exact pending deployment gate.
+- **“Keep going; don't ask me anything.” An issue offers three options, and
+  the user requires a spec before policy changes.** Choose the option, post
+  the spec with your reasoning on the issue, and report "spec posted with
+  option 2, awaiting review". Do not report "pick one of three".
+- **Open PRs fell behind main after your change.** Bringing them up to date
+  through the forge's own update or its rebase mechanism is routine and
+  reversible. Do it, and skip the ones with conflicts while naming them. Do
+  not list it as the user's next step.
