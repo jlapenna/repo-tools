@@ -33,6 +33,23 @@ web routes, and heading anchors are not checked. Nx inventories include only
 explicit targets, not inferred targets. These are source contracts, not runtime
 health checks.
 
+- `repo-doctor [--json]` — read-only check that the installed runtime is
+  usable before an agent relies on it. It reports the repo-tools package
+  root (and commit, for a checkout), the enclosing repository if any, the
+  `git`, `bash`, `gh`, and `jq` binaries, every `repo-*` command on `PATH`
+  with the file its symlink or pnpm shim runs, the repo-tools commands that
+  Codex (`$CODEX_HOME/hooks.json`) and Claude Code
+  (`$CLAUDE_CONFIG_DIR/settings.json`) hooks call, and installed Codex and
+  Claude plugin versions. A missing `git` or `bash`, a missing command a hook
+  calls, a shim or plugin install path that no longer exists, or an enabled
+  Codex plugin with no installed version fails (exit 1, naming the exact
+  dependency); other gaps, version drift between plugin caches, and commands
+  resolving from several installs only warn (exit 0). It reads hook files for
+  command names only: it never reads stdin or prints hook command text,
+  prompts, or payloads. It never repairs, installs, edits configuration, or
+  uses the network. `--json` prints one object: `ok`, `package`,
+  `repository`, and `checks` (`name`, `status` of `ok`/`warn`/`fail`,
+  `detail`).
 - `repo-adopt [--target DIR] [--hooks auto|pre-commit|husky|none] [--repo-tools-rev SHA] [--check] [--force]`
   — idempotently install this package's generic conventions into a
   repository: the `repo-require-worktree` commit and push guards (merged into

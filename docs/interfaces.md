@@ -15,6 +15,7 @@ Nx-inferred targets are intentionally not listed. Runtime status is not inferred
 | repo-check-runner-labels | [bin/check-runner-labels.mjs](../bin/check-runner-labels.mjs) |
 | repo-check-schedules | [bin/check-schedules.mjs](../bin/check-schedules.mjs) |
 | repo-docs | [bin/docs.mjs](../bin/docs.mjs) |
+| repo-doctor | [bin/doctor.mjs](../bin/doctor.mjs) |
 | repo-github-app-token | [bin/github-app-token.mjs](../bin/github-app-token.mjs) |
 | repo-install-husky-hooks | [bin/install-husky-hooks.sh](../bin/install-husky-hooks.sh) |
 | repo-nx | [bin/nx.sh](../bin/nx.sh) |
