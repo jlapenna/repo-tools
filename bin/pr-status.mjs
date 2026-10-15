@@ -118,9 +118,9 @@ function gh(args) {
 
 export function status({ repo, number }) {
   const nameWithOwner = repo ?? gh(['repo', 'view', '--json', 'nameWithOwner', '--jq', '.nameWithOwner']);
-  const prNumber = number ?? Number(gh(['pr', 'view', '--json', 'number', '--jq', '.number']));
+  const prNumber = number ?? Number(gh(['pr', 'view', ...(repo ? ['--repo', repo] : []), '--json', 'number', '--jq', '.number']));
   const [owner, name] = nameWithOwner.split('/');
-  const raw = gh(['api', 'graphql', '-F', `owner=${owner}`, '-F', `name=${name}`, '-F', `pr=${prNumber}`, '-f', `query=${QUERY}`]);
+  const raw = gh(['api', 'graphql', '-f', `owner=${owner}`, '-f', `name=${name}`, '-F', `pr=${prNumber}`, '-f', `query=${QUERY}`]);
   let body;
   try {
     body = JSON.parse(raw);
