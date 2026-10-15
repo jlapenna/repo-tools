@@ -10,7 +10,7 @@
 // Exit: 0 when no check fails (warnings allowed), 1 when any check fails,
 // 64 on a usage error.
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
+import { accessSync, constants, existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -26,9 +26,12 @@ function which(name, env) {
     if (!dir) continue;
     const candidate = path.join(dir, name);
     try {
-      if (statSync(candidate).isFile()) return candidate;
+      if (statSync(candidate).isFile()) {
+        accessSync(candidate, constants.X_OK);
+        return candidate;
+      }
     } catch {
-      // not in this PATH entry
+      // absent or not executable here; the shell would keep searching too
     }
   }
   return null;
@@ -56,7 +59,10 @@ function hookCommands(file) {
     else if (node && typeof node === 'object') {
       for (const [key, value] of Object.entries(node)) {
         if (key === 'command' && typeof value === 'string') {
-          for (const name of value.match(/\brepo-[a-z0-9-]+/g) ?? []) if (commands.includes(name)) found.add(name);
+          // Command-position words only, so a path such as .../repo-tools/...
+          // is not a command. Names the current package no longer ships are
+          // kept: a hook calling a removed command is exactly what must fail.
+          for (const [, name] of value.matchAll(/(?:^|[\s|;&(`])(repo-[a-z0-9-]+)(?=$|[\s|;&)`])/g)) found.add(name);
         } else visit(value);
       }
     }
@@ -114,7 +120,7 @@ export function diagnose({ env = process.env, cwd = process.cwd() } = {}) {
   }
 
   const roots = new Set();
-  for (const name of commands) {
+  for (const name of [...new Set([...commands, ...hooked.keys()])]) {
     const found = which(name, env);
     const by = hooked.get(name);
     const needed = by ? ` (required by ${by.join(' and ')} hooks)` : '';
@@ -155,7 +161,11 @@ export function diagnose({ env = process.env, cwd = process.cwd() } = {}) {
     }
   }
   const codexConfig = path.join(codexHome, 'config.toml');
-  if (existsSync(codexConfig) && /^\[plugins\."repo-tools@[^"]+"\]/m.test(readFileSync(codexConfig, 'utf8'))) {
+  // Enabled unless its own section says `enabled = false`.
+  const codexSection = existsSync(codexConfig)
+    ? /^\[plugins\."repo-tools@[^"]+"\]\s*\n((?:(?!\[).*\n?)*)/m.exec(readFileSync(codexConfig, 'utf8'))
+    : null;
+  if (codexSection && !/^\s*enabled\s*=\s*false\b/m.test(codexSection[1])) {
     const cache = path.join(codexHome, 'plugins', 'cache', 'repo-tools', 'repo-tools');
     const latest = newest(versions(cache));
     if (latest) add('plugin:codex', 'ok', `${latest} at ${path.join(cache, latest)}`);
@@ -191,7 +201,7 @@ function main(argv) {
     process.stdout.write(`${JSON.stringify(report)}\n`);
   } else {
     // Healthy commands collapse to one line; anything else is listed.
-    const healthy = report.checks.filter((c) => c.name.startsWith('command:') && c.status === 'ok');
+    const healthy = report.checks.filter((c) => commands.includes(c.name.slice('command:'.length)) && c.status === 'ok');
     const lines = [
       `repo-tools ${report.package.root}${report.package.commit ? ` @ ${report.package.commit.slice(0, 12)}` : ''}`,
       `repository: ${report.repository ?? 'none (not a git repository)'}`,

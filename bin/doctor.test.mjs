@@ -2,7 +2,7 @@
 // directories laid out like real pnpm-global and plugin installs.
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, test } from 'node:test';
@@ -121,7 +121,7 @@ test('mismatched plugin versions and mixed installs warn', () => {
   rmSync(path.join(fx.codex, 'plugins/cache/repo-tools/repo-tools/2.0.10'), { recursive: true });
   const other = path.join(tmp, 'other/bin');
   mkdirSync(other, { recursive: true });
-  writeFileSync(path.join(other, 'nx.sh'), '');
+  writeFileSync(path.join(other, 'nx.sh'), '', { mode: 0o755 });
   rmSync(path.join(fx.shims, 'repo-nx'));
   symlinkSync(path.join(other, 'nx.sh'), path.join(fx.shims, 'repo-nx'));
   const { status, json } = run(fx);
@@ -135,4 +135,34 @@ test('reports the enclosing repository and rejects unknown flags', () => {
   execFileSync('git', ['init', '-q', tmp]);
   assert.equal(run(fx).json.repository, execFileSync('git', ['-C', tmp, 'rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim());
   assert.equal(spawnSync(process.execPath, [script, '--fix']).status, 64);
+});
+
+test('hooks calling a command the package no longer ships still fail', () => {
+  const fx = fixture();
+  writeFileSync(
+    path.join(fx.codex, 'hooks.json'),
+    JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command: 'sh $HOME/.codex/plugins/cache/repo-tools/x.sh; repo-claim-status || true' }] }] } }),
+  );
+  const { status, json } = run(fx);
+  assert.equal(status, 1);
+  assert.match(check(json, 'hooks:codex').detail, /calls repo-claim-status$/);
+  assert.equal(check(json, 'command:repo-claim-status').detail, 'missing repo-claim-status on PATH (required by codex hooks)');
+  assert.equal(check(json, 'command:repo-tools'), undefined);
+});
+
+test('a non-executable PATH entry is not a usable command', () => {
+  const fx = fixture();
+  chmodSync(path.join(fx.shims, 'repo-set-tmux-task-title'), 0o644);
+  const { status, json } = run(fx);
+  assert.equal(status, 1);
+  assert.match(check(json, 'command:repo-set-tmux-task-title').detail, /^missing repo-set-tmux-task-title on PATH/);
+});
+
+test('a disabled Codex plugin needs no cache', () => {
+  const fx = fixture();
+  writeFileSync(path.join(fx.codex, 'config.toml'), '[plugins."repo-tools@repo-tools"]\nenabled = false\n\n[other]\nenabled = true\n');
+  rmSync(path.join(fx.codex, 'plugins/cache/repo-tools/repo-tools'), { recursive: true });
+  const { status, json } = run(fx);
+  assert.equal(status, 0);
+  assert.equal(check(json, 'plugin:codex'), undefined);
 });
