@@ -3,7 +3,7 @@
 // real command line.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
@@ -38,8 +38,11 @@ writeFileSync(
   `#!/usr/bin/env bash
 case "$1 $2" in
   'repo view') echo 'owner/repo' ;;
-  'pr view') echo 7 ;;
-  'api graphql') [ -n "$GH_FAIL" ] && { echo "$GH_FAIL" >&2; exit 1; }; cat "$GH_BODY" ;;
+  'pr view') [ "$3" = --repo ] && echo 8 || echo 7 ;;
+  'api graphql')
+    [ -n "$GH_FAIL" ] && { echo "$GH_FAIL" >&2; exit 1; }
+    printf '%s\n' "$@" >"$GH_ARGS"
+    cat "$GH_BODY" ;;
   *) echo "unexpected gh $*" >&2; exit 1 ;;
 esac
 `,
@@ -51,7 +54,7 @@ function run(body, { args = ['--json', '7'], env = {} } = {}) {
   writeFileSync(bodyPath, typeof body === 'string' ? body : JSON.stringify(body));
   const result = spawnSync(process.execPath, [script, ...args], {
     encoding: 'utf8',
-    env: { ...process.env, PATH: `${tmp}:${process.env.PATH}`, GH_BODY: bodyPath, ...env },
+    env: { ...process.env, PATH: `${tmp}:${process.env.PATH}`, GH_BODY: bodyPath, GH_ARGS: path.join(tmp, 'args'), ...env },
   });
   return { status: result.status, stdout: result.stdout, json: args.includes('--json') ? JSON.parse(result.stdout) : undefined };
 }
@@ -139,6 +142,14 @@ test('current-branch PR is used when no number is given', () => {
   assert.equal(status, 0);
   assert.equal(json.repo, 'owner/repo');
   assert.equal(json.pr, 7);
+});
+
+test('--repo without a number resolves the PR in that repository, sending names as strings', () => {
+  const { status, json } = run(prBody({ number: 8 }), { args: ['--json', '--repo', 'org/123'] });
+  assert.equal(status, 0);
+  assert.equal(json.repo, 'org/123');
+  const args = readFileSync(path.join(tmp, 'args'), 'utf8').split('\n');
+  assert.deepEqual(args.slice(2, 8), ['-f', 'owner=org', '-f', 'name=123', '-F', 'pr=8']);
 });
 
 test('rejects unknown arguments', () => {
