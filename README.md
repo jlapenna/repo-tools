@@ -90,6 +90,21 @@ health checks.
   complete inventory. Also the `repo-check-schedules` pre-commit hook.
 - `repo-watch-prs` — watch auto-merge lifecycle for pull requests in the
   current repository.
+- `repo-pr-status [--json] [--repo OWNER/NAME] [PR]` — one read-only
+  snapshot of a pull request at its current head (default: the current
+  branch's PR): head SHA, mergeability and merge state, required checks,
+  auto-merge disposition, and unresolved review threads, from one GraphQL
+  read. It never polls; use `repo-watch-prs` to wait. `--json` prints one
+  stable object (`state`, `reasons`, `head`, `mergeable`, `mergeState`,
+  `autoMerge`, `requiredChecks`, `unresolvedThreads`). States and exits:
+  `merged`, `ready` (green, mergeable, armed), and `waiting` (checks pending
+  or merge state settling) exit 0; `blocked` and `closed` exit 2;
+  `indeterminate` exits 3 when GitHub errors or the check evidence is not for
+  the current head, and is never a success; usage errors exit 64. Blocking
+  reasons are `checks-failed:<names>`, `dirty`, `unresolved-threads:<n>`,
+  `draft`, and `auto-merge-unarmed`; waiting reasons are
+  `checks-pending:<n>`, `mergeability-unknown`, `behind`, and
+  `merge-state:<STATE>`.
 - `repo-set-tmux-task-title [--force <title>]` — set an empty tmux window task
   title from a Codex `UserPromptSubmit` hook payload, without overwriting a
   pinned title; `--force` explicitly pins or replaces a title for manual use.
