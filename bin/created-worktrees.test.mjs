@@ -97,3 +97,21 @@ test('consumer lock rejects added ignored files and staging-only changes',t=>{
     assert.equal(f.archives().length,1);
   }
 });
+
+test('actual high-level cleanup accepts its own parent cwd after the tool moves outside',t=>{
+  for(const mode of ['created','merged']) {
+    const f=fixture(t);
+    if(mode==='merged')writeFileSync(join(f.root,'bin','gh'),'#!/bin/sh\nprintf "[[]]\\n"\n',{mode:0o700});
+    const actor=`import subprocess,sys,json
+subject,primary,target,outside,mode=sys.argv[1:]
+args=['bash',subject,'--repo',primary,'--delete']
+args+=['--retire-created-hours','72'] if mode=='created' else ['--base','main']
+r=subprocess.run(args+[target],cwd=outside,capture_output=True,text=True)
+print(json.dumps({'rc':r.returncode,'stdout':r.stdout,'stderr':r.stderr}))
+`;
+    const result=f.run('python3',['-c',actor,join(here,'prune-merged-worktrees.sh'),f.primary,f.path,f.root,mode],{cwd:f.path});
+    assert.equal(result.status,0,result.stderr);
+    const r=JSON.parse(result.stdout);assert.equal(r.rc,0,r.stderr+r.stdout);
+    assert.match(r.stdout,mode==='created'?/PARKED/:/REMOVED/);assert.equal(existsSync(f.path),false);
+  }
+});
