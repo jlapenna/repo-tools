@@ -1,6 +1,6 @@
 {
   "name": "repo-tools",
-  "version": "2.0.9",
+  "version": "2.0.10",
   "description": "General repository-management commands and skills for safe worktrees, CI monitoring, testing policy, PR delivery, harness maintenance, autonomous work, and Renovate maintenance.",
   "author": {
     "name": "Joe LaPenna",
