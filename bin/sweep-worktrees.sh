@@ -122,7 +122,7 @@ worktree_evidence() {
   echo "$reason"; return 1
 }
 
-live_count() { "$SCANNER" "$1" 2>/dev/null | grep -cE '^[0-9]+ ' || true; }
+live_count() { "$SCANNER" "$1" --foreign-only 2>/dev/null | grep -cE '^[0-9]+ ' || true; }
 
 # Uncommitted changes in a worktree, not counting files that belong to a
 # worktree nested inside it (a child under .claude/worktrees/ shows up as

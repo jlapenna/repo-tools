@@ -148,15 +148,12 @@ def source(path, hours, occupancy=True):
     if occupancy:
         if not Path("/proc/self/stat").is_file():
             raise Refusal("linux-process-evidence-required")
-        for process in Path("/proc").iterdir():
-            if not process.name.isdigit():
-                continue
-            try:
-                cwd = os.readlink(process / "cwd")
-            except OSError:
-                continue
-            if cwd == str(path) or cwd.startswith(str(path) + "/"):
-                raise Refusal("live-process-cwd")
+        occupants = subprocess.run([str(HERE / "scan-live-processes.sh"), str(path), "--foreign-only"],
+                                   capture_output=True, env=ENV)
+        if occupants.returncode:
+            raise Refusal("live-process-evidence-unavailable")
+        if occupants.stdout.strip():
+            raise Refusal("foreign-live-process-cwd")
     index = admin / "index"
     if not index.is_file() or index.is_symlink():
         raise Refusal("index-unavailable")

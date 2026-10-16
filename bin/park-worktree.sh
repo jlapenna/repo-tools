@@ -26,7 +26,7 @@ check_snapshot() {
   [[ $(git -C "$worktree" rev-parse HEAD) == "$expected" ]] &&
     [[ $(git -C "$worktree" symbolic-ref --quiet --short HEAD || true) == "$branch" ]] &&
     [[ -z $(git -C "$worktree" status --porcelain --untracked-files=all) ]] &&
-    [[ -z $("$here/scan-live-processes.sh" "$worktree") ]] &&
+    [[ -z $("$here/scan-live-processes.sh" "$worktree" --foreign-only) ]] &&
     cleanup_worktree_idle "$worktree" "$branch" "$idle_hours" >/dev/null
 }
 check_snapshot || exit 75
