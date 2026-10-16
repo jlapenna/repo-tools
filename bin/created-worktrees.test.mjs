@@ -124,3 +124,13 @@ test('an unavailable process scanner is KEEP before any snapshot or removal',t=>
   assert.equal(r.status,1,r.stderr+r.stdout);assert.match(r.stdout,/KEEP.*occupancy-unverifiable/);
   assert.equal(existsSync(f.path),true);assert.deepEqual(f.archives(),[]);
 });
+
+test('a nested independent primary remains intact even inside an ignored directory',t=>{
+  const f=fixture(t),nested=join(f.path,'local-state','separate-primary');
+  mkdirSync(nested,{recursive:true});f.git('-C',nested,'init','-q','-b','main');
+  writeFileSync(join(nested,'private-work'),'nested owner work\n');
+  const r=f.prune('--delete');assert.equal(r.status,1,r.stderr+r.stdout);
+  assert.match(r.stdout,/KEEP.*nested-independent-git-checkout/);
+  assert.equal(readFileSync(join(nested,'private-work'),'utf8'),'nested owner work\n');
+  assert.equal(existsSync(join(nested,'.git')),true);assert.deepEqual(f.archives(),[]);
+});

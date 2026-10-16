@@ -126,6 +126,13 @@ def source(path, hours, occupancy=True):
         raise Refusal("not-a-registered-linked-checkout")
     if any(p.startswith(str(path) + "/") for p in paths):
         raise Refusal("nested-worktree")
+    # An independent nested primary is not in this common directory's records.
+    # Its ownership remains separate even when it is ignored locally.
+    def unreadable(_error):
+        raise Refusal("nested-repository-evidence-unavailable")
+    for folder, directories, filenames in os.walk(path, followlinks=False, onerror=unreadable):
+        if Path(folder) != path and (".git" in directories or ".git" in filenames):
+            raise Refusal("nested-independent-git-checkout")
     if (admin / "locked").exists():
         raise Refusal("locked")
     if any((admin / name).exists() for name in OPERATIONS):
