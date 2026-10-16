@@ -152,3 +152,11 @@ test('worktree-only configuration and full-index sparse checkout are retained be
     assert.equal(existsSync(f.path),true);assert.deepEqual(f.archives(),[]);
   }
 });
+
+test('dangling sparse metadata is retained rather than silently lost',t=>{
+  const f=fixture(t),sparse=f.git('-C',f.path,'rev-parse','--path-format=absolute','--git-path','info/sparse-checkout');
+  mkdirSync(dirname(sparse),{recursive:true});symlinkSync('missing-private-patterns',sparse);
+  const r=f.prune('--delete');assert.equal(r.status,1,r.stderr+r.stdout);
+  assert.match(r.stdout,/KEEP.*sparse-checkout-needs-independent-recovery/);
+  assert.equal(existsSync(f.path),true);assert.deepEqual(f.archives(),[]);
+});

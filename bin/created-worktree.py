@@ -138,9 +138,9 @@ def source(path, hours, occupancy=True):
     if any((admin / name).exists() for name in OPERATIONS):
         raise Refusal("operation-state-needs-independent-recovery")
     sparse = Path(text(path, "rev-parse", "--path-format=absolute", "--git-path", "info/sparse-checkout"))
-    if (admin / "info/sparse-checkout").exists() or sparse.exists():
+    if os.path.lexists(admin / "info/sparse-checkout") or os.path.lexists(sparse):
         raise Refusal("sparse-checkout-needs-independent-recovery")
-    if (admin / "config.worktree").exists():
+    if os.path.lexists(admin / "config.worktree"):
         raise Refusal("worktree-config-needs-independent-recovery")
     if text(path, "rev-parse", "--shared-index-path"):
         raise Refusal("split-index-needs-independent-recovery")
