@@ -84,8 +84,11 @@ with tempfile.TemporaryDirectory(prefix="repo-scanner-proof-") as temporary:
     def stat_record(pid, parent, session, generation):
         return " ".join([str(pid), "(fixture)", "S", str(parent), "123", str(session)]
                         + ["0"] * 15 + [str(generation)])
-    for fault in ("unknown", "candidate-generation", "ancestor-generation",
-                  "candidate-parent", "candidate-session", "missing-metadata"):
+    def overwrite_record(record):
+        return ("printf '%s\\n' " + chr(34) + stat_record(*record) + chr(34)
+                + " > " + chr(34) + "$PROC_ROOT/" + str(record[0]) + "/stat" + chr(34))
+    for fault in ("stable", "unknown", "candidate-generation", "ancestor-generation",
+                  "candidate-parent", "candidate-session", "missing-metadata", "self-generation"):
         proc = root / ("proc-" + fault)
         proc.mkdir()
         candidate = proc / "999999999"
@@ -94,17 +97,28 @@ with tempfile.TemporaryDirectory(prefix="repo-scanner-proof-") as temporary:
         marker = "synthetic-sensitive-argv-marker"
         (candidate / "cmdline").write_bytes(marker.encode() + b"\0")
         (candidate / "comm").write_text("fixture-candidate\n")
+        changed = None
         mutation = ""
         if fault == "candidate-generation":
-            mutation = "printf '%s\\n' \"" + stat_record(999999999, "$$", 123, 201) + "\" > \"$PROC_ROOT/999999999/stat\""
+            changed = (999999999, "$$", 123, 201)
         elif fault == "ancestor-generation":
-            mutation = "printf '%s\\n' \"" + stat_record("$$", 1, 123, 112) + "\" > \"$PROC_ROOT/$$/stat\""
+            ancestor = proc / "888888888"
+            ancestor.mkdir()
+            (ancestor / "cwd").symlink_to(target, target_is_directory=True)
+            (ancestor / "cmdline").write_bytes(b"synthetic-ancestor\0")
+            (ancestor / "comm").write_text("fixture-ancestor\n")
+            (ancestor / "stat").write_text(stat_record(888888888, 1, 123, 333) + "\n")
+            changed = (888888888, 1, 123, 334)
         elif fault == "candidate-parent":
-            mutation = "printf '%s\\n' \"" + stat_record(999999999, 1, 123, 200) + "\" > \"$PROC_ROOT/999999999/stat\""
+            changed = (999999999, 1, 123, 200)
         elif fault == "candidate-session":
-            mutation = "printf '%s\\n' \"" + stat_record(999999999, "$$", 124, 200) + "\" > \"$PROC_ROOT/999999999/stat\""
+            changed = (999999999, "$$", 124, 200)
+        elif fault == "self-generation":
+            changed = ("$$", 1, 123, 112)
         elif fault == "missing-metadata":
             mutation = 'rm -- "$PROC_ROOT/999999999/stat"'
+        if changed:
+            mutation = overwrite_record(changed)
         subject = root / ("scanner-" + fault + ".sh")
         copy = source.replace("readonly PROC_ROOT=/proc", "readonly PROC_ROOT=" + str(proc))
         if mutation:
@@ -121,24 +135,52 @@ printf '%s\n' "CHILD_STAT" > "$1/999999999/stat"
 printf '%s\n' "$$" > "$4"
 exec bash "$3" "$2" --foreign-only
 '''
-        wrapper = wrapper.replace("OWN_STAT", stat_record("$$", 1, 123, 111))
+        parent = 888888888 if fault == "ancestor-generation" else 1
+        candidate_parent = 888888888 if fault == "ancestor-generation" else "$$"
+        wrapper = wrapper.replace("OWN_STAT", stat_record("$$", parent, 123, 111))
         wrapper = wrapper.replace("CHILD_STAT", "malformed" if fault == "unknown"
-                                  else stat_record(999999999, "$$", 123, 200))
+                                  else stat_record(999999999, candidate_parent, 123, 200))
         result = subprocess.run(["bash", "-c", wrapper, "fixture", str(proc), str(target),
                                  str(subject), str(pid_file)], cwd=root,
                                 capture_output=True, text=True, timeout=5)
+        own_pid = pid_file.read_text().strip()
+        if changed:
+            changed_pid = str(changed[0]).replace("$$", own_pid)
+            expected_record = stat_record(*changed).replace("$$", own_pid) + "\n"
+            assert (proc / changed_pid / "stat").read_text() == expected_record
+        assert marker not in result.stdout
+        if fault == "self-generation":
+            assert result.returncode == 75 and "caller identity is unverified" in result.stderr
+            print("changed-caller-identity-refused: ok")
+            continue
         assert result.returncode == 0, (fault, result.stderr)
-        assert marker not in result.stdout and "fixture-candidate" in result.stdout
-        expected = {999999999}
+        expected = set() if fault == "stable" else {999999999}
         if fault == "ancestor-generation":
-            expected.add(int(pid_file.read_text()))
+            expected.update({int(own_pid), 888888888})
         actual = {int(line.split()[0]) for line in result.stdout.splitlines()}
         assert actual == expected, (fault, actual, expected)
-        print(fault + "-metadata-stays-foreign: ok")
+        if expected:
+            assert "fixture-candidate" in result.stdout
+        print(fault + "-metadata-classified: ok")
         if fault == "unknown":
             diagnostic = subprocess.run(["bash", str(subject), str(target)], cwd=root,
                                         capture_output=True, text=True, timeout=5)
             assert diagnostic.returncode == 0 and marker in diagnostic.stdout
             print("filtered-comm-only-default-argv-preserved: ok")
+    for fault in ("empty", "missing-self"):
+        proc = root / ("proc-" + fault)
+        proc.mkdir()
+        if fault == "missing-self":
+            occupant = proc / "999999999"
+            occupant.mkdir()
+            (occupant / "cwd").symlink_to(target, target_is_directory=True)
+            (occupant / "stat").write_text(stat_record(999999999, 1, 123, 1) + "\n")
+        subject = root / ("scanner-" + fault + ".sh")
+        subject.write_text(source.replace("readonly PROC_ROOT=/proc", "readonly PROC_ROOT=" + str(proc)))
+        result = subprocess.run(["bash", str(subject), str(target), "--foreign-only"],
+                                cwd=root, capture_output=True, text=True, timeout=5)
+        assert result.returncode == 75 and result.stdout == "", (fault, result)
+        assert result.stderr == "foreign process classification unavailable: caller identity is unverified\n"
+        print(fault + "-process-view-refused: ok")
 print("repo-scan-live-processes: ok")
 PY

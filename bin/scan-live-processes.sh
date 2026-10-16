@@ -39,6 +39,13 @@ identity_matches_snapshot() {
      ${sid_of[$pid]:-} == "$identity_sid" && ${start_of[$pid]} == "$identity_start" ]]
 }
 
+require_self_identity() {
+  if [[ -z ${sid_of[$$]:-} ]] || ! identity_matches_snapshot "$$"; then
+    echo 'foreign process classification unavailable: caller identity is unverified' >&2
+    return 75
+  fi
+}
+
 if [[ $foreign_only == true ]]; then
   for pid_dir in "$PROC_ROOT"/[0-9]*; do
     pid=${pid_dir##*/}
@@ -48,6 +55,7 @@ if [[ $foreign_only == true ]]; then
     start_of[$pid]=$identity_start
   done
   my_sid=${sid_of[$$]:-}
+  require_self_identity
   current=$$
   remaining=${#ppid_of[@]}
   while [[ -n $my_sid && $current =~ ^(0|[1-9][0-9]{0,9})$ && $current -gt 1 && $remaining -gt 0 ]]; do
@@ -100,6 +108,10 @@ for pid_dir in "$PROC_ROOT"/[0-9]*; do
   echo "$pid  $link  $cmd"
   found=1
 done
+
+if [[ $foreign_only == true ]]; then
+  require_self_identity
+fi
 
 if [ "$found" -eq 0 ]; then
   echo "no live processes found under: $target" >&2
