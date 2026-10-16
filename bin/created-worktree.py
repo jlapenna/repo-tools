@@ -25,6 +25,7 @@ OPERATIONS = ("MERGE_HEAD", "MERGE_MSG", "MERGE_MODE", "AUTO_MERGE",
               "CHERRY_PICK_HEAD", "REVERT_HEAD", "REBASE_HEAD", "rebase-apply",
               "rebase-merge", "sequencer", "BISECT_LOG", "index.lock", "HEAD.lock", "SQUASH_MSG")
 CACHES = {"node_modules", ".nx", ".next", ".venv", "__pycache__", ".turbo"}
+PREPARED_ARCHIVE = None
 
 
 class Refusal(Exception):
@@ -82,6 +83,15 @@ def digest(path, dir_fd=None):
         for block in iter(lambda: stream.read(1024 * 1024), b""):
             value.update(block)
     return value.hexdigest()
+
+
+def copy_regular(source_path, destination):
+    # In particular the source index may be replaced by an editor between
+    # admission and capture. Never follow a replacement link or FIFO.
+    with regular_file(source_path) as incoming:
+        descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(descriptor, "wb") as outgoing:
+            shutil.copyfileobj(incoming, outgoing)
 
 
 def creation(path, hours):
@@ -311,6 +321,7 @@ def verify(archive, path, occupancy=True):
 
 
 def prepare(path, expected, hours):
+    global PREPARED_ARCHIVE
     before = source(path, hours)
     if before["head"] != expected:
         raise Refusal("head-changed")
@@ -322,12 +333,13 @@ def prepare(path, expected, hours):
         raise Refusal("archive-root-not-owned")
     root.chmod(0o700)
     archive = Path(tempfile.mkdtemp(prefix=time.strftime("%Y%m%dT%H%M%SZ-", time.gmtime()), dir=root))
+    PREPARED_ARCHIVE = archive
     archive.chmod(0o700)
-    shutil.copyfile(before["index_path"], archive / "index")
+    copy_regular(before["index_path"], archive / "index")
     if digest(archive / "index") != before["index_sha256"]:
         raise Refusal("index-changed-during-copy")
     copied = archive / "index.for-tree"
-    shutil.copyfile(archive / "index", copied)
+    copy_regular(archive / "index", copied)
     tree = git(path, "write-tree", env=dict(ENV, GIT_INDEX_FILE=str(copied))).decode().strip()
     copied.unlink()
     ref = "refs/parked-worktrees/" + archive.name
@@ -336,7 +348,10 @@ def prepare(path, expected, hours):
     git(path, "update-ref", index_ref, tree, "")
     with open(archive / "staged.pack", "wb") as stream:
         subprocess.run(["git", "-C", str(path), "pack-objects", "--revs", "--stdout"],
-                       input=("\n".join([tree, *before["objects"]]) + "\n").encode(),
+                       # HEAD history has its own protected ref. Store every
+                       # staged object absent from that history independently,
+                       # without duplicating unchanged committed payloads.
+                       input=("\n".join([tree, *before["objects"], "^" + expected]) + "\n").encode(),
                        stdout=stream, stderr=subprocess.PIPE, env=ENV, check=True)
     git(path, "index-pack", "--strict", str(archive / "staged.pack"))
     excluded = exclusions(path)
@@ -417,7 +432,7 @@ def restore(archive, target):
     # tracked deletions, unlike overlaying an automatically checked-out HEAD.
     subprocess.run(["tar", "-xzf", str(archive / "files.tar.gz"), "--no-same-owner", "--same-permissions", "-C", str(path)], check=True)
     index = Path(text(path, "rev-parse", "--path-format=absolute", "--git-path", "index"))
-    shutil.copyfile(archive / "index", index)
+    copy_regular(archive / "index", index)
     if digest(index) != info["index_sha256"] or inventory(path, manifest["excluded_caches"]) != expected:
         raise Refusal("restored-snapshot-verification-failed-recovery-retained")
     print("RESTORED\t" + str(path) + "\t" + info["head"])
@@ -446,5 +461,7 @@ if __name__ == "__main__":
     try:
         sys.exit(main())
     except (Refusal, OSError, ValueError, KeyError, subprocess.SubprocessError, tarfile.TarError) as error:
+        if PREPARED_ARCHIVE is not None:
+            print("Recovery archive retained: " + str(PREPARED_ARCHIVE), file=sys.stderr)
         print("retirement-refused: " + str(error), file=sys.stderr)
         sys.exit(75)

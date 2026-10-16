@@ -219,6 +219,7 @@ for i in $order; do
       out=$("$here/park-worktree.sh" "$p" "$h" "$REMOVE_HOOK" "$IDLE_HOURS" 2>&1) || park_status=$?
     fi
     if [[ $park_status == 75 && -e $p ]]; then
+      if [[ $CREATED_HOURS != 0 && -n $out ]]; then printf '%s\n' "$out" >&2; fi
       emit KEEP "$p" "$b" 'parking-refused:snapshot-or-resources-changed'
     elif [[ $park_status != 0 ]]; then
       printf '%s\n' "$out" >&2

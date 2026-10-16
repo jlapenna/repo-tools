@@ -23,7 +23,7 @@ function fixture(t) {
   git('init','-q','-b','main');
   writeFileSync(join(primary,'.gitignore'),'.env\nlocal-state/\nnode_modules/\n');
   for(const name of ['mixed','staged-delete','unstaged-delete'])writeFileSync(join(primary,name),'base\n');
-  git('add','.');git('-c','core.hooksPath=/dev/null','commit','-qm','base');
+  git('add','.');git('commit','-qm','base');
   git('worktree','add','-qb','feature',path);
   const realStat=run('which',['stat']).stdout.trim();
   // Positive-age fixtures mock ONLY the synthetic Git-link birth query.
