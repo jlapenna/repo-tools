@@ -142,8 +142,10 @@ test('worktree-only configuration and full-index sparse checkout are retained be
       f.git('config','extensions.worktreeConfig','true');
       f.git('-C',f.path,'config','--worktree','core.fileMode','false');
     } else {
-      const sparse=f.git('-C',f.path,'rev-parse','--path-format=absolute','--git-path','info/sparse-checkout');
-      mkdirSync(dirname(sparse),{recursive:true});writeFileSync(sparse,'/mixed\n');
+      f.git('-C',f.path,'sparse-checkout','init','--no-sparse-index','--no-cone');
+      f.git('-C',f.path,'sparse-checkout','set','--no-cone','/mixed');
+      assert.doesNotMatch(f.git('-C',f.path,'ls-files','--sparse','--stage'),/^040000/m);
+      assert.match(f.git('-C',f.path,'ls-files','-t'),/^S /m);
     }
     const r=f.prune('--delete');assert.equal(r.status,1,r.stderr+r.stdout);
     assert.match(r.stdout,kind==='config'?/KEEP.*worktree-config-needs-independent-recovery/:/KEEP.*sparse-checkout-needs-independent-recovery/);
