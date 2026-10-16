@@ -13,6 +13,10 @@ while (($#)); do
   shift
 done
 manifest="$archive/manifest.json"
+if [[ $(jq -r .version "$manifest") == 2 ]]; then
+  here=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)
+  exec python3 "$here/created-worktree.py" restore "$archive" "$target"
+fi
 jq -e '.version==1 and (.head|test("^[0-9a-f]{40}$")) and
   (.ref|startswith("refs/parked-worktrees/")) and
   (.checksum|test("^[0-9a-f]{64}$")) and (.state=="parked" or .state=="prepared")' \

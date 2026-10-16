@@ -28,6 +28,7 @@ REMOVE_HOOK=""
 PARK_UNMERGED=false
 PARK_INACTIVE=false
 IDLE_HOURS=0
+CREATED_HOURS=0
 UNDER=()
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -40,6 +41,7 @@ while [ "$#" -gt 0 ]; do
     --park-unmerged) PARK_UNMERGED=true ;;
     --park-inactive) PARK_INACTIVE=true ;;
     --idle-hours) [[ $# -ge 2 && $2 =~ ^[0-9]+$ ]] || exit 64; IDLE_HOURS=$2; shift ;;
+    --retire-created-hours) [[ $# -ge 2 && $2 =~ ^[1-9][0-9]*$ ]] || exit 64; CREATED_HOURS=$2; shift ;;
     -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 64 ;;
   esac
@@ -48,6 +50,10 @@ done
 [[ $PARK_INACTIVE == false || ( $IDLE_HOURS -gt 0 ) ]] || {
   echo '--park-inactive requires a positive --idle-hours window' >&2; exit 64;
 }
+[[ $CREATED_HOURS == 0 || ( $PARK_INACTIVE == false && $PARK_UNMERGED == false && $IDLE_HOURS == 0 ) ]] || {
+  echo '--retire-created-hours cannot be combined with inactivity parking' >&2; exit 64;
+}
+export GIT_OPTIONAL_LOCKS=0
 
 here=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)
 # shellcheck source=bin/cleanup-evidence.sh
@@ -64,19 +70,23 @@ COMMON=$(git -C "$REPO" rev-parse --path-format=absolute --git-common-dir 2>/dev
 RECORDS=$(git --git-dir="$COMMON" worktree list --porcelain)
 PRIMARY=$(printf '%s\n' "$RECORDS" | sed -n 's/^worktree //p' | head -n 1)
 if [ -z "$BASE" ]; then
-  if [[ $PARK_INACTIVE == true ]]; then BASE=HEAD
+  if [[ $PARK_INACTIVE == true || $CREATED_HOURS != 0 ]]; then BASE=HEAD
   elif git -C "$PRIMARY" rev-parse -q --verify origin/main >/dev/null 2>&1; then BASE=origin/main
   else BASE=main; fi
 fi
 git -C "$PRIMARY" rev-parse -q --verify "$BASE^{commit}" >/dev/null || { echo "unknown base ref: $BASE" >&2; exit 1; }
 
 BASE=$(git -C "$PRIMARY" rev-parse "$BASE^{commit}")
-if [[ $PARK_INACTIVE != true ]]; then
+if [[ $PARK_INACTIVE != true && $CREATED_HOURS == 0 ]]; then
   cleanup_load_prs "$PRIMARY" || echo '# PR data unavailable; keeping unverified worktrees' >&2
 fi
 
 worktree_evidence() {
   local reason
+  if [[ $CREATED_HOURS != 0 ]]; then
+    python3 "$here/created-worktree.py" eligible "$3" "$CREATED_HOURS" 2>&1
+    return $?
+  fi
   # Explicit cold-checkout retirement does not discard Git history or claim a
   # merge. Local inactivity/occupancy and preservation are its authority; PRs
   # and branches remain available. No GitHub lookup or write is needed.
@@ -166,14 +176,14 @@ while IFS= read -r line; do
           emit KEEP "$path" "$branch" "directory missing (git worktree prune)"
         elif [ "$locked" = true ]; then
           emit KEEP "$path" "$branch" "locked"
-        elif dirty=$(dirty_count "$path") && [ "$dirty" -gt 0 ]; then
+        elif [[ $CREATED_HOURS == 0 ]] && dirty=$(dirty_count "$path") && [ "$dirty" -gt 0 ]; then
           emit KEEP "$path" "$branch" "dirty: $dirty uncommitted change(s)"
         elif live=$(live_count "$path") && [ "$live" -gt 0 ]; then
           emit KEEP "$path" "$branch" "live: $live process(es) with cwd inside"
-        elif ! idle_reason=$(cleanup_worktree_idle "$path" "$branch" "$IDLE_HOURS"); then
+        elif [[ $CREATED_HOURS == 0 ]] && ! idle_reason=$(cleanup_worktree_idle "$path" "$branch" "$IDLE_HOURS"); then
           emit KEEP "$path" "$branch" "$idle_reason"
         else
-          if reason=$(worktree_evidence "$branch" "$head"); then
+          if reason=$(worktree_evidence "$branch" "$head" "$path"); then
             emit SAFE "$path" "$branch" "$reason"
             safe_paths+=("$path"); safe_branches+=("$branch"); safe_heads+=("$head")
           else
@@ -195,15 +205,19 @@ order=$(for i in "${!safe_paths[@]}"; do printf '%s\t%s\n' "$(tr -cd '/' <<<"${s
 for i in $order; do
   p=${safe_paths[$i]}; b=${safe_branches[$i]}
   h=${safe_heads[$i]}
-  if { [[ $PARK_INACTIVE != true ]] && ! cleanup_load_prs "$PRIMARY"; } ||
-    ! current_reason=$(worktree_evidence "$b" "$h") ||
+  if { [[ $PARK_INACTIVE != true && $CREATED_HOURS == 0 ]] && ! cleanup_load_prs "$PRIMARY"; } ||
+    ! current_reason=$(worktree_evidence "$b" "$h" "$p") ||
     [[ $(git -C "$p" rev-parse HEAD) != "$h" ]] ||
-    ! cleanup_worktree_idle "$p" "$b" "$IDLE_HOURS" >/dev/null; then
+    { [[ $CREATED_HOURS == 0 ]] && ! cleanup_worktree_idle "$p" "$b" "$IDLE_HOURS" >/dev/null; }; then
     emit KEEP "$p" "$b" 'unverified:plan-changed'; continue
   fi
   if [[ $current_reason == parkable:* ]]; then
     park_status=0
-    out=$("$here/park-worktree.sh" "$p" "$h" "$REMOVE_HOOK" "$IDLE_HOURS" 2>&1) || park_status=$?
+    if [[ $CREATED_HOURS != 0 ]]; then
+      out=$(python3 "$here/created-worktree.py" retire "$p" "$h" "$REMOVE_HOOK" "$CREATED_HOURS" 2>&1) || park_status=$?
+    else
+      out=$("$here/park-worktree.sh" "$p" "$h" "$REMOVE_HOOK" "$IDLE_HOURS" 2>&1) || park_status=$?
+    fi
     if [[ $park_status == 75 && -e $p ]]; then
       emit KEEP "$p" "$b" 'parking-refused:snapshot-or-resources-changed'
     elif [[ $park_status != 0 ]]; then

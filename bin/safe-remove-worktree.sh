@@ -13,10 +13,14 @@ shift
 FORCE_ANYWAY=false
 DRY_RUN=false
 OWNER=""
+VERIFIED_SNAPSHOT=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --force-anyway) FORCE_ANYWAY=true ;;
     --dry-run) DRY_RUN=true ;;
+    --verified-snapshot)
+      [ "$#" -ge 2 ] || exit 64
+      VERIFIED_SNAPSHOT="$2"; shift ;;
     --git-dir)
       [ "$#" -ge 2 ] || {
         echo "--git-dir requires an owning checkout or Git directory" >&2
@@ -32,6 +36,10 @@ while [ "$#" -gt 0 ]; do
   esac
   shift
 done
+if [[ -n $VERIFIED_SNAPSHOT ]]; then
+  [[ $FORCE_ANYWAY == false ]] || { echo 'verified snapshots cannot waive live-process guards' >&2; exit 64; }
+  export GIT_OPTIONAL_LOCKS=0
+fi
 
 # Live-process check. Every process whose cwd is under the target is either
 # part of the caller's own session or foreign; only foreign occupants refuse.
@@ -73,7 +81,11 @@ report_live_processes() {
     cur="${ppid_of[$cur]:-}"
   done
   if [ -n "$own_root" ]; then
-    own_root_cmd=$(tr '\0' ' ' < "/proc/$own_root/cmdline" 2>/dev/null || echo "?")
+    if [[ -n $VERIFIED_SNAPSHOT ]]; then
+      own_root_cmd=$(cat "/proc/$own_root/comm" 2>/dev/null || echo "?")
+    else
+      own_root_cmd=$(tr '\0' ' ' < "/proc/$own_root/cmdline" 2>/dev/null || echo "?")
+    fi
   fi
 
   for pid_dir in /proc/[0-9]*; do
@@ -83,7 +95,11 @@ report_live_processes() {
       "$target" | "$target"/*) ;;
       *) continue ;;
     esac
-    cmd=$(tr '\0' ' ' < "$pid_dir/cmdline" 2>/dev/null || echo "?")
+    if [[ -n $VERIFIED_SNAPSHOT ]]; then
+      cmd=$(cat "$pid_dir/comm" 2>/dev/null || echo "?")
+    else
+      cmd=$(tr '\0' ' ' < "$pid_dir/cmdline" 2>/dev/null || echo "?")
+    fi
     label=foreign
     if [ -n "$own_root" ]; then
       cur="$pid"
@@ -343,10 +359,20 @@ echo "== owning Git directory: $GIT_COMMON_DIR =="
 
 report_live_processes "$WT_ABS"
 
+if [[ -n $VERIFIED_SNAPSHOT ]]; then
+  here=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)
+  # This is a verified dirty-snapshot exception only. The normal occupancy,
+  # registered-checkout and Git lock guards remain mandatory.
+  python3 "$here/created-worktree.py" verify "$VERIFIED_SNAPSHOT" "$WT_ABS" || exit 75
+fi
+
 echo "== git status in worktree =="
-git -C "$WT_ABS" status --porcelain || true
-dirty=$(git -C "$WT_ABS" status --porcelain 2>/dev/null | wc -l)
-if [ "$dirty" -gt 0 ] && [ "$FORCE_ANYWAY" != true ]; then
+dirty=0
+if [[ -z $VERIFIED_SNAPSHOT ]]; then
+  git -C "$WT_ABS" status --porcelain || true
+  dirty=$(git -C "$WT_ABS" status --porcelain 2>/dev/null | wc -l)
+fi
+if [ "$dirty" -gt 0 ] && [ "$FORCE_ANYWAY" != true ] && [[ -z $VERIFIED_SNAPSHOT ]]; then
   echo "REFUSING: worktree has $dirty uncommitted change(s)." >&2
   echo "This may be un-pushed WIP from a crashed session, not garbage." >&2
   echo "Review with: git -C \"$WT_ABS\" diff" >&2

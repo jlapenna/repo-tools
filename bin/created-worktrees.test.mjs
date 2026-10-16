@@ -1,0 +1,99 @@
+// Required verify consumer: creation-age retirement must preserve real dirty
+// Git/file state and refuse unknown age, occupied or changing snapshots.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,existsSync,rmSync,readdirSync,unlinkSync,symlinkSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join,dirname} from 'node:path';
+import {fileURLToPath} from 'node:url';
+import {spawnSync,spawn} from 'node:child_process';
+
+const here=dirname(fileURLToPath(import.meta.url));
+function fixture(t) {
+  const root=mkdtempSync(join(tmpdir(),'created-worktree-'));
+  t.after(()=>rmSync(root,{recursive:true,force:true}));
+  const primary=join(root,'primary'),path=join(root,'checkout'),bins=join(root,'bin');
+  mkdirSync(primary);mkdirSync(bins);
+  const env={...process.env,GIT_OPTIONAL_LOCKS:'0',GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null',CREATED_TEST_BIRTH:String(Math.floor(Date.now()/1000)-73*3600)};
+  const run=(command,args,extra={})=>spawnSync(command,args,{cwd:root,env,encoding:'utf8',...extra});
+  const git=(...args)=>{
+    const r=run('git',['-C',primary,'-c','user.name=Test','-c','user.email=test@example.invalid',...args]);
+    assert.equal(r.status,0,r.stderr);return r.stdout.trim();
+  };
+  git('init','-q','-b','main');
+  writeFileSync(join(primary,'.gitignore'),'.env\nlocal-state/\nnode_modules/\n');
+  for(const name of ['mixed','staged-delete','unstaged-delete'])writeFileSync(join(primary,name),'base\n');
+  git('add','.');git('-c','core.hooksPath=/dev/null','commit','-qm','base');
+  git('worktree','add','-qb','feature',path);
+  const realStat=run('which',['stat']).stdout.trim();
+  // Positive-age fixtures mock ONLY the synthetic Git-link birth query.
+  // A separate negative control below uses the real, freshly-created link.
+  writeFileSync(join(bins,'stat'),`#!/bin/sh
+if [ "$*" = "-c %W -- ${path}/.git" ]; then
+  case "$CREATED_TEST_AGE" in fresh) exec '${realStat}' "$@";; unknown) echo 0;; *) printf '%s\\n' "$CREATED_TEST_BIRTH";; esac
+else exec '${realStat}' "$@"; fi
+`,{mode:0o700});
+  writeFileSync(join(bins,'gh'),'#!/bin/sh\nexit 199\n',{mode:0o700});
+  env.PATH=bins+':'+env.PATH;
+  const prune=(...args)=>run('bash',[join(here,'prune-merged-worktrees.sh'),'--repo',primary,'--retire-created-hours','72',...args,path]);
+  const archives=()=>existsSync(join(primary,'.git','parked-worktrees'))?readdirSync(join(primary,'.git','parked-worktrees')).map(n=>join(primary,'.git','parked-worktrees',n)):[];
+  const semantic=()=>['ls-files --stage -z','diff --cached --binary','diff --binary','status --porcelain=v1 --untracked-files=all -z'].map(s=>git('-C',path,...s.split(' ')));
+  return {root,primary,path,env,run,git,prune,archives,semantic};
+}
+
+test('creation-age mode is explicit, has no audit side effects, and rejects fresh/unknown birth evidence',t=>{
+  const f=fixture(t);
+  for(const age of ['fresh','unknown']) {
+    f.env.CREATED_TEST_AGE=age;
+    const r=f.prune('--delete');assert.equal(r.status,1,r.stderr+r.stdout);
+    assert.match(r.stdout,/KEEP.*creation-age/);assert.equal(existsSync(f.path),true);assert.deepEqual(f.archives(),[]);
+  }
+  delete f.env.CREATED_TEST_AGE;
+  const report=f.prune();assert.equal(report.status,0,report.stderr);
+  assert.match(report.stdout,/SAFE.*parkable:created-age/);assert.deepEqual(f.archives(),[]);
+  assert.equal(f.prune('--park-inactive','--idle-hours','72').status,2);
+});
+
+test('dirty index and working files round-trip after GC, without resurrecting tracked deletions',t=>{
+  const f=fixture(t);
+  writeFileSync(join(f.path,'mixed'),'staged\n');f.git('-C',f.path,'add','mixed');writeFileSync(join(f.path,'mixed'),'working\n');
+  f.git('-C',f.path,'rm','-q','staged-delete');unlinkSync(join(f.path,'unstaged-delete'));
+  writeFileSync(join(f.path,'staged-only'),'only staged object\n');f.git('-C',f.path,'add','staged-only');unlinkSync(join(f.path,'staged-only'));
+  writeFileSync(join(f.path,'untracked'),Buffer.from([0,1,255]));writeFileSync(join(f.path,'.env'),'FAKE_LOCAL_INPUT=kept\n',{mode:0o600});
+  mkdirSync(join(f.path,'node_modules'));writeFileSync(join(f.path,'node_modules','cache'),'reinstall');
+  symlinkSync('mixed',join(f.path,'link'));
+  const before=f.semantic();const index=f.git('-C',f.path,'rev-parse','--path-format=absolute','--git-path','index');const original=readFileSync(index);
+  const r=f.prune('--delete');assert.equal(r.status,0,r.stderr+r.stdout);assert.match(r.stdout,/PARKED/);assert.equal(existsSync(f.path),false);
+  const [archive]=f.archives();const m=JSON.parse(readFileSync(join(archive,'manifest.json')));
+  assert.equal(m.version,2);assert.equal(f.git('rev-parse',m.ref),m.source.head);assert.equal(f.git('rev-parse',m.index_ref),m.index_tree);
+  assert.deepEqual(readFileSync(join(archive,'index')),original);
+  f.git('gc','--prune=now');
+  const restored=f.run('bash',[join(here,'restore-worktree.sh'),archive]);assert.equal(restored.status,0,restored.stderr);
+  assert.deepEqual(f.semantic(),before);assert.equal(readFileSync(join(f.path,'.env'),'utf8'),'FAKE_LOCAL_INPUT=kept\n');
+  assert.deepEqual(readFileSync(join(f.path,'untracked')),Buffer.from([0,1,255]));assert.equal(existsSync(join(f.path,'node_modules')),false);
+  for(const name of ['staged-delete','unstaged-delete','staged-only'])assert.equal(existsSync(join(f.path,name)),false);
+});
+
+test('split index, unmerged operations, Git locks and foreign live sessions stay',async t=>{
+  for(const kind of ['split','operation','locked','live']) {
+    const f=fixture(t);let child;
+    if(kind==='split')f.git('-C',f.path,'update-index','--split-index');
+    if(kind==='operation')writeFileSync(f.git('-C',f.path,'rev-parse','--path-format=absolute','--git-path','MERGE_HEAD'),f.git('rev-parse','HEAD')+'\n');
+    if(kind==='locked')f.git('worktree','lock',f.path);
+    if(kind==='live') {child=spawn('sleep',['120'],{cwd:f.path,detached:true,stdio:'ignore'});await new Promise(resolve=>child.once('spawn',resolve));t.after(()=>child.kill());}
+    const r=f.prune('--delete');assert.equal(r.status,1,r.stderr+r.stdout);assert.match(r.stdout,/KEEP/);assert.equal(existsSync(f.path),true);assert.deepEqual(f.archives(),[]);
+    if(child){child.kill();await new Promise(resolve=>child.once('exit',resolve));}
+  }
+});
+
+test('consumer lock rejects added ignored files and staging-only changes',t=>{
+  for(const kind of ['ignored','index']) {
+    const f=fixture(t);writeFileSync(join(f.path,'mixed'),'dirty working\n');mkdirSync(join(f.path,'local-state'));
+    const hook=join(f.root,'hook');
+    const mutation=kind==='ignored'?'printf new > "$1/local-state/new-private"':'printf staged > "$1/late"; git -C "$1" add late; rm "$1/late"';
+    writeFileSync(hook,'#!/bin/bash\nset -euo pipefail\nexec 9>"$1.lock"\nflock 9\n'+mutation+'\n"$2" "$1"\n',{mode:0o700});
+    const r=f.prune('--delete','--remove-hook',hook);assert.equal(r.status,1,r.stderr+r.stdout);assert.match(r.stdout,/KEEP/);assert.equal(existsSync(f.path),true);
+    // Changed snapshots retain their original recovery evidence as well.
+    assert.equal(f.archives().length,1);
+  }
+});

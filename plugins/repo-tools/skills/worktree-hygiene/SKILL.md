@@ -132,6 +132,16 @@ a repository-wide `--delete` requires that broader cleanup scope. A dry run neve
 removes anything. Stop task-owned background watchers before cleanup, and do not
 kill another session to turn KEEP into SAFE.
 
+Every agent must remove its own completed task checkout before reporting
+completion. Record its absolute path, owning primary and branch; stop its own
+watchers/servers; move the cleanup command outside the checkout; run the guarded
+remover; and verify both directory and Git registration are gone. With exec
+tools, set an outside working directory on **every** cleanup call: an earlier
+shell's `cd` does not persist. A caller still inside its checkout must fix that
+condition; it is not a reason to leave a completed checkout behind. Foreign
+sessions and detached task processes remain protected until their owner stops
+them. Keep exact blockers and retained paths in the completion record.
+
 Standalone local/remote branches use `repo-audit-branches`; its `--delete`
 and `--delete-remote` flags are independent. After safe worktree teardown, use
 `repo-audit-branches --base origin/main --fetch --branch <merged-head> --delete-remote`
@@ -190,31 +200,41 @@ inside the locked transaction. A resource refusal discards its prepared
 snapshot and ref only while the original checkout remains intact; partial
 removal failures retain recovery evidence.
 
-## Standing worktree retention
+## Standing creation-age retention
 
-An owner's standing seven-day retention grant authorizes retirement of linked
-checkouts older than seven days within the approved repositories without asking
-for permission again. By then, work should have been pushed to a remote branch
-or its checkout removed. An unmerged tip or an open PR does not revoke that
-checkout-retirement authorization. This procedure does not itself grant access
-or expand the owner's approved scope.
+An owner's explicit retention grant authorizes retirement of linked checkouts
+older than that creation-age window within the approved repositories without
+asking again. For a three-day grant, the window is 72 hours. An unmerged tip,
+open PR or recent edit does not renew an old checkout's age. This procedure
+does not grant access or select a global default window.
 
-Measure seven days from the worktree's creation, not its HEAD commit date;
-recent edits do not make an old checkout new. Use reliable checkout creation
-evidence, such as the Git link file's filesystem birth time. Unknown creation
-age is not evidence of expiry. Explicit narrower instructions for a task win.
+Use reliable Git-link filesystem birth time, never the HEAD commit date.
+Unknown or future creation time is KEEP. For an authorized three-day grant:
 
-Retain branches and exact committed history, including protected refs for
-detached HEADs, and preserve private local inputs in verified recovery archives.
-The rule does not authorize deleting remote branches or assuming every local
-commit was uploaded. Keep live or locked checkouts and preserve dirty work
-before removal; do not kill another session or force away unarchived edits.
+```bash
+repo-prune-merged-worktrees --repo <primary> --retire-created-hours 72 <checkout>
+repo-prune-merged-worktrees --repo <primary> --retire-created-hours 72 --delete <checkout>
+```
 
-`repo-prune-merged-worktrees --park-inactive --idle-hours 168` implements a
-seven-day inactivity check, not a creation-age check. It can retire the subset
-that also meets that window using the verified archive/restore workflow; do not
-claim it implements the full creation-age rule. Retain the process, archive and
-consumer-resource guards described above.
+Pass the documented consumer resource adapter in audit and apply. This mode
+keeps branches and exact committed history, an independent index and staged
+objects, dirty working files and their absences, and private ignored/untracked
+inputs in verified recovery archives. Restore with the reported
+`repo-restore-worktree` command; it creates an empty checkout before restoring
+files and staging state, so deleted tracked files remain absent. Archives may
+contain credentials and must remain private. Disposal is separate authorization.
+
+Keep live/locked/nested checkouts and unsupported split/sparse/unmerged indexes
+or in-progress Git operations with their exact reason and path. Never kill
+another session or use `--force-anyway` to bypass snapshot/occupancy refusals.
+The verified snapshot and retained path set are compared again under the
+consumer lock; changed snapshots and partial removal failures retain recovery
+evidence. The grant does not authorize deleting remote branches or treating
+unfinished implementation issues as completed.
+
+`--park-inactive --idle-hours N` remains an inactivity policy. It must not be
+used as a substitute for the creation-age policy or weakened to bypass a
+dirty/recent refusal.
 
 ## Syncing the primary checkout after a merge
 

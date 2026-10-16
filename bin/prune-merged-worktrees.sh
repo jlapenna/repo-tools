@@ -10,6 +10,7 @@ Usage: repo-prune-merged-worktrees [--repo <checkout>] [--base <ref>]
        [--fetch] [--delete] [--session-only] [--remove-hook <executable>]
        [<worktree-path>]
        [--park-unmerged|--park-inactive] [--idle-hours N]
+       [--retire-created-hours N]
 
 Default: report only, using current local refs. --fetch refreshes origin first.
 --delete removes only clean, idle, unlocked worktrees with verified landed work.
@@ -33,6 +34,13 @@ always keeps branches/history, and performs no GitHub reads or writes.
 Local writes, live processes, dirty/locked/nested checkouts and resource
 adapter refusals still keep it.
 
+--retire-created-hours N is explicitly authorized checkout retirement measured
+from the Git link file's reliable creation time. Recent edits do not renew age.
+It preserves dirty files, staging state, exact history and private local inputs
+in a verified recovery snapshot before removal, without GitHub access. Live,
+locked, nested, split/sparse-index and in-progress-operation checkouts stay.
+Use the owner's positive creation-age window; unknown creation age stays.
+
 An optional remove hook receives <worktree-path> <safe-remover-executable> after
 merge/ownership verification. It may hold consumer resource locks, invoke the
 provided remover, then clean up consumer-owned resources. A refusal must leave
@@ -52,6 +60,7 @@ hook=""
 park_unmerged=false
 park_inactive=false
 idle_hours=0
+created_hours=0
 while (($#)); do
   case "$1" in
     --repo|--base|--remove-hook)
@@ -67,6 +76,7 @@ while (($#)); do
     --park-unmerged) park_unmerged=true ;;
     --park-inactive) park_inactive=true ;;
     --idle-hours) [[ $# -ge 2 && $2 =~ ^[0-9]+$ ]] || { usage >&2; exit 2; }; idle_hours=$2; shift ;;
+    --retire-created-hours) [[ $# -ge 2 && $2 =~ ^[1-9][0-9]*$ ]] || { usage >&2; exit 2; }; created_hours=$2; shift ;;
     --session-only) session_only=true ;;
     -h|--help) usage; exit 0 ;;
     --) shift; (($# == 1)) || { usage >&2; exit 2; }; target=$1; break ;;
@@ -77,6 +87,9 @@ while (($#)); do
 done
 [[ $park_inactive == false || ( $idle_hours -gt 0 ) ]] || {
   echo '--park-inactive requires a positive --idle-hours window' >&2; exit 2;
+}
+[[ $created_hours == 0 || ( $park_inactive == false && $park_unmerged == false && $idle_hours == 0 ) ]] || {
+  echo '--retire-created-hours cannot be combined with inactivity parking' >&2; exit 2;
 }
 
 # Canonicalize relative arguments before using the primary checkout.
@@ -114,6 +127,7 @@ args=(--repo "$primary")
 [[ $park_unmerged != true ]] || args+=(--park-unmerged)
 [[ $park_inactive != true ]] || args+=(--park-inactive)
 args+=(--idle-hours "$idle_hours")
+[[ $created_hours == 0 ]] || args+=(--retire-created-hours "$created_hours")
 [[ $delete != true ]] || args+=(--delete)
 report=$("$here/sweep-worktrees.sh" "${args[@]}")
 printf '%s\n' "$report"
