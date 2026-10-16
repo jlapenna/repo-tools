@@ -91,7 +91,9 @@ with tempfile.TemporaryDirectory(prefix="repo-scanner-proof-") as temporary:
         candidate = proc / "999999999"
         candidate.mkdir()
         (candidate / "cwd").symlink_to(target, target_is_directory=True)
-        (candidate / "cmdline").write_bytes(b"synthetic-candidate\0")
+        marker = "synthetic-sensitive-argv-marker"
+        (candidate / "cmdline").write_bytes(marker.encode() + b"\0")
+        (candidate / "comm").write_text("fixture-candidate\n")
         mutation = ""
         if fault == "candidate-generation":
             mutation = "printf '%s\\n' \"" + stat_record(999999999, "$$", 123, 201) + "\" > \"$PROC_ROOT/999999999/stat\""
@@ -114,6 +116,7 @@ mkdir "$1/$$"
 printf '%s\n' "OWN_STAT" > "$1/$$/stat"
 ln -s "$2" "$1/$$/cwd"
 printf 'synthetic-own\0' > "$1/$$/cmdline"
+printf 'fixture-own\n' > "$1/$$/comm"
 printf '%s\n' "CHILD_STAT" > "$1/999999999/stat"
 printf '%s\n' "$$" > "$4"
 exec bash "$3" "$2" --foreign-only
@@ -125,11 +128,17 @@ exec bash "$3" "$2" --foreign-only
                                  str(subject), str(pid_file)], cwd=root,
                                 capture_output=True, text=True, timeout=5)
         assert result.returncode == 0, (fault, result.stderr)
+        assert marker not in result.stdout and "fixture-candidate" in result.stdout
         expected = {999999999}
         if fault == "ancestor-generation":
             expected.add(int(pid_file.read_text()))
         actual = {int(line.split()[0]) for line in result.stdout.splitlines()}
         assert actual == expected, (fault, actual, expected)
         print(fault + "-metadata-stays-foreign: ok")
+        if fault == "unknown":
+            diagnostic = subprocess.run(["bash", str(subject), str(target)], cwd=root,
+                                        capture_output=True, text=True, timeout=5)
+            assert diagnostic.returncode == 0 and marker in diagnostic.stdout
+            print("filtered-comm-only-default-argv-preserved: ok")
 print("repo-scan-live-processes: ok")
 PY

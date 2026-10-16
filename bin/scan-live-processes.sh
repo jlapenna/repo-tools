@@ -92,7 +92,11 @@ for pid_dir in "$PROC_ROOT"/[0-9]*; do
   if [[ $foreign_only == true ]] && is_own_process "$pid"; then
     continue
   fi
-  cmd=$(tr '\0' ' ' <"$pid_dir/cmdline" 2>/dev/null || echo "?")
+  if [[ $foreign_only == true ]]; then
+    cmd=$(cat "$pid_dir/comm" 2>/dev/null || echo "?")
+  else
+    cmd=$(tr '\0' ' ' <"$pid_dir/cmdline" 2>/dev/null || echo "?")
+  fi
   echo "$pid  $link  $cmd"
   found=1
 done
