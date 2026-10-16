@@ -23,10 +23,12 @@ if [[ -n $submodules ]] && grep -qv '^-' <<<"$submodules"; then
   echo 'initialized submodule needs its own history archive' >&2; exit 75
 fi
 check_snapshot() {
+  local occupants
+  occupants=$("$here/scan-live-processes.sh" "$worktree" --foreign-only) || return 75
   [[ $(git -C "$worktree" rev-parse HEAD) == "$expected" ]] &&
     [[ $(git -C "$worktree" symbolic-ref --quiet --short HEAD || true) == "$branch" ]] &&
     [[ -z $(git -C "$worktree" status --porcelain --untracked-files=all) ]] &&
-    [[ -z $("$here/scan-live-processes.sh" "$worktree") ]] &&
+    [[ -z $occupants ]] &&
     cleanup_worktree_idle "$worktree" "$branch" "$idle_hours" >/dev/null
 }
 check_snapshot || exit 75

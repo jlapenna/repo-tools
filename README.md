@@ -180,6 +180,24 @@ health checks.
   repository's worktree setup command afterward to reinstall dependencies.
   Each archive includes its manifest and exact restore command. Archives and
   protected refs are retained until the owner explicitly disposes of them.
+- For an explicit creation-age retirement grant, use
+  `repo-prune-merged-worktrees --repo <primary> --retire-created-hours 72
+  --delete <checkout>`, substituting the owner's positive hour window.
+  Reliable Git-link filesystem birth time controls eligibility; recent writes
+  and commit dates do not renew it. Unknown/future creation time stays.
+  This mode does not consult GitHub or delete branches. It preserves exact
+  HEAD and staged history with protected refs and an independent staged-object
+  pack, the byte-exact index, retained working-file versions and absences, and
+  untracked/ignored private inputs. Only the ignored caches listed above are
+  omitted. A complete retained path/content inventory and the index are checked
+  again inside the consumer resource lock, including newly added ignored files.
+  Version-2 recovery archives restore into an empty `--no-checkout` worktree,
+  preserving staged-versus-working differences and tracked deletions.
+  Live, locked, nested, initialized-submodule, split/sparse-index, unmerged,
+  worktree-only configuration, sparse-checkout patterns, and in-progress
+  Git-operation checkouts remain with explicit KEEP reasons.
+  The safe remover's verified-snapshot option permits only this independently
+  verified dirty state; it never waives occupancy or resource guards.
 - With `repo-sweep-worktrees`, use `--path <worktree>` to scope it to one
   completed task. Both
   the sweep and `repo-audit-branches [--base main] [--fetch] [--branch NAME] [--delete] [--delete-remote]`
