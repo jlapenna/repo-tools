@@ -224,8 +224,9 @@ inputs in verified recovery archives. Restore with the reported
 files and staging state, so deleted tracked files remain absent. Archives may
 contain credentials and must remain private. Disposal is separate authorization.
 
-Keep live/locked/nested checkouts and unsupported split/sparse/unmerged indexes
-or in-progress Git operations with their exact reason and path. Never kill
+Keep live/locked/nested checkouts and unsupported split/sparse/unmerged indexes,
+worktree-only configuration, sparse-checkout patterns or in-progress Git
+operations with their exact reason and path. Never kill
 another session or use `--force-anyway` to bypass snapshot/occupancy refusals.
 The verified snapshot and retained path set are compared again under the
 consumer lock; changed snapshots and partial removal failures retain recovery

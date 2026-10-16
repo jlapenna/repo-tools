@@ -134,3 +134,19 @@ test('a nested independent primary remains intact even inside an ignored directo
   assert.equal(readFileSync(join(nested,'private-work'),'utf8'),'nested owner work\n');
   assert.equal(existsSync(join(nested,'.git')),true);assert.deepEqual(f.archives(),[]);
 });
+
+test('worktree-only configuration and full-index sparse checkout are retained before capture',t=>{
+  for(const kind of ['config','sparse']) {
+    const f=fixture(t);
+    if(kind==='config') {
+      f.git('config','extensions.worktreeConfig','true');
+      f.git('-C',f.path,'config','--worktree','core.fileMode','false');
+    } else {
+      const sparse=f.git('-C',f.path,'rev-parse','--path-format=absolute','--git-path','info/sparse-checkout');
+      mkdirSync(dirname(sparse),{recursive:true});writeFileSync(sparse,'/mixed\n');
+    }
+    const r=f.prune('--delete');assert.equal(r.status,1,r.stderr+r.stdout);
+    assert.match(r.stdout,kind==='config'?/KEEP.*worktree-config-needs-independent-recovery/:/KEEP.*sparse-checkout-needs-independent-recovery/);
+    assert.equal(existsSync(f.path),true);assert.deepEqual(f.archives(),[]);
+  }
+});

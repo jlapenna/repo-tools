@@ -194,7 +194,8 @@ health checks.
   Version-2 recovery archives restore into an empty `--no-checkout` worktree,
   preserving staged-versus-working differences and tracked deletions.
   Live, locked, nested, initialized-submodule, split/sparse-index, unmerged,
-  and in-progress Git-operation checkouts remain with explicit KEEP reasons.
+  worktree-only configuration, sparse-checkout patterns, and in-progress
+  Git-operation checkouts remain with explicit KEEP reasons.
   The safe remover's verified-snapshot option permits only this independently
   verified dirty state; it never waives occupancy or resource guards.
 - With `repo-sweep-worktrees`, use `--path <worktree>` to scope it to one
