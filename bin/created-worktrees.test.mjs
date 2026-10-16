@@ -2,7 +2,7 @@
 // Git/file state and refuse unknown age, occupied or changing snapshots.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,existsSync,rmSync,readdirSync,unlinkSync,symlinkSync} from 'node:fs';
+import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,existsSync,rmSync,readdirSync,unlinkSync,symlinkSync,cpSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join,dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -114,4 +114,13 @@ print(json.dumps({'rc':r.returncode,'stdout':r.stdout,'stderr':r.stderr}))
     const r=JSON.parse(result.stdout);assert.equal(r.rc,0,r.stderr+r.stdout);
     assert.match(r.stdout,mode==='created'?/PARKED/:/REMOVED/);assert.equal(existsSync(f.path),false);
   }
+});
+
+test('an unavailable process scanner is KEEP before any snapshot or removal',t=>{
+  const f=fixture(t),commands=join(f.root,'commands');
+  cpSync(here,commands,{recursive:true});
+  writeFileSync(join(commands,'scan-live-processes.sh'),'#!/bin/sh\nexit 75\n',{mode:0o700});
+  const r=f.run('bash',[join(commands,'prune-merged-worktrees.sh'),'--repo',f.primary,'--retire-created-hours','72','--delete',f.path]);
+  assert.equal(r.status,1,r.stderr+r.stdout);assert.match(r.stdout,/KEEP.*occupancy-unverifiable/);
+  assert.equal(existsSync(f.path),true);assert.deepEqual(f.archives(),[]);
 });

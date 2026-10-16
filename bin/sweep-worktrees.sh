@@ -122,7 +122,11 @@ worktree_evidence() {
   echo "$reason"; return 1
 }
 
-live_count() { "$SCANNER" "$1" --foreign-only 2>/dev/null | grep -cE '^[0-9]+ ' || true; }
+live_count() {
+  local occupants
+  occupants=$("$SCANNER" "$1" --foreign-only 2>/dev/null) || return 1
+  printf '%s\n' "$occupants" | grep -cE '^[0-9]+ ' || true
+}
 
 # Uncommitted changes in a worktree, not counting files that belong to a
 # worktree nested inside it (a child under .claude/worktrees/ shows up as
@@ -178,7 +182,9 @@ while IFS= read -r line; do
           emit KEEP "$path" "$branch" "locked"
         elif [[ $CREATED_HOURS == 0 ]] && dirty=$(dirty_count "$path") && [ "$dirty" -gt 0 ]; then
           emit KEEP "$path" "$branch" "dirty: $dirty uncommitted change(s)"
-        elif live=$(live_count "$path") && [ "$live" -gt 0 ]; then
+        elif ! live=$(live_count "$path"); then
+          emit KEEP "$path" "$branch" 'occupancy-unverifiable'
+        elif [ "$live" -gt 0 ]; then
           emit KEEP "$path" "$branch" "live: $live process(es) with cwd inside"
         elif [[ $CREATED_HOURS == 0 ]] && ! idle_reason=$(cleanup_worktree_idle "$path" "$branch" "$IDLE_HOURS"); then
           emit KEEP "$path" "$branch" "$idle_reason"
