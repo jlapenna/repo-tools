@@ -11,6 +11,7 @@
 #   - its work is in the base: the tip is an ancestor of --base, or the
 #     exact branch head was merged by a PR whose merge commit is on the base.
 # Missing PR ownership data is unverified, never permission to delete.
+# A rejected or missing gh credential exits 77 after the report.
 # Anything else is KEEP with the reason. Nothing is removed without --delete.
 # Nested worktrees are removed before their parents. Removal goes through
 # safe-remove-worktree, which re-checks live processes and cleanliness.
@@ -42,7 +43,7 @@ while [ "$#" -gt 0 ]; do
     --park-inactive) PARK_INACTIVE=true ;;
     --idle-hours) [[ $# -ge 2 && $2 =~ ^[0-9]+$ ]] || exit 64; IDLE_HOURS=$2; shift ;;
     --retire-created-hours) [[ $# -ge 2 && $2 =~ ^[1-9][0-9]*$ ]] || exit 64; CREATED_HOURS=$2; shift ;;
-    -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,21p' "$0"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 64 ;;
   esac
   shift
@@ -78,7 +79,13 @@ git -C "$PRIMARY" rev-parse -q --verify "$BASE^{commit}" >/dev/null || { echo "u
 
 BASE=$(git -C "$PRIMARY" rev-parse "$BASE^{commit}")
 if [[ $PARK_INACTIVE != true && $CREATED_HOURS == 0 ]]; then
-  cleanup_load_prs "$PRIMARY" || echo '# PR data unavailable; keeping unverified worktrees' >&2
+  if ! cleanup_load_prs "$PRIMARY"; then
+    if [[ -n $CLEANUP_PRS_AUTH_FAILED ]]; then
+      echo '# ERROR: GitHub rejected the gh credential; PR verdicts are impossible until it is repaired' >&2
+    else
+      echo '# PR data unavailable; keeping unverified worktrees' >&2
+    fi
+  fi
 fi
 
 worktree_evidence() {
@@ -202,6 +209,14 @@ while IFS= read -r line; do
   esac
 done <<<"$RECORDS
 "
+
+# A dead credential pins every worktree KEEP on every run, so fail loudly
+# (EX_NOPERM) instead of reporting a clean sweep. Nothing can be SAFE here.
+if [[ -n ${CLEANUP_PRS_AUTH_FAILED:-} ]]; then
+  echo '# ERROR: gh credential rejected (bad credentials / not logged in); KEEP unverified:gh-auth-failed is not a verdict.' >&2
+  echo '# Fix on this host as this user: gh auth status, then gh auth login -h github.com' >&2
+  exit 77
+fi
 
 [ "$DELETE" = true ] || { echo "# ${#safe_paths[@]} removable worktree(s); re-run with --delete to remove them" >&2; exit 0; }
 [ "${#safe_paths[@]}" -gt 0 ] || exit 0

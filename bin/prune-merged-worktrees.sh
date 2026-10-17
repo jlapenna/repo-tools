@@ -129,8 +129,10 @@ args=(--repo "$primary")
 args+=(--idle-hours "$idle_hours")
 [[ $created_hours == 0 ]] || args+=(--retire-created-hours "$created_hours")
 [[ $delete != true ]] || args+=(--delete)
-report=$("$here/sweep-worktrees.sh" "${args[@]}")
-printf '%s\n' "$report"
+sweep_status=0
+report=$("$here/sweep-worktrees.sh" "${args[@]}") || sweep_status=$?
+[[ -z $report ]] || printf '%s\n' "$report"
+((sweep_status == 0)) || exit "$sweep_status"
 [[ $delete == true ]] || exit 0
 if awk -F '\t' '$1 == "FAILED" { found=1 } END { exit !found }' <<<"$report"; then
   exit 1

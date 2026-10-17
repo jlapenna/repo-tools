@@ -131,7 +131,10 @@ health checks.
   audit every linked worktree of a checkout and, with `--delete`, remove the
   ones whose work has landed (ancestor of the base, or exact merged PR head
   whose merge commit is on the base) that are clean and unoccupied;
-  dirty, live, open-PR, and unverified worktrees are reported and kept. Run
+  dirty, live, open-PR, and unverified worktrees are reported and kept. A
+  rejected or missing `gh` credential is reported as
+  `unverified:gh-auth-failed` and the command exits 77 after the report, so a
+  scheduled run fails loudly instead of pinning every worktree forever. Run
   it from the primary checkout, on a schedule, as the backstop for sessions
   that never completed their own teardown.
 - Exact merged-head evidence also covers renamed branches and detached review
