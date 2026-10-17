@@ -225,11 +225,16 @@ inputs in verified recovery archives. Restore with the reported
 `repo-restore-worktree` command; it creates an empty checkout before restoring
 files and staging state, so deleted tracked files remain absent. Archives may
 contain credentials and must remain private. Disposal is separate authorization.
+Identity-only
+`config.worktree` files are separately checksummed and restored byte-for-byte
+into the new checkout's private Git administration directory; other keys,
+includes, redirected files, unsafe modes and changed extension semantics stay.
+Group writes require the current primary group.
 
 Keep live/locked/nested checkouts and unsupported split/sparse/unmerged indexes,
-worktree-only configuration, sparse-checkout patterns or in-progress Git
-operations with their exact reason and path. Never kill
-another session or use `--force-anyway` to bypass snapshot/occupancy refusals.
+worktree-only configuration beyond regular, owned `user.name` / `user.email`
+settings, sparse-checkout patterns or in-progress Git operations with their
+exact reason and path. Never kill another session or use `--force-anyway` to bypass snapshot/occupancy refusals.
 The verified snapshot and retained path set are compared again under the
 consumer lock; changed snapshots and partial removal failures retain recovery
 evidence. The grant does not authorize deleting remote branches or treating

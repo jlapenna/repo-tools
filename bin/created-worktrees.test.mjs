@@ -160,3 +160,71 @@ test('dangling sparse metadata is retained rather than silently lost',t=>{
   assert.match(r.stdout,/KEEP.*sparse-checkout-needs-independent-recovery/);
   assert.equal(existsSync(f.path),true);assert.deepEqual(f.archives(),[]);
 });
+
+test('identity-only worktree configuration survives private retirement and restoration',t=>{
+  const f=fixture(t);
+  f.git('config','extensions.worktreeConfig','true');
+  f.git('-C',f.path,'config','--worktree','user.name','First identity');
+  f.git('-C',f.path,'config','--worktree','--add','user.name','Last "quoted" identity\nsecond line');
+  f.git('-C',f.path,'config','--worktree','user.email','local@example.invalid');
+  const config=f.git('-C',f.path,'rev-parse','--path-format=absolute','--git-path','config.worktree');
+  const mode=f.run('chmod',['0664',config]);assert.equal(mode.status,0,mode.stderr);
+  const original=readFileSync(config);
+  writeFileSync(join(f.path,'mixed'),'staged identity work\n');f.git('-C',f.path,'add','mixed');
+  writeFileSync(join(f.path,'mixed'),'unstaged identity work\n');
+  const before=f.semantic();
+  const r=f.prune('--delete');assert.equal(r.status,0,r.stderr+r.stdout);
+  assert.equal(existsSync(f.path),false);
+  const [archive]=f.archives();const m=JSON.parse(readFileSync(join(archive,'manifest.json')));
+  assert.equal(m.version,3);assert.equal(m.source.worktree_config.mode,0o664);assert.deepEqual(readFileSync(join(archive,'config.worktree')),original);
+  f.git('gc','--prune=now');
+  const restored=f.run('bash',[join(here,'restore-worktree.sh'),archive]);assert.equal(restored.status,0,restored.stderr);
+  const newConfig=f.git('-C',f.path,'rev-parse','--path-format=absolute','--git-path','config.worktree');
+  assert.equal(f.run('stat',['-c','%a',newConfig]).stdout.trim(),'664');
+  assert.deepEqual(readFileSync(newConfig),original);assert.deepEqual(f.semantic(),before);
+  const identity=f.run('git',['-C',f.path,'config','--get','user.name']);
+  assert.equal(identity.status,0);assert.equal(identity.stdout,'Last "quoted" identity\nsecond line\n');
+  // Same UID with a changed primary group must fail before creating a checkout.
+  const manifest=join(archive,'manifest.json');const saved=readFileSync(manifest);
+  m.source.worktree_config.group_write_gid=process.getgid()+1;
+  writeFileSync(manifest,JSON.stringify(m));
+  const alternate=join(f.root,'changed-primary-group');
+  const refused=f.run('bash',[join(here,'restore-worktree.sh'),archive,'--path',alternate]);
+  assert.equal(refused.status,75,refused.stderr);assert.equal(existsSync(alternate),false);
+  assert.match(refused.stderr,/primary-group-changed/);writeFileSync(manifest,saved);
+
+});
+
+test('identity configuration changes and changed extension semantics retain the checkout',t=>{
+  for(const kind of ['identity','extension']) {
+    const f=fixture(t);f.git('config','extensions.worktreeConfig','true');
+    f.git('-C',f.path,'config','--worktree','user.name','Before snapshot');
+    const hook=join(f.root,'config-hook');
+    const mutation=kind==='identity'?'git -C "$1" config --worktree user.name "After snapshot"':'git -C "$1" config --local extensions.worktreeConfig false';
+    writeFileSync(hook,'#!/bin/bash\nset -euo pipefail\nexec 9>"$1.lock"\nflock 9\n'+mutation+'\n"$2" "$1"\n',{mode:0o700});
+    const r=f.prune('--delete','--remove-hook',hook);assert.equal(r.status,1,r.stderr+r.stdout);
+    assert.match(r.stdout,/KEEP/);assert.equal(existsSync(f.path),true);assert.equal(f.archives().length,1);
+    const [archive]=f.archives();assert.match(readFileSync(join(archive,'config.worktree'),'utf8'),/Before snapshot/);
+  }
+});
+
+test('identity recovery rejects includes, nonidentity settings and redirected config files',t=>{
+  const differentGroup=process.getgroups().find(g=>g!==process.getgid());
+  const kinds=['include','nonidentity','symlink','writable'];
+  if(differentGroup!==undefined)kinds.push('different-group');
+  for(const kind of kinds) {
+    const f=fixture(t);f.git('config','extensions.worktreeConfig','true');
+    f.git('-C',f.path,'config','--worktree','user.name','Safe identity');
+    const config=f.git('-C',f.path,'rev-parse','--path-format=absolute','--git-path','config.worktree');
+    if(kind==='include')f.git('-C',f.path,'config','--worktree','include.path','/missing');
+    if(kind==='nonidentity')f.git('-C',f.path,'config','--worktree','core.hooksPath','/missing');
+    if(kind==='symlink') {const copy=join(f.root,'identity-source');writeFileSync(copy,readFileSync(config));unlinkSync(config);symlinkSync(copy,config);}
+    if(kind==='writable') {const changed=f.run('chmod',['0666',config]);assert.equal(changed.status,0,changed.stderr);}
+    if(kind==='different-group') {
+      const changed=f.run('chgrp',[String(differentGroup),config]);assert.equal(changed.status,0,changed.stderr);
+      const mode=f.run('chmod',['0664',config]);assert.equal(mode.status,0,mode.stderr);
+    }
+    const r=f.prune('--delete');assert.equal(r.status,1,r.stderr+r.stdout);
+    assert.match(r.stdout,/KEEP/);assert.equal(existsSync(f.path),true);assert.deepEqual(f.archives(),[]);
+  }
+});

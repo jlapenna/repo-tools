@@ -13,7 +13,7 @@ while (($#)); do
   shift
 done
 manifest="$archive/manifest.json"
-if [[ $(jq -r .version "$manifest") == 2 ]]; then
+if [[ $(jq -r .version "$manifest") == 2 || $(jq -r .version "$manifest") == 3 ]]; then
   here=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)
   exec python3 "$here/created-worktree.py" restore "$archive" "$target"
 fi
