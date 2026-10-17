@@ -156,7 +156,7 @@ def merge_control(path):
 
 def resolved_merge(path, admin):
     """Preserve ordinary resolved merge metadata, including a missing advisory tree."""
-    if any(os.path.lexists(admin / (name + ".lock")) for name in MERGE_FILES):
+    if any(os.path.lexists(admin / (name + ".lock")) for name in MERGE_FILES | {"MERGE_AUTOSTASH"}):
         raise Refusal("merge-control-lock-needs-independent-recovery")
     if not os.path.lexists(admin / "MERGE_HEAD"):
         return None

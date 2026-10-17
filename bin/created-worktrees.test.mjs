@@ -324,6 +324,28 @@ test('every merge-control lock retains the resolved checkout before archive prep
   }
 });
 
+test('autostash pseudoref locks retain final-state-absent merges before retirement',t=>{
+  for(const kind of ['regular','dangling','consumer-race']){
+    const f=resolvedMergeFixture(t,{missing:true});
+    const lock=join(f.admin,'MERGE_AUTOSTASH.lock');
+    assert.equal(existsSync(join(f.admin,'MERGE_AUTOSTASH')),false);
+    let r;
+    if(kind==='consumer-race'){
+      const hook=join(f.root,'autostash-lock-hook');
+      writeFileSync(hook,'#!/bin/bash\nset -euo pipefail\nexec 9>"$1.lock"\nflock 9\nadmin=$(git -C "$1" rev-parse --absolute-git-dir)\nprintf "pending pseudoref\\n" >"$admin/MERGE_AUTOSTASH.lock"\n"$2" "$1"\n',{mode:0o700});
+      r=f.prune('--delete','--remove-hook',hook);
+    }else{
+      if(kind==='regular')writeFileSync(lock,'pending pseudoref\n');
+      else symlinkSync(join(f.root,'absent-lock-target'),lock);
+      r=f.prune('--delete');
+    }
+    assert.equal(r.status,1,r.stderr+r.stdout);
+    assert.match(r.stdout,kind==='consumer-race'?/KEEP.*snapshot-or-resources-changed/:/KEEP.*merge-control-lock/);
+    assert.equal(existsSync(f.path),true);
+    assert.equal(f.archives().length,kind==='consumer-race'?1:0);
+  }
+});
+
 test('missing advisory classification never invokes a configured promisor transport',t=>{
   const f=resolvedMergeFixture(t,{missing:true});
   const transport=join(f.root,'unexpected-fetch'),marker=join(f.root,'transport-invoked');
