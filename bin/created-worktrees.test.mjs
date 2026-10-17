@@ -228,3 +228,112 @@ test('identity recovery rejects includes, nonidentity settings and redirected co
     assert.match(r.stdout,/KEEP/);assert.equal(existsSync(f.path),true);assert.deepEqual(f.archives(),[]);
   }
 });
+
+function resolvedMergeFixture(t,{missing=false,unresolved=false}={}) {
+  const f=fixture(t);
+  f.git('config','user.name','Merge recovery fixture');
+  f.git('config','user.email','merge@example.invalid');
+  f.git('config','gc.auto','0');
+  f.env.GIT_EDITOR='true';f.env.GIT_MERGE_AUTOEDIT='no';
+  f.git('switch','-qc','merge-side');
+  writeFileSync(join(f.primary,'mixed'),'side\n');f.git('commit','-qam','side');
+  writeFileSync(join(f.path,'mixed'),'ours\n');f.git('-C',f.path,'commit','-qam','ours');
+  const parents=[f.git('-C',f.path,'rev-parse','HEAD'),f.git('rev-parse','merge-side')];
+  const conflict=f.run('git',['-C',f.path,'merge','--no-edit','merge-side']);
+  assert.equal(conflict.status,1,conflict.stderr+conflict.stdout);
+  const admin=f.git('-C',f.path,'rev-parse','--absolute-git-dir');
+  const auto=readFileSync(join(admin,'AUTO_MERGE'),'utf8').trim();
+  assert.equal(f.git('cat-file','-t',auto),'tree');
+  if(missing)unlinkSync(join(f.primary,'.git','objects',auto.slice(0,2),auto.slice(2)));
+  if(!unresolved){writeFileSync(join(f.path,'mixed'),'resolved\n');f.git('-C',f.path,'add','mixed');}
+  writeFileSync(join(admin,'MERGE_RR'),'');
+  const controls={};
+  for(const name of ['MERGE_HEAD','MERGE_MSG','MERGE_MODE','ORIG_HEAD','AUTO_MERGE','MERGE_RR']){
+    const file=join(admin,name);controls[name]=readFileSync(file);
+    const mode=f.run('chmod',['0664',file]);assert.equal(mode.status,0,mode.stderr);
+  }
+  return {...f,admin,auto,parents,controls};
+}
+
+test('resolved ordinary merge round-trips available and preexisting-missing advisory trees',t=>{
+  for(const missing of [false,true]){
+    const f=resolvedMergeFixture(t,{missing});const before=f.semantic();
+    const r=f.prune('--delete');assert.equal(r.status,0,r.stderr+r.stdout);
+    assert.equal(existsSync(f.path),false);
+    const [archive]=f.archives();const manifest=JSON.parse(readFileSync(join(archive,'manifest.json')));
+    assert.equal(manifest.version,4);
+    assert.equal(manifest.source.merge_state.auto_merge.status,missing?'preexisting-missing':'available-tree');
+    for(const [name,bytes]of Object.entries(f.controls))assert.deepEqual(readFileSync(join(archive,'merge-'+name)),bytes);
+    // The other parent now survives only via the snapshot's protected refs/pack.
+    f.git('switch','-q','main');f.git('update-ref','-d','refs/heads/merge-side',f.parents[1]);
+    f.git('gc','--prune=now');
+    const restored=f.run('bash',[join(here,'restore-worktree.sh'),archive]);assert.equal(restored.status,0,restored.stderr);
+    assert.deepEqual(f.semantic(),before);
+    const admin=f.git('-C',f.path,'rev-parse','--absolute-git-dir');
+    for(const [name,bytes]of Object.entries(f.controls)){
+      assert.deepEqual(readFileSync(join(admin,name)),bytes);
+      assert.equal(f.run('stat',['-c','%a',join(admin,name)]).stdout.trim(),'664');
+    }
+    const state=f.run('git',['-C',f.path,'cat-file','--batch-check'],{input:f.auto+'\n'});
+    assert.equal(state.status,0,state.stderr);
+    assert.equal(state.stdout.includes(' missing'),missing);
+    f.git('-C',f.path,'merge','--continue');
+    assert.deepEqual(f.git('-C',f.path,'show','-s','--format=%P','HEAD').split(' '),f.parents);
+    assert.equal(readFileSync(join(f.path,'mixed'),'utf8'),'resolved\n');
+  }
+});
+
+test('resolved-merge retirement still refuses all unresolved and unsupported operation state',t=>{
+  for(const kind of ['unresolved','autostash','rerere','lock','symlink']){
+    const f=resolvedMergeFixture(t,{unresolved:kind==='unresolved'});
+    if(kind==='autostash')writeFileSync(join(f.admin,'MERGE_AUTOSTASH'),f.parents[0]+'\n');
+    if(kind==='rerere')writeFileSync(join(f.admin,'MERGE_RR'),'unsupported rerere record\n');
+    if(kind==='lock')writeFileSync(join(f.admin,'index.lock'),'');
+    if(kind==='symlink'){
+      const outside=join(f.root,'private-merge-message');writeFileSync(outside,'fixture only\n');
+      unlinkSync(join(f.admin,'MERGE_MSG'));symlinkSync(outside,join(f.admin,'MERGE_MSG'));
+    }
+    const r=f.prune('--delete');assert.equal(r.status,1,r.stderr+r.stdout);
+    assert.match(r.stdout,/KEEP/);assert.equal(existsSync(f.path),true);assert.deepEqual(f.archives(),[]);
+  }
+});
+
+test('consumer-lock merge-control changes retain the checkout and exact earlier evidence',t=>{
+  const f=resolvedMergeFixture(t,{missing:true});
+  const hook=join(f.root,'merge-change-hook');
+  writeFileSync(hook,'#!/bin/bash\nset -euo pipefail\nexec 9>"$1.lock"\nflock 9\nadmin=$(git -C "$1" rev-parse --absolute-git-dir)\nprintf "changed after snapshot\\n" >"$admin/MERGE_MSG"\n"$2" "$1"\n',{mode:0o700});
+  const r=f.prune('--delete','--remove-hook',hook);assert.equal(r.status,1,r.stderr+r.stdout);
+  assert.match(r.stdout,/KEEP/);assert.equal(existsSync(f.path),true);
+  const [archive]=f.archives();assert.deepEqual(readFileSync(join(archive,'merge-MERGE_MSG')),f.controls.MERGE_MSG);
+});
+
+test('every merge-control lock retains the resolved checkout before archive preparation',t=>{
+  for(const name of ['MERGE_HEAD','AUTO_MERGE','MERGE_RR','ORIG_HEAD','MERGE_MSG','MERGE_MODE']){
+    const f=resolvedMergeFixture(t,{missing:true});
+    writeFileSync(join(f.admin,name+'.lock'),'');
+    const r=f.prune('--delete');assert.equal(r.status,1,r.stderr+r.stdout);
+    assert.match(r.stdout,/KEEP.*merge-control-lock/);
+    assert.equal(existsSync(f.path),true);assert.deepEqual(f.archives(),[]);
+  }
+  for(const name of ['MERGE_HEAD','AUTO_MERGE']){
+    const f=resolvedMergeFixture(t,{missing:true});
+    symlinkSync(join(f.root,'absent-lock-target'),join(f.admin,name+'.lock'));
+    const r=f.prune('--delete');assert.equal(r.status,1,r.stderr+r.stdout);
+    assert.match(r.stdout,/KEEP.*merge-control-lock/);
+    assert.equal(existsSync(f.path),true);assert.deepEqual(f.archives(),[]);
+  }
+});
+
+test('missing advisory classification never invokes a configured promisor transport',t=>{
+  const f=resolvedMergeFixture(t,{missing:true});
+  const transport=join(f.root,'unexpected-fetch'),marker=join(f.root,'transport-invoked');
+  writeFileSync(transport,'#!/bin/sh\nprintf "unexpected hydration\\n" >>"$FIXTURE_TRANSPORT_MARKER"\nexit 93\n',{mode:0o700});
+  f.env.GIT_SSH_COMMAND=transport;f.env.GIT_SSH_VARIANT='ssh';f.env.FIXTURE_TRANSPORT_MARKER=marker;
+  f.git('config','remote.origin.url','ssh://fixture.invalid/unavailable');
+  f.git('config','remote.origin.promisor','true');
+  f.git('config','extensions.partialClone','origin');
+  const r=f.prune('--delete');assert.equal(r.status,0,r.stderr+r.stdout);
+  assert.equal(existsSync(marker),false,'inspection must not call even the private fake transport');
+  const [archive]=f.archives();const m=JSON.parse(readFileSync(join(archive,'manifest.json')));
+  assert.equal(m.source.merge_state.auto_merge.status,'preexisting-missing');
+});

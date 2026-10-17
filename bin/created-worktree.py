@@ -136,6 +136,108 @@ def identity_config(path):
             "group_write_gid": info.st_gid if info.st_mode & 0o020 else None}
 
 
+MERGE_FILES = {"MERGE_HEAD", "MERGE_MSG", "MERGE_MODE", "AUTO_MERGE", "ORIG_HEAD", "MERGE_RR"}
+MERGE_REQUIRED = {"MERGE_HEAD", "MERGE_MSG", "MERGE_MODE", "ORIG_HEAD"}
+
+
+def merge_control(path):
+    with regular_file(path) as stream:
+        info = os.fstat(stream.fileno())
+        mode = stat.S_IMODE(info.st_mode)
+        if (info.st_uid != os.getuid() or mode & ~0o664 or not mode & 0o400
+                or (mode & 0o020 and info.st_gid != os.getgid())):
+            raise Refusal("merge-control-needs-independent-recovery")
+        data = stream.read(65537)
+    if len(data) > 65536:
+        raise Refusal("merge-control-too-large")
+    return data, {"sha256": hashlib.sha256(data).hexdigest(), "mode": mode,
+                  "group_write_gid": info.st_gid if mode & 0o020 else None}
+
+
+def resolved_merge(path, admin):
+    """Preserve ordinary resolved merge metadata, including a missing advisory tree."""
+    if any(os.path.lexists(admin / (name + ".lock")) for name in MERGE_FILES):
+        raise Refusal("merge-control-lock-needs-independent-recovery")
+    if not os.path.lexists(admin / "MERGE_HEAD"):
+        return None
+    files, data = {}, {}
+    for name in sorted(MERGE_FILES):
+        if os.path.lexists(admin / name):
+            data[name], files[name] = merge_control(admin / name)
+        if os.path.lexists(admin / "logs" / name):
+            raise Refusal("merge-operation-log-needs-independent-recovery")
+    if not MERGE_REQUIRED <= set(files) or data.get("MERGE_RR", b"") or data["MERGE_MODE"] not in (b"", b"no-ff"):
+        raise Refusal("unsupported-merge-control-state")
+    reader_env = dict(ENV, GIT_NO_LAZY_FETCH="1")
+    head = git(path, "rev-parse", "HEAD", env=reader_env).decode().strip()
+    def oid(name):
+        value = data[name].decode("ascii")
+        if len(value) not in (len(head), len(head) + 1) or value.rstrip("\n") != value.strip():
+            raise Refusal("unsupported-merge-control-object-id")
+        value = value.removesuffix("\n")
+        if len(value) != len(head) or any(c not in "0123456789abcdef" for c in value):
+            raise Refusal("unsupported-merge-control-object-id")
+        return value
+    parent, original = oid("MERGE_HEAD"), oid("ORIG_HEAD")
+    if original != head or git(path, "cat-file", "-t", parent, env=reader_env).decode().strip() != "commit":
+        raise Refusal("unsupported-merge-parent-state")
+    roots = [parent]
+    auto = {"status": "absent"}
+    if "AUTO_MERGE" in data:
+        auto_oid = oid("AUTO_MERGE")
+        kind = git(path, "cat-file", "--batch-check", data=(auto_oid + "\n").encode(), env=reader_env).decode().strip().split()
+        if kind == [auto_oid, "missing"]:
+            auto = {"oid": auto_oid, "status": "preexisting-missing"}
+        elif len(kind) == 3 and kind[0] == auto_oid and kind[1] == "tree":
+            auto = {"oid": auto_oid, "status": "available-tree"}
+            roots.append(auto_oid)
+        else:
+            raise Refusal("unsupported-auto-merge-object-type")
+    for root in roots:
+        closure = git(path, "rev-list", "--objects", "--missing=print", root,
+                      env=reader_env)
+        if any(line.startswith(b"?") for line in closure.splitlines()):
+            raise Refusal("available-merge-object-closure-incomplete")
+    return {"kind": "resolved-ordinary-merge", "files": files, "parent": parent,
+            "original_head": original, "auto_merge": auto, "object_roots": roots}
+
+
+def archive_merge_files(archive, state):
+    if not state or state.get("kind") != "resolved-ordinary-merge":
+        raise Refusal("unsupported-merge-archive")
+    names = set(state["files"])
+    if not MERGE_REQUIRED <= names or not names <= MERGE_FILES:
+        raise Refusal("unsupported-merge-archive-file-set")
+    for name, recorded in state["files"].items():
+        _raw, actual = merge_control(archive / ("merge-" + name))
+        if actual != {"sha256": recorded["sha256"], "mode": 0o600, "group_write_gid": None}:
+            raise Refusal("merge-archive-control-mismatch")
+        mode, group = recorded["mode"], recorded["group_write_gid"]
+        if mode & ~0o664 or not mode & 0o400 or bool(mode & 0o020) != (group is not None):
+            raise Refusal("unsafe-merge-archive-mode")
+    return {"merge-" + name for name in names}
+
+
+def restore_merge_files(archive, path, state):
+    admin = Path(text(path, "rev-parse", "--absolute-git-dir"))
+    for name, recorded in state["files"].items():
+        destination = Path(text(path, "rev-parse", "--path-format=absolute", "--git-path", name))
+        if destination.parent != admin:
+            raise Refusal("merge-control-destination-is-not-private-gitdir")
+        copy_regular(archive / ("merge-" + name), destination)
+        if recorded["group_write_gid"] is not None and destination.stat().st_gid != recorded["group_write_gid"]:
+            raise Refusal("restore-merge-control-group-changed")
+        destination.chmod(recorded["mode"])
+    actual = resolved_merge(path, admin)
+    # A formerly missing advisory object may be independently repaired in the
+    # shared object DB. Never delete that newly available object to force absence.
+    if state["auto_merge"]["status"] == "preexisting-missing" and actual["auto_merge"]["status"] == "available-tree" and actual["auto_merge"]["oid"] == state["auto_merge"]["oid"]:
+        actual["auto_merge"] = state["auto_merge"]
+        actual["object_roots"] = state["object_roots"]
+    if actual != state:
+        raise Refusal("restored-merge-controls-differ-recovery-retained")
+
+
 def source(path, hours, occupancy=True):
     if hours <= 0:
         raise Refusal("positive-creation-window-required")
@@ -157,7 +259,8 @@ def source(path, hours, occupancy=True):
             raise Refusal("nested-independent-git-checkout")
     if (admin / "locked").exists():
         raise Refusal("locked")
-    if any((admin / name).exists() for name in OPERATIONS):
+    if any(os.path.lexists(admin / name) for name in (*OPERATIONS, "MERGE_AUTOSTASH")
+           if name not in (MERGE_FILES if os.path.lexists(admin / "MERGE_HEAD") else set())):
         raise Refusal("operation-state-needs-independent-recovery")
     sparse = Path(text(path, "rev-parse", "--path-format=absolute", "--git-path", "info/sparse-checkout"))
     if os.path.lexists(admin / "info/sparse-checkout") or os.path.lexists(sparse):
@@ -179,6 +282,7 @@ def source(path, hours, occupancy=True):
             raise Refusal("unmerged-or-sparse-index")
         if mode != b"160000":
             objects.append(oid.decode())
+    merge_state = resolved_merge(path, admin)
     submodules = git(path, "submodule", "status", "--recursive").splitlines()
     if any(line and line[:1] != b"-" for line in submodules):
         raise Refusal("initialized-submodule")
@@ -202,6 +306,8 @@ def source(path, hours, occupancy=True):
             "objects": sorted(set(objects))}
     if config is not None:
         result["worktree_config"] = {"path": str(admin / "config.worktree"), **config}
+    if merge_state is not None:
+        result["merge_state"] = merge_state
     return result
 
 
@@ -328,15 +434,23 @@ def private_archive(path):
 def load_archive(path):
     private_archive(path)
     manifest = json.loads((path / "manifest.json").read_text())
-    if manifest.get("version") not in (2, 3) or manifest.get("state") not in ("prepared", "parked"):
+    if manifest.get("version") not in (2, 3, 4) or manifest.get("state") not in ("prepared", "parked"):
         raise Refusal("unsupported-archive-manifest")
     expected_files = {"files.tar.gz", "inventory.json", "index", "staged.pack", "staged.idx"}
-    if manifest["version"] == 3:
+    if manifest["version"] == 3 or (manifest["version"] == 4 and manifest["source"].get("worktree_config")):
         expected_files.add("config.worktree")
         config = manifest["source"].get("worktree_config")
         if not config or identity_config(path / "config.worktree") != {"sha256": config["sha256"], "mode": 0o600, "group_write_gid": None}:
             raise Refusal("archive-worktree-config-mismatch")
     elif manifest["source"].get("worktree_config"):
+        raise Refusal("unsupported-archive-manifest")
+    if manifest["version"] == 4:
+        state = manifest["source"].get("merge_state")
+        expected_files |= archive_merge_files(path, state)
+        expected_refs = {manifest["ref"] + "-operation-" + str(i): oid for i, oid in enumerate(state["object_roots"])}
+        if manifest.get("operation_refs") != expected_refs:
+            raise Refusal("merge-object-protection-ref-set-mismatch")
+    elif manifest["source"].get("merge_state"):
         raise Refusal("unsupported-archive-manifest")
     if set(manifest["checksums"]) != expected_files:
         raise Refusal("incomplete-archive-checksums")
@@ -348,6 +462,9 @@ def load_archive(path):
         raise Refusal("protected-head-ref-changed")
     if text(primary, "rev-parse", manifest["index_ref"]) != manifest["index_tree"]:
         raise Refusal("protected-index-ref-changed")
+    for ref, oid in manifest.get("operation_refs", {}).items():
+        if text(primary, "rev-parse", ref) != oid:
+            raise Refusal("protected-merge-object-ref-changed")
     return manifest
 
 
@@ -384,6 +501,13 @@ def prepare(path, expected, hours):
         copy_regular(config["path"], archive / "config.worktree")
         if digest(archive / "config.worktree") != config["sha256"]:
             raise Refusal("worktree-config-changed-during-copy")
+    merge_state = before.get("merge_state")
+    if merge_state:
+        admin = Path(text(path, "rev-parse", "--absolute-git-dir"))
+        for name, recorded in merge_state["files"].items():
+            copy_regular(admin / name, archive / ("merge-" + name))
+            if digest(archive / ("merge-" + name)) != recorded["sha256"]:
+                raise Refusal("merge-control-changed-during-copy")
     copy_regular(before["index_path"], archive / "index")
     if digest(archive / "index") != before["index_sha256"]:
         raise Refusal("index-changed-during-copy")
@@ -395,12 +519,16 @@ def prepare(path, expected, hours):
     index_ref = ref + "-index"
     git(path, "update-ref", ref, expected, "")
     git(path, "update-ref", index_ref, tree, "")
+    operation_roots = merge_state["object_roots"] if merge_state else []
+    operation_refs = {ref + "-operation-" + str(i): oid for i, oid in enumerate(operation_roots)}
+    for operation_ref, oid in operation_refs.items():
+        git(path, "update-ref", operation_ref, oid, "")
     with open(archive / "staged.pack", "wb") as stream:
         subprocess.run(["git", "-C", str(path), "pack-objects", "--revs", "--stdout"],
                        # HEAD history has its own protected ref. Store every
                        # staged object absent from that history independently,
                        # without duplicating unchanged committed payloads.
-                       input=("\n".join([tree, *before["objects"], "^" + expected]) + "\n").encode(),
+                       input=("\n".join([tree, *before["objects"], *operation_roots, "^" + expected]) + "\n").encode(),
                        stdout=stream, stderr=subprocess.PIPE, env=ENV, check=True)
     git(path, "index-pack", "--strict", str(archive / "staged.pack"))
     excluded = exclusions(path)
@@ -413,9 +541,12 @@ def prepare(path, expected, hours):
                  ("files.tar.gz", "inventory.json", "index", "staged.pack", "staged.idx")}
     if config:
         checksums["config.worktree"] = digest(archive / "config.worktree")
-    manifest = {"version": 3 if config else 2, "state": "prepared", "path": str(path), "source": before,
+    if merge_state:
+        checksums.update({"merge-" + name: digest(archive / ("merge-" + name)) for name in merge_state["files"]})
+    manifest = {"version": 4 if merge_state else 3 if config else 2, "state": "prepared", "path": str(path), "source": before,
                 "created_hours": hours, "excluded_caches": excluded, "ref": ref,
-                "index_ref": index_ref, "index_tree": tree, "checksums": checksums}
+                "index_ref": index_ref, "index_tree": tree, "checksums": checksums,
+                **({"operation_refs": operation_refs} if merge_state else {})}
     (archive / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     (archive / "restore.sh").write_text("repo-restore-worktree " + shlex.quote(str(archive)) + "\n")
     for child in archive.iterdir():
@@ -441,6 +572,8 @@ def retire(path, expected, hook, hours):
                 verify(archive, path, occupancy=False)
                 git(path, "update-ref", "-d", manifest["ref"], expected)
                 git(path, "update-ref", "-d", manifest["index_ref"], manifest["index_tree"])
+                for operation_ref, oid in manifest.get("operation_refs", {}).items():
+                    git(path, "update-ref", "-d", operation_ref, oid)
                 shutil.rmtree(archive)
             except (Refusal, OSError):
                 print("Recovery archive retained: " + str(archive), file=sys.stderr)
@@ -469,6 +602,10 @@ def restore(archive, target):
         raise Refusal("restore-worktree-config-primary-group-changed")
     if info.get("worktree_config") and text(info["primary"], "config", "--bool", "--get", "extensions.worktreeConfig") != "true":
         raise Refusal("owning-worktree-config-semantics-changed")
+    merge_state = info.get("merge_state")
+    if merge_state and any(value["group_write_gid"] is not None and value["group_write_gid"] != os.getgid()
+                           for value in merge_state["files"].values()):
+        raise Refusal("restore-merge-primary-group-changed")
     expected = json.loads((archive / "inventory.json").read_text())
     if archive_inventory(archive / "files.tar.gz") != expected:
         raise Refusal("archive-inventory-mismatch")
@@ -503,6 +640,8 @@ def restore(archive, target):
     copy_regular(archive / "index", index)
     if digest(index) != info["index_sha256"] or inventory(path, manifest["excluded_caches"]) != expected:
         raise Refusal("restored-snapshot-verification-failed-recovery-retained")
+    if merge_state:
+        restore_merge_files(archive, path, merge_state)
     print("RESTORED\t" + str(path) + "\t" + info["head"])
     print("Reinstall omitted dependencies/caches with the repository setup command.", file=sys.stderr)
     return 0
