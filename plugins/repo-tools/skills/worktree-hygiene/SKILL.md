@@ -231,10 +231,17 @@ into the new checkout's private Git administration directory; other keys,
 includes, redirected files, unsafe modes and changed extension semantics stay.
 Group writes require the current primary group.
 
+Version-4 archives additionally preserve ordinary merges whose index is fully
+resolved, including exact private operation files and available parent/advisory
+objects. A preexisting missing advisory `AUTO_MERGE` object is explicitly
+recorded and its reference bytes preserved; the tool never reconstructs it.
+Object inspection disables lazy fetching. Merge-control lock files still keep
+the checkout.
+
 Keep live/locked/nested checkouts and unsupported split/sparse/unmerged indexes,
 worktree-only configuration beyond regular, owned `user.name` / `user.email`
-settings, sparse-checkout patterns or in-progress Git operations with their
-exact reason and path. Never kill another session or use `--force-anyway` to bypass snapshot/occupancy refusals.
+settings, sparse-checkout patterns and other in-progress Git operations with
+their exact reason and path. Never kill another session or use `--force-anyway` to bypass snapshot/occupancy refusals.
 The verified snapshot and retained path set are compared again under the
 consumer lock; changed snapshots and partial removal failures retain recovery
 evidence. The grant does not authorize deleting remote branches or treating
