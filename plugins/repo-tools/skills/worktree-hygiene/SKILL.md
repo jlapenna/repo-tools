@@ -115,7 +115,9 @@ The report is TSV: verdict, path, branch, reason. The command combines paginated
 open-PR ownership, exact merged-head/ancestor evidence, cleanliness, and live
 process checks. Apply rechecks ownership and HEAD, delegates removal to
 `repo-safe-remove-worktree`, and compare-and-deletes only the audited local
-branch tip. Missing GitHub evidence is KEEP, not permission. No fetch is implicit;
+branch tip. Missing GitHub evidence is KEEP, not permission. A rejected or
+missing `gh` credential (`unverified:gh-auth-failed`, exit 77) is a host defect
+to report and repair with `gh auth status`, never a verdict to accept. No fetch is implicit;
 refresh the base only when the user's task permits it.
 
 `repo-prune-merged-worktrees` uses the same evidence/removal engine as

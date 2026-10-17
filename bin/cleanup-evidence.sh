@@ -2,9 +2,21 @@
 # Shared, fail-closed cleanup evidence. Source from branch and worktree commands.
 # PR data is a snapshot, not permission: callers recheck before applying a plan.
 cleanup_load_prs() {
-  local repo=$1 open
+  local repo=$1 open err msg status=0
   CLEANUP_PRS=''
-  open=$(cd "$repo" && gh api --paginate --slurp 'repos/{owner}/{repo}/pulls?state=open&per_page=100') || return 1
+  CLEANUP_PRS_AUTH_FAILED=''
+  err=$(mktemp) || return 1
+  open=$(cd "$repo" && gh api --paginate --slurp 'repos/{owner}/{repo}/pulls?state=open&per_page=100' 2>"$err") || status=$?
+  msg=$(<"$err"); rm -f -- "$err"
+  [[ -z $msg ]] || printf '%s\n' "$msg" >&2
+  if ((status != 0)); then
+    # A rejected or missing credential is a host defect, not a transient
+    # outage: callers must surface it instead of quietly pinning KEEP.
+    if grep -qiE 'HTTP 401|bad credentials|gh auth login|not logged in' <<<"$msg"; then
+      CLEANUP_PRS_AUTH_FAILED=1
+    fi
+    return 1
+  fi
   open=$(jq -ce 'if type == "array" and all(.[]; type == "array") then
     [.[][] | if (.head.ref | type) == "string" then
       {headRefName: .head.ref, headRefOid: .head.sha,
@@ -16,7 +28,10 @@ cleanup_load_prs() {
 
 cleanup_evidence() {
   local repo=$1 base=$2 branch=$3 tip=$4 merge associated
-  if [[ -z ${CLEANUP_PRS:-} ]]; then echo 'unverified:pr-data-unavailable'; return 1; fi
+  if [[ -z ${CLEANUP_PRS:-} ]]; then
+    if [[ -n ${CLEANUP_PRS_AUTH_FAILED:-} ]]; then echo 'unverified:gh-auth-failed'; else echo 'unverified:pr-data-unavailable'; fi
+    return 1
+  fi
   if jq -e --arg branch "$branch" --arg tip "$tip" 'any(.[]; .state == "OPEN" and (.headRefName == $branch or .headRefOid == $tip))' <<<"$CLEANUP_PRS" >/dev/null; then
     echo 'open-pr'; return 1
   fi
