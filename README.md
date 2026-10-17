@@ -194,10 +194,16 @@ health checks.
   untracked/ignored private inputs. Only the ignored caches listed above are
   omitted. A complete retained path/content inventory and the index are checked
   again inside the consumer resource lock, including newly added ignored files.
-  Version-2 recovery archives restore into an empty `--no-checkout` worktree,
+  Version-2 and version-3 recovery archives restore into an empty `--no-checkout` worktree,
   preserving staged-versus-working differences and tracked deletions.
+  Version 3 additionally preserves exact `config.worktree` bytes and modes for
+  `user.name` / `user.email` only, with includes disabled during validation.
+  It rechecks configuration inside the removal lock and refuses changed
+  extension semantics, redirected files, unsafe modes or any other key.
+  Group writes require the current primary group.
   Live, locked, nested, initialized-submodule, split/sparse-index, unmerged,
-  worktree-only configuration, sparse-checkout patterns, and in-progress
+  worktree-only configuration beyond regular owned identity-only settings,
+  sparse-checkout patterns, and in-progress
   Git-operation checkouts remain with explicit KEEP reasons.
   The safe remover's verified-snapshot option permits only this independently
   verified dirty state; it never waives occupancy or resource guards.

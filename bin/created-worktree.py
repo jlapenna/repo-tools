@@ -114,6 +114,28 @@ def creation(path, hours):
             "gitfile_sha256": digest(link)}
 
 
+def identity_config(path):
+    """Only inert author identity settings have a portable recovery contract."""
+    with regular_file(path) as stream:
+        info = os.fstat(stream.fileno())
+        if (info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) & ~0o664
+                or not info.st_mode & 0o400
+                or (info.st_mode & 0o020 and info.st_gid != os.getgid())):
+            raise Refusal("worktree-config-needs-independent-recovery")
+        data = stream.read(65537)
+    if len(data) > 65536:
+        raise Refusal("worktree-config-needs-independent-recovery")
+    parsed = subprocess.run(["git", "config", "--no-includes", "--file", "-", "--null", "--list"],
+                            input=data, capture_output=True, env=ENV)
+    if parsed.returncode:
+        raise Refusal("worktree-config-needs-independent-recovery")
+    for record in parsed.stdout.split(b"\0"):
+        if record and record.split(b"\n", 1)[0].lower() not in (b"user.name", b"user.email"):
+            raise Refusal("worktree-config-needs-independent-recovery")
+    return {"sha256": hashlib.sha256(data).hexdigest(), "mode": stat.S_IMODE(info.st_mode),
+            "group_write_gid": info.st_gid if info.st_mode & 0o020 else None}
+
+
 def source(path, hours, occupancy=True):
     if hours <= 0:
         raise Refusal("positive-creation-window-required")
@@ -140,8 +162,11 @@ def source(path, hours, occupancy=True):
     sparse = Path(text(path, "rev-parse", "--path-format=absolute", "--git-path", "info/sparse-checkout"))
     if os.path.lexists(admin / "info/sparse-checkout") or os.path.lexists(sparse):
         raise Refusal("sparse-checkout-needs-independent-recovery")
+    config = None
     if os.path.lexists(admin / "config.worktree"):
-        raise Refusal("worktree-config-needs-independent-recovery")
+        if text(path, "config", "--bool", "--get", "extensions.worktreeConfig") != "true":
+            raise Refusal("worktree-config-needs-independent-recovery")
+        config = identity_config(admin / "config.worktree")
     if text(path, "rev-parse", "--shared-index-path"):
         raise Refusal("split-index-needs-independent-recovery")
     entries = git(path, "ls-files", "--sparse", "--stage", "-z").split(b"\0")
@@ -169,12 +194,15 @@ def source(path, hours, occupancy=True):
     index = admin / "index"
     if not index.is_file() or index.is_symlink():
         raise Refusal("index-unavailable")
-    return {"identity": identity, "common": common, "primary": paths[0],
+    result = {"identity": identity, "common": common, "primary": paths[0],
             "head": text(path, "rev-parse", "HEAD"),
             "branch": subprocess.run(["git", "-C", str(path), "symbolic-ref", "-q", "--short", "HEAD"],
                                       capture_output=True, text=True, env=ENV).stdout.strip(),
             "index_path": str(index), "index_sha256": digest(index),
             "objects": sorted(set(objects))}
+    if config is not None:
+        result["worktree_config"] = {"path": str(admin / "config.worktree"), **config}
+    return result
 
 
 def exclusions(path):
@@ -300,9 +328,16 @@ def private_archive(path):
 def load_archive(path):
     private_archive(path)
     manifest = json.loads((path / "manifest.json").read_text())
-    if manifest.get("version") != 2 or manifest.get("state") not in ("prepared", "parked"):
+    if manifest.get("version") not in (2, 3) or manifest.get("state") not in ("prepared", "parked"):
         raise Refusal("unsupported-archive-manifest")
     expected_files = {"files.tar.gz", "inventory.json", "index", "staged.pack", "staged.idx"}
+    if manifest["version"] == 3:
+        expected_files.add("config.worktree")
+        config = manifest["source"].get("worktree_config")
+        if not config or identity_config(path / "config.worktree") != {"sha256": config["sha256"], "mode": 0o600, "group_write_gid": None}:
+            raise Refusal("archive-worktree-config-mismatch")
+    elif manifest["source"].get("worktree_config"):
+        raise Refusal("unsupported-archive-manifest")
     if set(manifest["checksums"]) != expected_files:
         raise Refusal("incomplete-archive-checksums")
     for name, expected in manifest["checksums"].items():
@@ -344,6 +379,11 @@ def prepare(path, expected, hours):
     archive = Path(tempfile.mkdtemp(prefix=time.strftime("%Y%m%dT%H%M%SZ-", time.gmtime()), dir=root))
     PREPARED_ARCHIVE = archive
     archive.chmod(0o700)
+    config = before.get("worktree_config")
+    if config:
+        copy_regular(config["path"], archive / "config.worktree")
+        if digest(archive / "config.worktree") != config["sha256"]:
+            raise Refusal("worktree-config-changed-during-copy")
     copy_regular(before["index_path"], archive / "index")
     if digest(archive / "index") != before["index_sha256"]:
         raise Refusal("index-changed-during-copy")
@@ -371,7 +411,9 @@ def prepare(path, expected, hours):
         raise Refusal("archive-does-not-match-working-snapshot")
     checksums = {name: digest(archive / name) for name in
                  ("files.tar.gz", "inventory.json", "index", "staged.pack", "staged.idx")}
-    manifest = {"version": 2, "state": "prepared", "path": str(path), "source": before,
+    if config:
+        checksums["config.worktree"] = digest(archive / "config.worktree")
+    manifest = {"version": 3 if config else 2, "state": "prepared", "path": str(path), "source": before,
                 "created_hours": hours, "excluded_caches": excluded, "ref": ref,
                 "index_ref": index_ref, "index_tree": tree, "checksums": checksums}
     (archive / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
@@ -422,6 +464,11 @@ def restore(archive, target):
         raise Refusal("restore-path-already-exists")
     if text(info["primary"], "rev-parse", "--path-format=absolute", "--git-common-dir") != info["common"]:
         raise Refusal("owning-repository-changed")
+    if (info.get("worktree_config") and info["worktree_config"]["group_write_gid"] is not None
+            and info["worktree_config"]["group_write_gid"] != os.getgid()):
+        raise Refusal("restore-worktree-config-primary-group-changed")
+    if info.get("worktree_config") and text(info["primary"], "config", "--bool", "--get", "extensions.worktreeConfig") != "true":
+        raise Refusal("owning-worktree-config-semantics-changed")
     expected = json.loads((archive / "inventory.json").read_text())
     if archive_inventory(archive / "files.tar.gz") != expected:
         raise Refusal("archive-inventory-mismatch")
@@ -437,6 +484,18 @@ def restore(archive, target):
         git(info["primary"], "worktree", "add", "--no-checkout", "--", str(path), branch)
     else:
         git(info["primary"], "worktree", "add", "--no-checkout", "--detach", "--", str(path), manifest["ref"])
+    config = info.get("worktree_config")
+    if config:
+        admin = Path(text(path, "rev-parse", "--absolute-git-dir"))
+        if str(admin) == info["common"]:
+            raise Refusal("restore-worktree-admin-is-common-directory")
+        target_config = admin / "config.worktree"
+        copy_regular(archive / "config.worktree", target_config)
+        if config["group_write_gid"] is not None and target_config.stat().st_gid != config["group_write_gid"]:
+            raise Refusal("restore-worktree-config-group-changed")
+        target_config.chmod(config["mode"])
+        if identity_config(target_config) != {"sha256": config["sha256"], "mode": config["mode"], "group_write_gid": config["group_write_gid"]}:
+            raise Refusal("restored-worktree-config-verification-failed")
     # New checkout is empty except its Git link. Extraction cannot resurrect
     # tracked deletions, unlike overlaying an automatically checked-out HEAD.
     subprocess.run(["tar", "-xzf", str(archive / "files.tar.gz"), "--no-same-owner", "--same-permissions", "-C", str(path)], check=True)
