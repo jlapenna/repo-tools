@@ -1,0 +1,33 @@
+{
+  "skill_name": "diagnostic-hygiene",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "I think ~/p/x1c has a bunch of leftover verification/calibration junk from when I set up the 3d printer workflow in early October. Go through the repo read-only (don't edit anything, don't touch git state) and give me a list of what can be deleted vs what has to stay, with the reason for each. Put the list in a markdown file in your output dir.",
+      "expected_output": "A table that marks the workshop verification artifacts (engine-probe, calibration-cube, calibration-token, headless-workflow-validation, hillclimb and dated eval JSONs) as deletable with origin and zero-reference evidence, while keeping inspect-job.py, evals/gridfinity-cases.json and the gridfinity-white-black fixture because tests or tools read them. No files in the repo are modified.",
+      "files": [],
+      "assertions": [
+        "Marks workshop/projects/verification/engine-probe.scad (and its STL) as deletable",
+        "Marks the dated workshop/evals/*-20261003.json records (hillclimb or the agent-trial JSONs) as deletable or foldable",
+        "Keeps workshop/tools/openscad-mcp/inspect-job.py, citing a code or test consumer (bambu.mjs or a test)",
+        "Keeps workshop/evals/gridfinity-cases.json or artifacts/sliced/gridfinity-white-black.gcode.3mf, citing the tool or test that reads it",
+        "Each deletable item names at least one piece of evidence beyond its name (origin PR/commit, zero references, or closed issue)",
+        "Does not recommend deleting any patches/*, bin-1x1x6-finger.*, or project model.py sources",
+        "Report states the repo was not modified and no git mutation occurred"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "quick freshness pass on ~/p/ebayclaw and ~/p/nx-cache-server please: anything debug/diagnostic/doctor-ish that we can drop? read-only, no edits, no git changes. write up what you'd remove and what you'd keep and why, as a markdown file in your output dir.",
+      "expected_output": "Reports that ebayclaw/doctor.py is a live operator command routed from README and OPERATIONS.md and that nx-cache-server's canary.sh is consumed by a homelab timer and alert plus server.test.js, so neither is deletable; states clearly that nothing qualified for deletion rather than inventing cuts. No files modified.",
+      "files": [],
+      "assertions": [
+        "Keeps ebayclaw/doctor.py, citing README or OPERATIONS.md routing to it",
+        "Keeps apps/nx-cache-server/canary.sh, citing server.test.js and/or the homelab timer/alert consumer",
+        "Does not recommend deleting doctor.py, canary.sh, preflight.py, or tests/fixtures/fake_auction",
+        "States explicitly that nothing (or nothing diagnostic) qualified for deletion, rather than inventing cuts",
+        "Report states the repos were not modified and no git mutation occurred"
+      ]
+    }
+  ]
+}

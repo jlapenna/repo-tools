@@ -346,6 +346,11 @@ The plugin exposes the authoritative skills listed in the generated inventory:
 - `harness-maintenance` applies observed feedback to documentation, skills,
   context routes, and their owning contracts. Consumers keep local truth and
   authorization; structural checks do not prove better worker behavior.
+- `diagnostic-hygiene` retires obsolete diagnostic machinery: committed
+  evidence, one-off probes and measurement harnesses, canaries for settled
+  upgrades, incident logs nobody appends, shipped plans, and CI steps guarding
+  deleted facilities. Each cut is tied to a closed issue and an empty set of
+  live routes; live monitoring and open investigations stay.
 - `autonomous-work` completes authorized tasks when the user is unavailable:
   resolve optional questions from evidence and reversible defaults, continue
   independent work around blockers, and report any unfinished actions. It is

@@ -25,6 +25,7 @@ copying procedures into always-loaded context.
 | Harness, documentation, or skill upkeep | `plugins/repo-tools/skills/harness-maintenance/SKILL.md` | native docs checks and observed consumer use |
 | Authorized work while the user is unavailable | `plugins/repo-tools/skills/autonomous-work/SKILL.md` | task verification and an honest completion report |
 | Obsolete compatibility or completed-migration cleanup | `plugins/repo-tools/skills/compatibility-cleanup/SKILL.md` | consumer retirement evidence and supported-path checks |
+| Retire obsolete diagnostics, evidence, probes, or shipped plans | `plugins/repo-tools/skills/diagnostic-hygiene/SKILL.md` | per-candidate route evidence and closed-issue references |
 | Renovate maintenance | `plugins/repo-tools/skills/renovate-maintenance/SKILL.md` | skill-defined queue evidence |
 | Complexity or freshness sweep | `plugins/repo-tools/skills/complexity-sweep/SKILL.md` | preserved consumer contracts and concrete maintenance reduction |
 | Add or change a CLI | `ARCHITECTURE.md`, matching `bin/*.test.*` | focused test, then `pnpm test` |
