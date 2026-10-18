@@ -1,7 +1,7 @@
 {
   "name": "repo-tools",
   "version": "2.1.0",
-  "description": "General repository-management commands and skills for safe worktrees, CI monitoring, testing policy, PR delivery, harness maintenance, autonomous work, Renovate maintenance, and complexity/freshness sweeps.",
+  "description": "General repository-management commands and skills for safe worktrees, CI monitoring, testing policy, PR delivery, harness maintenance, autonomous work, compatibility cleanup, complexity/freshness sweeps, and Renovate maintenance.",
   "author": {
     "name": "Joe LaPenna",
     "url": "https://github.com/jlapenna"
@@ -26,7 +26,7 @@
   "interface": {
     "displayName": "Repo Tools",
     "shortDescription": "Repository & harness workflows",
-    "longDescription": "Loads authoritative worktree-hygiene, GitHub CI-monitoring, testing-policy, PR-delivery (land-pr), harness-maintenance, autonomous-work, Renovate-maintenance, and complexity-sweep skills for general repository management.",
+    "longDescription": "Loads authoritative worktree-hygiene, GitHub CI-monitoring, testing-policy, PR-delivery (land-pr), harness-maintenance, autonomous-work, compatibility-cleanup, complexity-sweep, and Renovate-maintenance skills for general repository management.",
     "developerName": "Joe LaPenna",
     "category": "Productivity",
     "capabilities": [
@@ -36,7 +36,7 @@
     "defaultPrompt": [
       "Create a safe worktree and land this pull request through checks, review, merge, and cleanup.",
       "Improve this repository's documentation and skills from observed workflow failures.",
-      "Audit code complexity and freshness, tests and CI, or this repository’s Renovate update queue."
+      "Audit complexity and stale compatibility paths, tests and CI, or this repository\u2019s Renovate update queue."
     ]
   }
 }

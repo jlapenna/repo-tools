@@ -1,6 +1,6 @@
 ---
 name: complexity-sweep
-description: Sweep active repositories for unnecessary code complexity and stale maintenance paths, rank evidence-backed findings, and implement the highest-value simplifications. Use for cross-repository cleanup or a focused complexity/freshness pass; ordinary feature work and dependency-update queues follow their existing workflows.
+description: Sweep active repositories for unnecessary code complexity and stale maintenance paths, rank evidence-backed findings, and implement the highest-value simplifications. Use for cross-repository cleanup or a focused complexity/freshness pass; focused compatibility retirement, feature work and dependency-update queues follow their existing workflows.
 ---
 
 # Complexity sweep
@@ -80,7 +80,9 @@ an intentional behavior correction exposed by duplication as an explicit fix,
 with its own regression evidence, rather than silently calling it a refactor.
 Do not mix bulk dependency upgrades, model changes, CI-capacity changes or
 deployment into a source cleanup. Use the existing Renovate workflow for a
-requested dependency queue and
+requested dependency queue,
+[compatibility-cleanup](../compatibility-cleanup/SKILL.md) for a focused
+compatibility retirement, and
 [harness-maintenance](../harness-maintenance/SKILL.md) for substantive context
 or skill upkeep.
 

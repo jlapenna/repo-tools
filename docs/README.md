@@ -20,3 +20,6 @@ Command implementation and regression tests live in `bin/`; shared ESLint
 behavior lives in `eslint/`; provider manifests and skills live in `plugins/`.
 Link new durable guides here. Regenerate the interface inventory through
 `repo-docs` rather than editing it manually.
+
+Obsolete compatibility and completed-migration cleanup follows the
+[compatibility-cleanup skill](../plugins/repo-tools/skills/compatibility-cleanup/SKILL.md).
