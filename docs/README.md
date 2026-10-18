@@ -14,6 +14,7 @@ Use the smallest source that owns the question.
 | Maintain agent context, documentation, and skills | [`../plugins/repo-tools/skills/harness-maintenance/SKILL.md`](../plugins/repo-tools/skills/harness-maintenance/SKILL.md) |
 | Continue authorized work while the user is unavailable | [`../plugins/repo-tools/skills/autonomous-work/SKILL.md`](../plugins/repo-tools/skills/autonomous-work/SKILL.md) |
 | Maintain Renovate updates | [`../plugins/repo-tools/skills/renovate-maintenance/SKILL.md`](../plugins/repo-tools/skills/renovate-maintenance/SKILL.md) |
+| Reduce code complexity and stale maintenance paths | [`../plugins/repo-tools/skills/complexity-sweep/SKILL.md`](../plugins/repo-tools/skills/complexity-sweep/SKILL.md) |
 
 Command implementation and regression tests live in `bin/`; shared ESLint
 behavior lives in `eslint/`; provider manifests and skills live in `plugins/`.

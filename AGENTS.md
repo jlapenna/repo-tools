@@ -25,6 +25,7 @@ copying procedures into always-loaded context.
 | Harness, documentation, or skill upkeep | `plugins/repo-tools/skills/harness-maintenance/SKILL.md` | native docs checks and observed consumer use |
 | Authorized work while the user is unavailable | `plugins/repo-tools/skills/autonomous-work/SKILL.md` | task verification and an honest completion report |
 | Renovate maintenance | `plugins/repo-tools/skills/renovate-maintenance/SKILL.md` | skill-defined queue evidence |
+| Complexity or freshness sweep | `plugins/repo-tools/skills/complexity-sweep/SKILL.md` | preserved consumer contracts and concrete maintenance reduction |
 | Add or change a CLI | `ARCHITECTURE.md`, matching `bin/*.test.*` | focused test, then `pnpm test` |
 | Change plugin manifests | `ARCHITECTURE.md`, `plugins/manifests.test.mjs` | manifest and docs checks |
 | Change shared ESLint behavior | `eslint/`, consumer contract | build and rule tests |
