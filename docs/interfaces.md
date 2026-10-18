@@ -35,6 +35,7 @@ Nx-inferred targets are intentionally not listed. Runtime status is not inferred
 | --- | --- |
 | autonomous-work | [plugins/repo-tools/skills/autonomous-work/SKILL.md](../plugins/repo-tools/skills/autonomous-work/SKILL.md) |
 | compatibility-cleanup | [plugins/repo-tools/skills/compatibility-cleanup/SKILL.md](../plugins/repo-tools/skills/compatibility-cleanup/SKILL.md) |
+| complexity-sweep | [plugins/repo-tools/skills/complexity-sweep/SKILL.md](../plugins/repo-tools/skills/complexity-sweep/SKILL.md) |
 | github-ci-monitor | [plugins/repo-tools/skills/github-ci-monitor/SKILL.md](../plugins/repo-tools/skills/github-ci-monitor/SKILL.md) |
 | harness-maintenance | [plugins/repo-tools/skills/harness-maintenance/SKILL.md](../plugins/repo-tools/skills/harness-maintenance/SKILL.md) |
 | land-pr | [plugins/repo-tools/skills/land-pr/SKILL.md](../plugins/repo-tools/skills/land-pr/SKILL.md) |

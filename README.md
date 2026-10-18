@@ -357,6 +357,9 @@ The plugin exposes the authoritative skills listed in the generated inventory:
 - `renovate-maintenance` audits and lands Renovate updates within a repository,
   with risk-based verification, sequential merges, combined-main validation,
   and explicit separation from deployment and production-state checks.
+- `complexity-sweep` identifies active repositories, ranks unnecessary code
+  complexity and stale maintenance paths, and implements verified priority
+  fixes while preserving each repository's consumer contracts.
 
 The plugin bundles the auto-merge watcher under `scripts/`, so
 `github-ci-monitor` and `land-pr` work in a plugin-only installation. The npm
