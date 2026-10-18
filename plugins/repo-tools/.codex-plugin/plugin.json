@@ -1,6 +1,6 @@
 {
   "name": "repo-tools",
-  "version": "2.0.13",
+  "version": "2.1.0",
   "description": "General repository-management commands and skills for safe worktrees, CI monitoring, testing policy, PR delivery, harness maintenance, autonomous work, Renovate maintenance, and complexity/freshness sweeps.",
   "author": {
     "name": "Joe LaPenna",
@@ -36,7 +36,7 @@
     "defaultPrompt": [
       "Create a safe worktree and land this pull request through checks, review, merge, and cleanup.",
       "Improve this repository's documentation and skills from observed workflow failures.",
-      "Audit code complexity and freshness, tests and CI, or this repository\u2019s Renovate update queue."
+      "Audit code complexity and freshness, tests and CI, or this repository’s Renovate update queue."
     ]
   }
 }
