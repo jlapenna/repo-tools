@@ -5,11 +5,11 @@
 // check noticing. Consumer: `pnpm test` in ci.yml.
 import assert from 'node:assert/strict';
 import {
+  accessSync,
   constants,
   existsSync,
   readFileSync,
   readdirSync,
-  statSync,
 } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
@@ -100,8 +100,8 @@ test('repo-tools plugin bundles the executable auto-merge watcher referenced by 
   const watchPrs = join(pluginRoot, 'scripts/repo-watch-prs.sh');
 
   assert.ok(existsSync(watchPrs), `${watchPrs} must be bundled with the plugin`);
-  assert.ok(
-    statSync(watchPrs).mode & constants.X_OK,
+  assert.doesNotThrow(
+    () => accessSync(watchPrs, constants.X_OK),
     `${watchPrs} must remain executable`,
   );
 

@@ -181,6 +181,10 @@ health checks.
   restores the original branch when unchanged and available; otherwise it
   uses detached HEAD without resetting an occupied or newer branch. Run the
   repository's worktree setup command afterward to reinstall dependencies.
+  Standalone empty owned `MERGE_RR` metadata and an optional regular
+  `ORIG_HEAD` with a protected available commit closure are preserved in
+  version-4 recovery
+  archives; nonempty records, locks and other active operations remain guarded.
   Each archive includes its manifest and exact restore command. Archives and
   protected refs are retained until the owner explicitly disposes of them.
 - For an explicit creation-age retirement grant, use

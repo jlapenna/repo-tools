@@ -154,12 +154,42 @@ def merge_control(path):
                   "group_write_gid": info.st_gid if mode & 0o020 else None}
 
 
+def idle_original_head(raw):
+    value = raw.removesuffix(b"\n")
+    if len(value) not in (40, 64) or any(c not in b"0123456789abcdef" for c in value):
+        raise Refusal("unsupported-idle-original-head")
+    return value.decode("ascii")
+
+
 def resolved_merge(path, admin):
-    """Preserve ordinary resolved merge metadata, including a missing advisory tree."""
+    """Capture resolved merges or a genuinely idle, empty rerere marker."""
     if any(os.path.lexists(admin / (name + ".lock")) for name in MERGE_FILES | {"MERGE_AUTOSTASH"}):
         raise Refusal("merge-control-lock-needs-independent-recovery")
     if not os.path.lexists(admin / "MERGE_HEAD"):
-        return None
+        if not os.path.lexists(admin / "MERGE_RR"):
+            return None
+        # Git can leave an empty rerere marker after an operation has finished.
+        # Preserve that private file, rather than silently dropping it with the
+        # linked Git administration directory. Any other merge state stays.
+        if (any(os.path.lexists(admin / name) for name in MERGE_FILES - {"MERGE_RR", "ORIG_HEAD"})
+                or any(os.path.lexists(admin / "logs" / name) for name in MERGE_FILES)):
+            raise Refusal("standalone-rerere-has-other-merge-state")
+        raw, metadata = merge_control(admin / "MERGE_RR")
+        if raw:
+            raise Refusal("nonempty-standalone-rerere-needs-independent-recovery")
+        files, roots = {"MERGE_RR": metadata}, []
+        if os.path.lexists(admin / "ORIG_HEAD"):
+            original, files["ORIG_HEAD"] = merge_control(admin / "ORIG_HEAD")
+            oid = idle_original_head(original)
+            reader_env = dict(ENV, GIT_NO_LAZY_FETCH="1")
+            head = git(path, "rev-parse", "HEAD", env=reader_env).decode().strip()
+            if len(oid) != len(head) or git(path, "cat-file", "-t", oid, env=reader_env).strip() != b"commit":
+                raise Refusal("unsupported-idle-original-head")
+            closure = git(path, "rev-list", "--objects", "--missing=print", oid, env=reader_env)
+            if any(line.startswith(b"?") for line in closure.splitlines()):
+                raise Refusal("idle-original-head-closure-incomplete")
+            roots.append(oid)
+        return {"kind": "idle-empty-rerere", "files": files, "object_roots": roots}
     files, data = {}, {}
     for name in sorted(MERGE_FILES):
         if os.path.lexists(admin / name):
@@ -203,13 +233,25 @@ def resolved_merge(path, admin):
 
 
 def archive_merge_files(archive, state):
-    if not state or state.get("kind") != "resolved-ordinary-merge":
+    if not state or state.get("kind") not in ("resolved-ordinary-merge", "idle-empty-rerere"):
         raise Refusal("unsupported-merge-archive")
     names = set(state["files"])
-    if not MERGE_REQUIRED <= names or not names <= MERGE_FILES:
+    idle_rerere = state["kind"] == "idle-empty-rerere"
+    if idle_rerere:
+        if "MERGE_RR" not in names or not names <= {"MERGE_RR", "ORIG_HEAD"}:
+            raise Refusal("unsupported-idle-rerere-archive")
+        roots = []
+        if "ORIG_HEAD" in names:
+            original, _metadata = merge_control(archive / "merge-ORIG_HEAD")
+            roots.append(idle_original_head(original))
+        if state.get("object_roots") != roots:
+            raise Refusal("idle-rerere-original-head-root-mismatch")
+    elif not MERGE_REQUIRED <= names or not names <= MERGE_FILES:
         raise Refusal("unsupported-merge-archive-file-set")
     for name, recorded in state["files"].items():
-        _raw, actual = merge_control(archive / ("merge-" + name))
+        raw, actual = merge_control(archive / ("merge-" + name))
+        if idle_rerere and name == "MERGE_RR" and raw:
+            raise Refusal("nonempty-idle-rerere-archive")
         if actual != {"sha256": recorded["sha256"], "mode": 0o600, "group_write_gid": None}:
             raise Refusal("merge-archive-control-mismatch")
         mode, group = recorded["mode"], recorded["group_write_gid"]
@@ -231,7 +273,10 @@ def restore_merge_files(archive, path, state):
     actual = resolved_merge(path, admin)
     # A formerly missing advisory object may be independently repaired in the
     # shared object DB. Never delete that newly available object to force absence.
-    if state["auto_merge"]["status"] == "preexisting-missing" and actual["auto_merge"]["status"] == "available-tree" and actual["auto_merge"]["oid"] == state["auto_merge"]["oid"]:
+    if (state["kind"] == "resolved-ordinary-merge"
+            and state["auto_merge"]["status"] == "preexisting-missing"
+            and actual["auto_merge"]["status"] == "available-tree"
+            and actual["auto_merge"]["oid"] == state["auto_merge"]["oid"]):
         actual["auto_merge"] = state["auto_merge"]
         actual["object_roots"] = state["object_roots"]
     if actual != state:

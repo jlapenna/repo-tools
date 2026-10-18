@@ -236,7 +236,12 @@ resolved, including exact private operation files and available parent/advisory
 objects. A preexisting missing advisory `AUTO_MERGE` object is explicitly
 recorded and its reference bytes preserved; the tool never reconstructs it.
 Object inspection disables lazy fetching. Merge-control lock files still keep
-the checkout.
+the checkout. A standalone empty, owned regular `MERGE_RR` is preserved
+byte-for-byte with its mode when no active merge metadata is present. An
+optional regular `ORIG_HEAD` is also preserved with its exact bytes and mode,
+and its available commit closure is protected. Nonempty
+rerere records, merge-control locks and other active operations stay; never
+clear a marker to make a checkout eligible.
 
 Keep live/locked/nested checkouts and unsupported split/sparse/unmerged indexes,
 worktree-only configuration beyond regular, owned `user.name` / `user.email`
