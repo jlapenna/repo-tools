@@ -359,3 +359,88 @@ test('missing advisory classification never invokes a configured promisor transp
   const [archive]=f.archives();const m=JSON.parse(readFileSync(join(archive,'manifest.json')));
   assert.equal(m.source.merge_state.auto_merge.status,'preexisting-missing');
 });
+
+
+test('standalone empty rerere metadata round-trips with dirty state and identity configuration',t=>{
+  for(const mode of ['600','664']){
+    const f=fixture(t);
+    f.git('config','extensions.worktreeConfig','true');
+    f.git('-C',f.path,'config','--worktree','user.name','Idle rerere fixture');
+    const admin=f.git('-C',f.path,'rev-parse','--absolute-git-dir');
+    const marker=join(admin,'MERGE_RR');writeFileSync(marker,'');
+    assert.equal(f.run('chmod',[mode,marker]).status,0);
+    assert.equal(existsSync(join(admin,'MERGE_HEAD')),false);
+    const identity=readFileSync(join(admin,'config.worktree'));
+    const original=f.git('commit-tree',f.git('rev-parse','HEAD^{tree}'),'-p',f.git('rev-parse','HEAD'),'-m','prior recovery commit');
+    const originalBytes=Buffer.from(original+'\n');writeFileSync(join(admin,'ORIG_HEAD'),originalBytes);
+    assert.equal(f.run('chmod',[mode,join(admin,'ORIG_HEAD')]).status,0);
+    writeFileSync(join(f.path,'mixed'),'staged idle rerere work\n');f.git('-C',f.path,'add','mixed');
+    writeFileSync(join(f.path,'mixed'),'unstaged idle rerere work\n');
+    const before=f.semantic(),index=readFileSync(join(admin,'index'));
+    const report=f.prune();assert.equal(report.status,0,report.stderr+report.stdout);assert.deepEqual(f.archives(),[]);
+    const removed=f.prune('--delete');assert.equal(removed.status,0,removed.stderr+removed.stdout);
+    const [archive]=f.archives();const m=JSON.parse(readFileSync(join(archive,'manifest.json')));
+    assert.equal(existsSync(f.path),false);f.git('gc','--prune=now');
+    const restored=f.run('bash',[join(here,'restore-worktree.sh'),archive]);assert.equal(restored.status,0,restored.stderr);
+    const recovered=f.git('-C',f.path,'rev-parse','--absolute-git-dir');
+    // Baseline must reach the real restore boundary: old code loses this file.
+    assert.equal(existsSync(join(recovered,'MERGE_RR')),true,'restoration must preserve the original empty rerere marker');
+    assert.deepEqual(readFileSync(join(recovered,'MERGE_RR')),Buffer.alloc(0));
+    assert.equal(m.version,4);assert.equal(m.source.merge_state.kind,'idle-empty-rerere');
+    assert.deepEqual(Object.values(m.operation_refs),[original]);assert.deepEqual(readFileSync(join(archive,'merge-MERGE_RR')),Buffer.alloc(0));
+    assert.deepEqual(readFileSync(join(recovered,'ORIG_HEAD')),originalBytes);
+    assert.equal(f.git('cat-file','-t',original),'commit');
+    assert.equal(f.run('stat',['-c','%a',join(recovered,'ORIG_HEAD')]).stdout.trim(),mode);
+    assert.equal(f.run('stat',['-c','%a',join(recovered,'MERGE_RR')]).stdout.trim(),mode);
+    assert.deepEqual(readFileSync(join(recovered,'index')),index);
+    assert.deepEqual(readFileSync(join(recovered,'config.worktree')),identity);
+    assert.deepEqual(f.semantic(),before);
+  }
+});
+
+test('standalone rerere refuses nonempty, redirected, locked or active operation metadata',t=>{
+  for(const kind of ['nonempty','symlink','lock','dangling-lock','other-merge','autostash','rebase','unmerged-index','orig-noncommit','orig-missing','orig-symlink','orig-invalid','operation-log']){
+    const f=fixture(t),admin=f.git('-C',f.path,'rev-parse','--absolute-git-dir'),marker=join(admin,'MERGE_RR');
+    writeFileSync(marker,kind==='nonempty'?'pending rerere record\n':'');
+    if(kind==='symlink'){unlinkSync(marker);const outside=join(f.root,'outside-marker');writeFileSync(outside,'');symlinkSync(outside,marker);}
+    if(kind==='lock')writeFileSync(marker+'.lock','');
+    if(kind==='dangling-lock')symlinkSync(join(f.root,'missing'),marker+'.lock');
+    if(kind==='other-merge')writeFileSync(join(admin,'MERGE_MSG'),'pending merge\n');
+    if(kind==='autostash')writeFileSync(join(admin,'MERGE_AUTOSTASH.lock'),'');
+    if(kind==='rebase')writeFileSync(join(admin,'REBASE_HEAD'),f.git('rev-parse','HEAD')+'\n');
+    if(kind==='unmerged-index'){
+      const oid=f.git('rev-parse','HEAD:mixed');
+      const stages='0 '+('0'.repeat(oid.length))+'\tmixed\n100644 '+oid+' 1\tmixed\n100644 '+oid+' 2\tmixed\n';
+      const staged=f.run('git',['-C',f.path,'update-index','--index-info'],{input:stages});assert.equal(staged.status,0,staged.stderr);
+    }
+    if(kind==='orig-noncommit')writeFileSync(join(admin,'ORIG_HEAD'),f.git('rev-parse','HEAD^{tree}')+'\n');
+    if(kind==='orig-missing')writeFileSync(join(admin,'ORIG_HEAD'),'f'.repeat(f.git('rev-parse','HEAD').length)+'\n');
+    if(kind==='orig-symlink'){if(existsSync(join(admin,'ORIG_HEAD')))unlinkSync(join(admin,'ORIG_HEAD'));const outside=join(f.root,'outside-original');writeFileSync(outside,f.git('rev-parse','HEAD')+'\n');symlinkSync(outside,join(admin,'ORIG_HEAD'));}
+    if(kind==='orig-invalid')writeFileSync(join(admin,'ORIG_HEAD'),'not-an-object\n');
+    if(kind==='operation-log'){mkdirSync(join(admin,'logs'),{recursive:true});writeFileSync(join(admin,'logs','ORIG_HEAD'),'opaque operation log\n');}
+    const r=f.prune('--delete');assert.equal(r.status,1,r.stderr+r.stdout);assert.match(r.stdout,/KEEP/);
+    assert.equal(existsSync(f.path),true);assert.deepEqual(f.archives(),[]);
+  }
+});
+
+test('consumer-lock standalone rerere changes retain the checkout and original empty archive',t=>{
+  for(const kind of ['content','lock']){
+    const f=fixture(t),admin=f.git('-C',f.path,'rev-parse','--absolute-git-dir');writeFileSync(join(admin,'MERGE_RR'),'');
+    const hook=join(f.root,'idle-rerere-hook');
+    const mutation=kind==='content'?'printf "pending rerere record\\n" >"$admin/MERGE_RR"':'printf "pending lock\\n" >"$admin/MERGE_RR.lock"';
+    writeFileSync(hook,'#!/bin/bash\nset -euo pipefail\nexec 9>"$1.lock"\nflock 9\nadmin=$(git -C "$1" rev-parse --absolute-git-dir)\n'+mutation+'\n"$2" "$1"\n',{mode:0o700});
+    const r=f.prune('--delete','--remove-hook',hook);assert.equal(r.status,1,r.stderr+r.stdout);
+    assert.match(r.stdout,/KEEP.*snapshot-or-resources-changed/);assert.equal(existsSync(f.path),true);
+    const [archive]=f.archives();assert.deepEqual(readFileSync(join(archive,'merge-MERGE_RR')),Buffer.alloc(0));
+  }
+});
+
+
+test('standalone empty rerere retains a foreign live checkout',async t=>{
+  const f=fixture(t),admin=f.git('-C',f.path,'rev-parse','--absolute-git-dir');writeFileSync(join(admin,'MERGE_RR'),'');
+  const child=spawn('sleep',['120'],{cwd:f.path,detached:true,stdio:'ignore'});
+  await new Promise(resolve=>child.once('spawn',resolve));t.after(()=>child.kill());
+  const r=f.prune('--delete');assert.equal(r.status,1,r.stderr+r.stdout);assert.match(r.stdout,/KEEP.*live/);
+  assert.equal(existsSync(f.path),true);assert.deepEqual(f.archives(),[]);
+  child.kill();await new Promise(resolve=>child.once('exit',resolve));
+});
