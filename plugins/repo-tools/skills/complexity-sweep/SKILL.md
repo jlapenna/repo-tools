@@ -82,7 +82,9 @@ Do not mix bulk dependency upgrades, model changes, CI-capacity changes or
 deployment into a source cleanup. Use the existing Renovate workflow for a
 requested dependency queue,
 [compatibility-cleanup](../compatibility-cleanup/SKILL.md) for a focused
-compatibility retirement, and
+compatibility retirement,
+[diagnostic-hygiene](../diagnostic-hygiene/SKILL.md) for retiring obsolete
+evidence, probes, canaries and shipped plans, and
 [harness-maintenance](../harness-maintenance/SKILL.md) for substantive context
 or skill upkeep.
 

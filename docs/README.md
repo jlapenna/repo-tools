@@ -23,3 +23,6 @@ Link new durable guides here. Regenerate the interface inventory through
 
 Obsolete compatibility and completed-migration cleanup follows the
 [compatibility-cleanup skill](../plugins/repo-tools/skills/compatibility-cleanup/SKILL.md).
+Retiring obsolete diagnostic machinery (evidence dumps, probes, canaries,
+shipped plans) follows the
+[diagnostic-hygiene skill](../plugins/repo-tools/skills/diagnostic-hygiene/SKILL.md).

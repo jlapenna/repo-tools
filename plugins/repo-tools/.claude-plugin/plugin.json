@@ -1,7 +1,7 @@
 {
   "name": "repo-tools",
-  "version": "2.2.0",
-  "description": "General repository-management commands and skills for safe worktrees, CI monitoring, testing policy, PR delivery, harness maintenance, autonomous work, compatibility cleanup, complexity/freshness sweeps, and Renovate maintenance.",
+  "version": "2.3.0",
+  "description": "General repository-management commands and skills for safe worktrees, CI monitoring, testing policy, PR delivery, harness maintenance, autonomous work, compatibility cleanup, diagnostic hygiene, complexity/freshness sweeps, and Renovate maintenance.",
   "author": {
     "name": "Joe LaPenna",
     "url": "https://github.com/jlapenna"
@@ -20,6 +20,7 @@
     "repository-management",
     "harness-maintenance",
     "autonomous-work",
-    "complexity-sweep"
+    "complexity-sweep",
+    "diagnostic-hygiene"
   ]
 }
