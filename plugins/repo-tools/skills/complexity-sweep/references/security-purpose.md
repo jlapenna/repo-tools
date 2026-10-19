@@ -31,6 +31,12 @@ two components the same trust domain. Localhost, a private network or a single
 owner alone does not eliminate browser-origin, cross-process or remote-client
 boundaries. A missing threat-model document is a reason to investigate.
 
+For GitHub merge controls, inspect active branch rules or rulesets, required
+check identities and bypass paths. Passing jobs or an armed request alone do
+not prove enforcement; where available, match the exact merge commit to the
+platform's rule evaluation. Keep consumer-specific queue and deployment
+procedures in the consumer.
+
 ## Leads, not deletion rules
 
 Look for bespoke ciphers or encodings described as encryption, signatures
