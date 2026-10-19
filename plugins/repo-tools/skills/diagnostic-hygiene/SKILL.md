@@ -43,6 +43,10 @@ source, not evidence.
 Read [candidates](references/candidates.md) before deciding. It has the shape
 table with each shape's obsolescence signal, the evidence row, and the
 name-pattern scan for auditors.
+When a safety check or security probe appears purposeless, use
+[security purpose](../complexity-sweep/references/security-purpose.md) to name
+the invariant it enforces. A live product control belongs to complexity-sweep
+or legacy-cleanup; diagnostic vocabulary alone does not make it disposable.
 
 ## 3. Decide
 
