@@ -1,13 +1,16 @@
 ---
-name: compatibility-cleanup
-description: Sweep repositories for obsolete compatibility branches, migration scaffolding, aliases, and superseded configuration paths; remove those whose current consumers no longer need them. Use for compatibility cleanup, completed-migration retirement, or repository freshness and complexity sweeps, rather than general dependency upgrades or feature redesign.
+name: legacy-cleanup
+description: Retire obsolete legacy code and behaviors to reduce repository complexity and keep supported paths current. Use for legacy cleanup, retired feature modes, outdated defaults and workarounds, compatibility shims, or completed migrations; general refactoring, diagnostic cleanup and dependency upgrades follow their owning workflows.
 ---
 
-# Compatibility cleanup
+# Legacy cleanup
 
-Reduce the number of supported paths and stale contracts while preserving
-behavior that has a current consumer. Favor deletion over replacing an old
-compatibility layer with another abstraction or permanent audit framework.
+Remove legacy code and behaviors whose purpose has ended, reducing the paths
+and concepts maintainers must support. Legacy includes retired feature modes,
+old defaults, temporary workarounds and fallback behavior, as well as backward
+compatibility and completed migrations. Preserve behavior with concrete current
+value; age, naming and unfamiliar implementation style alone do not make it
+obsolete. Favor deletion over another abstraction or permanent audit framework.
 
 ## Establish the sweep
 
@@ -27,13 +30,15 @@ unrelated activity as a reason to stop the sweep.
 ## Find and decide
 
 Search tracked source, configuration and current runbooks for legacy/deprecated
-markers, compatibility shims, old-format readers, aliases, migration commands,
+markers, retired feature modes, outdated defaults, temporary workarounds,
+compatibility shims, old-format readers, aliases, migration commands,
 feature-flag transitions and fallback chains. Follow the owning interfaces and
 callers beyond those words: unmarked obsolete branches also count. Exclude
 lockfile notices, vendor syntax and dated history from actionable hits.
 
-For each candidate, establish the old contract, its replacement, and what can
-still select the old behavior. Trace producers and consumers, including CI,
+For each candidate, establish the original purpose or contract, what ended
+that need, the current supported behavior (if there is a replacement), and what
+can still select the old behavior. Trace producers and consumers, including CI,
 CLI entry points, re-exports, deployment manifests, persisted records, browser
 storage, generated clients and other repositories in scope. Tests are consumers
 of code, but a test devoted solely to retired behavior is not a reason to keep
@@ -42,9 +47,9 @@ that behavior.
 Base removal on the relevant evidence:
 
 - **Closed repository contract:** all supported targets/callers select the
-  replacement; the old implementation/configuration has no remaining supported
-  caller. A manifest census plus call tracing can establish this without
-  production access.
+  current behavior, or the feature has been retired; the old implementation
+  or configuration has no remaining supported caller. A manifest census plus
+  call tracing can establish this without production access.
 - **Persisted data or deployed clients:** obtain a complete migration/census
   result or equivalent authoritative evidence covering the relevant versions,
   scopes and rollback policy. A migration script existing, an old commit date,
@@ -60,7 +65,7 @@ retirement proof needed. Continue independent removals; ask only when an
 unresolved policy decision materially affects the requested outcome. Do not
 invent a universal age threshold or preserve hypothetical compatibility forever.
 
-## Delete the complete obsolete path
+## Delete the complete legacy path
 
 Remove the branch together with helpers, imports, flags, configuration examples,
 workflow variables and tests that exist only for it. Update current runbooks
@@ -89,4 +94,4 @@ Follow each repository's authorized delivery and cleanup workflow. Report the
 repository/revision coverage, actual removals and complexity reduction,
 verification performed, and retained candidates with concrete reasons. Distinguish
 local verification, merged source and deployed behavior. A clean keyword search
-or passing tests is not proof that every migration has completed.
+or passing tests is not proof that every legacy behavior is obsolete.
