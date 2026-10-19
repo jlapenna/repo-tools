@@ -1,3 +1,0 @@
-interface:
-  display_name: "Compatibility Cleanup"
-  short_description: "Remove obsolete compatibility and migration paths"

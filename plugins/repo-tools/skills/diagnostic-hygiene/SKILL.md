@@ -1,6 +1,6 @@
 ---
 name: diagnostic-hygiene
-description: Sweep one repository or the active fleet for obsolete diagnostic machinery and retire what no longer earns its place, including committed evidence dumps and screenshots, one-off probes and measurement harnesses, canaries for settled upgrades, incident logs nobody appends, shipped implementation plans, CI steps guarding deleted facilities, and dated history inside runbooks. Use whenever the user asks to clean up diagnostics, debug tooling, evidence, probes, audits, or investigation leftovers, or wants repositories fresher and simpler, even without the word "diagnostic". Not for compatibility shims or migrations (compatibility-cleanup), dependency updates, or fixing a live incident.
+description: Sweep one repository or the active fleet for obsolete diagnostic machinery and retire what no longer earns its place, including committed evidence dumps and screenshots, one-off probes and measurement harnesses, canaries for settled upgrades, incident logs nobody appends, shipped implementation plans, CI steps guarding deleted facilities, and dated history inside runbooks. Use whenever the user asks to clean up diagnostics, debug tooling, evidence, probes, audits, or investigation leftovers, or wants repositories fresher and simpler, even without the word "diagnostic". Not for retired product behaviors, compatibility shims or migrations (legacy-cleanup), dependency updates, or fixing a live incident.
 ---
 
 # Diagnostic hygiene
@@ -16,8 +16,8 @@ protect production.
 This is the focused retirement sibling of the
 [complexity-sweep skill](../complexity-sweep/SKILL.md), which owns how a sweep
 establishes its repository set, remote freshness and base revisions; reuse
-that procedure here. Retired contracts, shims and migrations belong to
-[compatibility-cleanup](../compatibility-cleanup/SKILL.md).
+that procedure here. Retired legacy code, product behaviors, shims and
+migrations belong to [legacy-cleanup](../legacy-cleanup/SKILL.md).
 
 ## What counts as diagnostic machinery
 

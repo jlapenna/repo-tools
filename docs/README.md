@@ -21,8 +21,8 @@ behavior lives in `eslint/`; provider manifests and skills live in `plugins/`.
 Link new durable guides here. Regenerate the interface inventory through
 `repo-docs` rather than editing it manually.
 
-Obsolete compatibility and completed-migration cleanup follows the
-[compatibility-cleanup skill](../plugins/repo-tools/skills/compatibility-cleanup/SKILL.md).
+Retiring obsolete legacy code and behaviors follows the
+[legacy-cleanup skill](../plugins/repo-tools/skills/legacy-cleanup/SKILL.md).
 Retiring obsolete diagnostic machinery (evidence dumps, probes, canaries,
 shipped plans) follows the
 [diagnostic-hygiene skill](../plugins/repo-tools/skills/diagnostic-hygiene/SKILL.md).
