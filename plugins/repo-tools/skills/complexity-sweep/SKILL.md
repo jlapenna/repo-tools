@@ -1,115 +1,90 @@
 ---
 name: complexity-sweep
-description: Sweep active repositories for unnecessary code complexity and stale maintenance paths, rank evidence-backed findings, and implement the highest-value simplifications. Use for cross-repository cleanup or a focused complexity/freshness pass; focused legacy retirement, feature work and dependency-update queues follow their existing workflows.
+description: Sweep one repository or the active fleet for unnecessary complexity and stale maintenance paths, rank evidence-backed findings, and implement the highest-value simplifications, such as duplicated policy that has drifted, layers and indirection with no present need, and stale setup steps or generated projections. Use when the user asks for a complexity, freshness, simplification or cleanup pass across repositories, wants repos simpler or fresher, or asks what to refactor across a repository, even without naming a skill. Routes focused retirement of legacy code and behaviors to legacy-cleanup and leftover diagnostics to diagnostic-hygiene; not for feature work or dependency-update queues.
 ---
 
 # Complexity sweep
 
 Reduce the number of concepts, independent implementations and maintenance
-steps needed to support current behavior. Keep a repository unchanged when a
+steps needed to support current behavior. Leave a repository unchanged when a
 proposed abstraction, deletion or rewrite would cost more than it removes.
+This is the family's umbrella: it owns the shared procedures and hands focused
+retirements to its siblings.
 
-## Establish scope and freshness
+| Skill | Removes or simplifies | Its evidence bar |
+| --- | --- | --- |
+| [complexity-sweep](../complexity-sweep/SKILL.md) | duplicated policy, needless layers, stale setup and projections | preserved consumer contracts and a concrete maintenance reduction |
+| [legacy-cleanup](../legacy-cleanup/SKILL.md) | retired feature modes, outdated defaults and workarounds, shims, finished migrations | retirement proof per consumer class, including persisted data |
+| [diagnostic-hygiene](../diagnostic-hygiene/SKILL.md) | evidence dumps, one-off probes, settled canaries, shipped plans | closed issue, no live route, durable lesson already owned |
 
-Resolve the requested repositories from the workspace, repository registry or
-hosting account. For an unspecified active set, use recent default-branch
-commits and owned open work; state the activity window and exclusions. Thirty
-days is a useful starting assumption, not a retention policy. Include maintained
-forks when their local work is in scope. Deduplicate checkouts and linked
-worktrees by repository identity; distinguish source checkouts from deployment
-checkouts and preserve their local state.
+Shared procedures live with complexity-sweep:
+[sweep scope](../complexity-sweep/references/sweep-scope.md),
+[delegated audit](../complexity-sweep/references/delegated-audit.md) and
+[delivery and report](../complexity-sweep/references/sweep-report.md).
 
-Record each selected repository's default branch, inspected commit and dirty
-or live-work conflicts. Verify the current remote base before diagnosing a
-candidate: a local HEAD, cached tracking ref, or repository `pushedAt` alone
-does not prove default-branch freshness. A hosting API or `git ls-remote
---symref origin HEAD` can establish remote identity without moving a checkout.
-Treat an inaccessible repository as unverified and disclose the coverage gap.
-Honor explicit offline or local-snapshot instructions: inspect the supplied
-revision, label remote freshness unverified, and continue the authorized audit
-without fetching or contacting a hosting service.
+## 1. Scope the sweep
 
-Read the repository's agent guide and owning development workflow. Inspect
-open PRs and worktrees for overlapping implementations before editing. Use
-[worktree-hygiene](../worktree-hygiene/SKILL.md) for isolated authoring and
-task-end cleanup. Do not change a sibling session's branch, local edits or
-running services to make the sweep easier.
+Read [sweep scope](../complexity-sweep/references/sweep-scope.md) first. It
+selects the repositories, pins the revisions inspected, and checks for
+overlapping work. Never change another session's branch, local edits or running
+services. For several repositories, delegate read-only audits with
+the [delegated audit](../complexity-sweep/references/delegated-audit.md) prompt
+and this skill's lens, [candidates](references/candidates.md).
 
-## Find maintenance cost, not just large files
+## 2. Find candidates
 
-Use tracked source, call sites, history and existing checks to investigate:
+Look for maintenance cost, not size: parallel implementations of one policy,
+indirection that serves no present need, and docs or setup that disagree with
+their owner. Size, churn and duplicate-block matches are only leads. Legacy
+behaviors and diagnostic leftovers are in scope too, judged by the
+sibling that owns them. Dependency-update queues go to
+[renovate-maintenance](../renovate-maintenance/SKILL.md); substantive context
+or skill upkeep goes to [harness-maintenance](../harness-maintenance/SKILL.md).
 
-- Parallel implementations of the same policy or lifecycle, especially when
-  they have already drifted or frequently change together.
-- Obsolete adapters, migrations, flags or compatibility paths whose consumers
-  and supported contracts can be shown to have ended.
-- Layers, configurable frameworks, indirect dispatch or duplicate state that
-  make a current operation harder to trace without serving a present need.
-- Stale documentation, setup steps or generated projections that disagree
-  with their actual owner and make routine maintenance fail.
+Read [candidates](references/candidates.md) before ranking. It lists what to
+look for, what to record per candidate, and the name-pattern scan for auditors.
 
-Size, nesting, churn and duplicate-block searches are leads. Read callers and
-the protected behavior before deciding that code is unnecessary. Generated
-outputs, deployment bundles, snapshot references and independently shipped
-modules can legitimately resemble their sources. Separate operations may also
-need different policies despite similar syntax.
+## 3. Decide
 
-For every actionable candidate, record the path/revision, current consumer,
-maintenance cost, smallest proposed simplification, preserved contract and
-available proof. A claim of dead code needs caller and external-interface
-evidence; no grep hit does not prove the absence of a dynamic or deployed caller.
+- A dead-code claim needs caller and external-interface evidence; no grep hit
+  does not rule out a dynamic or deployed caller. Check consumer repositories
+  before deleting a producer they might read.
+- Rank by repeated drift, change frequency and operational steps saved, against
+  migration effort, uncertainty and blast radius. Keep speculative findings
+  apart from fixes ready to implement.
+- When cleanup is requested, implement the top verified items instead of
+  stopping at a ranked list. Ask only when an unresolved policy decision
+  materially affects the requested outcome.
 
-## Rank and implement the priority items
+## 4. Change
 
-Favor repeated sources of behavioral drift, frequently changed code and
-unnecessary operational steps with clear ownership and affordable verification.
-Weigh the benefit against migration effort, uncertainty and blast radius. Keep
-speculative or high-risk findings separate from fixes ready to implement.
+Prefer deleting a redundant owner, delegating to an existing operation, or
+replacing indirection with direct code. Share only the behavior that is truly
+common, and do not add modes, flags, registries or cross-repository packages to
+make callers fit one abstraction. Preserve supported CLI and API behavior,
+output protocols, failure semantics and safety checks; an intentional behavior
+fix exposed by duplication is an explicit fix with its own regression evidence.
 
-When cleanup is requested, implement the highest-value verified candidates
-instead of stopping at a ranked list. Prefer deleting a redundant owner,
-delegating to an existing operation, or replacing indirection with direct code.
-Share only the behavior that is actually common; keep platform-specific
-permissions, I/O, error handling and policy at their existing boundaries. Do not
-introduce modes, flags, generic registries or a cross-repository package merely
-to make two small callers fit one abstraction.
+Make edits in a dedicated worktree, and group changes per repository as
+[delivery and report](../complexity-sweep/references/sweep-report.md)
+describes. Never take a production action to manufacture proof for a source
+cleanup: no production migration, stored-data deletion, credential
+invalidation, runner-capacity change or deploy. Take any necessary external
+action only under the user's existing authorization and the repository's owning
+workflow.
 
-Keep each repository's change independently reviewable. Preserve supported
-CLI/API behavior, output protocols, failure semantics and safety checks. Treat
-an intentional behavior correction exposed by duplication as an explicit fix,
-with its own regression evidence, rather than silently calling it a refactor.
-Do not mix bulk dependency upgrades, model changes, CI-capacity changes or
-deployment into a source cleanup. Use the existing Renovate workflow for a
-requested dependency queue,
-[legacy-cleanup](../legacy-cleanup/SKILL.md) for a focused
-retirement of legacy code and behaviors,
-[diagnostic-hygiene](../diagnostic-hygiene/SKILL.md) for retiring obsolete
-evidence, probes, canaries and shipped plans, and
-[harness-maintenance](../harness-maintenance/SKILL.md) for substantive context
-or skill upkeep.
+## 5. Verify and report
 
-## Prove the reduction and finish
+Run the repository's required checks before pushing. Never weaken a failing
+gate; check whether it also fails at the inspected base. Do not add tests
+asserting a file stays deleted or a layout stays as it is.
 
-Run the owning repository's focused checks and required gate. Use
-[testing-policy](../testing-policy/SKILL.md) when changing coverage: protect
-observable contracts, particularly both consumers of a newly shared operation.
-Do not add tests that merely assert the new file layout. If a gate fails,
-establish whether the failure exists at the inspected base; do not weaken it or
-silently declare success. Source tests do not prove a live rollout or authorize
-account, host or hardware actions.
+Report as [delivery and report](../complexity-sweep/references/sweep-report.md)
+describes: the revisions inspected, what changed, what was kept and why, and
+repositories where nothing qualified.
 
-Reconcile relevant docs with the final owner and regenerate maintained
-projections through their generator. Describe the concrete reduction: for
-example, two independently maintained workflows now delegate to one tested
-operation, while each retains its input validation. Line count is supporting
-evidence, never a quota or sufficient reason to accept a change.
+State the reduction concretely ("two workflows now delegate to one tested
+operation"); line count supports a claim but never justifies one.
 
-Follow the existing delivery authority and
-[land-pr](../land-pr/SKILL.md) when publication is authorized. Keep durable
-guidance generic and put repository-specific evidence in its existing issue,
-PR or requested report; do not publish a private portfolio inventory in a
-public tooling repository. Report inspected coverage, completed fixes and
-exact revisions/PRs, checks and limits, justified deferrals, and task-checkout
-cleanup. Distinguish triage from deep review and merged code from deployed
-behavior. Stop when the selected priority set is finished; the sweep does not
-authorize an unsolicited backlog or recurring automation.
+Stop when the selected set is done; a sweep does not authorize an unsolicited
+backlog or recurring automation.

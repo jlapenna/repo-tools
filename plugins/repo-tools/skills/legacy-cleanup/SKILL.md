@@ -1,97 +1,97 @@
 ---
 name: legacy-cleanup
-description: Retire obsolete legacy code and behaviors to reduce repository complexity and keep supported paths current. Use for legacy cleanup, retired feature modes, outdated defaults and workarounds, compatibility shims, or completed migrations; general refactoring, diagnostic cleanup and dependency upgrades follow their owning workflows.
+description: Sweep one repository or the active fleet for legacy code and behaviors whose purpose has ended, such as retired feature modes, outdated defaults, temporary workarounds and fallbacks, compatibility shims, aliases, old-format readers and completed migrations, and remove those no current consumer needs. Use when the user asks for legacy cleanup, to retire a finished migration or cutover, to drop deprecated paths or workarounds, or to keep supported paths current, even if they only say the old way is gone. Not for general complexity passes (complexity-sweep), leftover diagnostics (diagnostic-hygiene), dependency upgrades or feature redesign.
 ---
 
 # Legacy cleanup
 
 Remove legacy code and behaviors whose purpose has ended, reducing the paths
 and concepts maintainers must support. Legacy includes retired feature modes,
-old defaults, temporary workarounds and fallback behavior, as well as backward
+old defaults, temporary workarounds and fallback behavior as well as backward
 compatibility and completed migrations. Preserve behavior with concrete current
-value; age, naming and unfamiliar implementation style alone do not make it
-obsolete. Favor deletion over another abstraction or permanent audit framework.
+value; age, naming and unfamiliar style alone do not make it obsolete. Favor
+deletion over another abstraction or a permanent audit framework.
 
-## Establish the sweep
+| Skill | Removes or simplifies | Its evidence bar |
+| --- | --- | --- |
+| [complexity-sweep](../complexity-sweep/SKILL.md) | duplicated policy, needless layers, stale setup and projections | preserved consumer contracts and a concrete maintenance reduction |
+| [legacy-cleanup](../legacy-cleanup/SKILL.md) | retired feature modes, outdated defaults and workarounds, shims, finished migrations | retirement proof per consumer class, including persisted data |
+| [diagnostic-hygiene](../diagnostic-hygiene/SKILL.md) | evidence dumps, one-off probes, settled canaries, shipped plans | closed issue, no live route, durable lesson already owned |
 
-Use the requested repository set. For an unspecified set of active repositories,
-inspect the workspace, maintained repository registry and recent development;
-state the inclusion rule. Deduplicate linked checkouts by repository identity,
-exclude archived/upstream vendor trees unless requested, and record the base
-revision examined for each repository. Include repositories with no changes
-in the outcome so “swept” has a verifiable scope.
+Shared procedures live with complexity-sweep:
+[sweep scope](../complexity-sweep/references/sweep-scope.md),
+[delegated audit](../complexity-sweep/references/delegated-audit.md) and
+[delivery and report](../complexity-sweep/references/sweep-report.md).
 
-Read each target's agent guide and owning development workflow. Inspect fresh
-source under its fetch policy; stale primary checkouts are not proof of current
-behavior. Use the shared [worktree-hygiene skill](../worktree-hygiene/SKILL.md)
-before edits or Git mutation. Check for overlapping work without treating
-unrelated activity as a reason to stop the sweep.
+## 1. Scope the sweep
 
-## Find and decide
+Read [sweep scope](../complexity-sweep/references/sweep-scope.md) first. It
+selects the repositories, pins the revisions inspected, and checks for
+overlapping work. Never change another session's branch, local edits or running
+services. For several repositories, delegate read-only audits with
+the [delegated audit](../complexity-sweep/references/delegated-audit.md) prompt
+and this skill's lens, [retirement evidence](references/retirement-evidence.md).
 
-Search tracked source, configuration and current runbooks for legacy/deprecated
-markers, retired feature modes, outdated defaults, temporary workarounds,
-compatibility shims, old-format readers, aliases, migration commands,
-feature-flag transitions and fallback chains. Follow the owning interfaces and
-callers beyond those words: unmarked obsolete branches also count. Exclude
-lockfile notices, vendor syntax and dated history from actionable hits.
+## 2. Find candidates
 
-For each candidate, establish the original purpose or contract, what ended
-that need, the current supported behavior (if there is a replacement), and what
-can still select the old behavior. Trace producers and consumers, including CI,
-CLI entry points, re-exports, deployment manifests, persisted records, browser
-storage, generated clients and other repositories in scope. Tests are consumers
-of code, but a test devoted solely to retired behavior is not a reason to keep
-that behavior.
+Search for legacy and deprecated markers, retired feature modes, outdated
+defaults, temporary workarounds, shims, old-format readers, aliases, migration
+commands, flag transitions and fallback chains, then follow the
+owning interfaces past those words: unmarked obsolete branches count too.
 
-Base removal on the relevant evidence:
+Read [retirement evidence](references/retirement-evidence.md) before removing
+anything. It covers tracing producers and consumers, the evidence each consumer
+class needs, and the name-pattern scan for auditors.
 
-- **Closed repository contract:** all supported targets/callers select the
-  current behavior, or the feature has been retired; the old implementation
-  or configuration has no remaining supported caller. A manifest census plus
-  call tracing can establish this without production access.
-- **Persisted data or deployed clients:** obtain a complete migration/census
-  result or equivalent authoritative evidence covering the relevant versions,
-  scopes and rollback policy. A migration script existing, an old commit date,
-  a sample containing no old records, or “it has been a while” is insufficient.
-- **External or unknown consumers:** check the published support/retirement
-  contract and available usage evidence. No local reference alone does not
-  prove a public API, metric, installed client or recovery path is unused.
+## 3. Decide
 
-Keep a path when its immediate value is concrete: an active caller, retained
-user data, an ongoing rollout, a supported restore/rollback path, or an external
-support commitment. When evidence is missing, name the specific consumer or
-retirement proof needed. Continue independent removals; ask only when an
-unresolved policy decision materially affects the requested outcome. Do not
-invent a universal age threshold or preserve hypothetical compatibility forever.
+- For each candidate, name its original purpose, what ended that need, the
+  current supported behavior if there is a replacement, and everything that
+  can still select the old behavior.
+- Persisted data and deployed clients need a complete census or migration
+  result covering versions, scopes and rollback. A script existing, an old
+  commit date, a clean sample or elapsed time is not evidence. Gather it
+  yourself when you can reach the system: a read-only count, a verify or
+  dry-run mode, or a names-only listing is evidence gathering, not a
+  production change. Only when access genuinely fails, name the exact
+  command that would settle it.
+- No local reference does not prove a public API, metric, installed client or
+  recovery path is unused; check the published support contract. Check
+  consumer repositories before deleting a producer they might read.
+- Keep a path with a concrete current value: an active caller, retained data,
+  an ongoing rollout, a supported restore or rollback path, or an external
+  commitment. When proof is missing, name the census or consumer that would
+  settle it and continue with independent removals. Ask only when an
+  unresolved policy decision materially affects the requested outcome.
 
-## Delete the complete legacy path
+## 4. Change
 
-Remove the branch together with helpers, imports, flags, configuration examples,
-workflow variables and tests that exist only for it. Update current runbooks
-and regenerate inventories from their owner. Preserve historical records.
-Collapse callers onto the supported interface; do not silently reinterpret old
-input as valid new input. Where old input can still enter, use the existing
-validation boundary to give an actionable unsupported-input error.
+Remove the branch with its helpers, imports, flags, config examples, workflow
+variables and the tests that exist only for it, and collapse callers onto the
+supported interface. Where old input can still arrive, return an actionable
+unsupported-input error at the existing validation boundary rather than
+silently reinterpreting it.
 
-Keep each repository's change reviewable and tie it to its retirement evidence.
-Do not run a production migration, delete stored data, invalidate credentials,
-alter runner capacity or deploy merely to manufacture proof for a code cleanup.
-Follow the user's existing authorization and each repository's owning workflow
-for any necessary external action.
+Make edits in a dedicated worktree, and group changes per repository as
+[delivery and report](../complexity-sweep/references/sweep-report.md)
+describes. Never take a production action to manufacture proof for a source
+cleanup: no production migration, stored-data deletion, credential
+invalidation, runner-capacity change or deploy. Take any necessary external
+action only under the user's existing authorization and the repository's owning
+workflow.
 
-## Verify and finish
+## 5. Verify and report
 
-Exercise the supported path at the affected boundary and any meaningful
-rejection of retired input. Retain tests for current behavior and safety
-properties. Remove tests whose entire purpose is the retired feature; do not
-replace them with text/absence assertions. Apply the
-[testing-policy skill](../testing-policy/SKILL.md) for proportionate checks.
-Search again for surviving references to removed interfaces and inspect the
-complete diff for accidentally broadened deletion.
+Run the repository's required checks before pushing. Never weaken a failing
+gate; check whether it also fails at the inspected base. Do not add tests
+asserting a file stays deleted or a layout stays as it is.
 
-Follow each repository's authorized delivery and cleanup workflow. Report the
-repository/revision coverage, actual removals and complexity reduction,
-verification performed, and retained candidates with concrete reasons. Distinguish
-local verification, merged source and deployed behavior. A clean keyword search
-or passing tests is not proof that every legacy behavior is obsolete.
+Report as [delivery and report](../complexity-sweep/references/sweep-report.md)
+describes: the revisions inspected, what changed, what was kept and why, and
+repositories where nothing qualified.
+
+Exercise the supported path and any meaningful rejection of retired input. A
+clean keyword search is not proof that a migration finished.
+
+Stop when the selected set is done; a sweep does not authorize an unsolicited
+backlog or recurring automation.

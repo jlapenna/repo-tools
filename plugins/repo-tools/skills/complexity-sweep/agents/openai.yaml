@@ -1,0 +1,3 @@
+interface:
+  display_name: "Complexity Sweep"
+  short_description: "Rank and remove unnecessary repository complexity"

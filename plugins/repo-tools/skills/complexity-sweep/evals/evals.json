@@ -1,0 +1,19 @@
+{
+  "skill_name": "complexity-sweep",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "the labels repo (~/p/labels, the label printer app) grew fast in a week. do a complexity pass on it, read-only: what's needlessly complicated or duplicated and what would you simplify first? rank it. no edits, write the findings as markdown in your output dir.",
+      "expected_output": "Read-only report with base revision, evidence-backed verdicts, and kept items with reasons.",
+      "files": [],
+      "assertions": [
+        "Records the exact base revision (origin/main SHA) inspected",
+        "Every removal candidate cites evidence beyond its name or age (origin issue/PR state, consumer search, or census)",
+        "Kept items each name the live route, open issue, or missing proof that keeps them",
+        "States that the repository was not modified",
+        "Findings are ranked with an explicit cost or benefit rationale per item",
+        "Each proposed simplification names the contract or behavior it must preserve"
+      ]
+    }
+  ]
+}

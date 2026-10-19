@@ -1,0 +1,19 @@
+{
+  "skill_name": "legacy-cleanup",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "sync-padd has been through a couple of cutovers lately (the selected-age secrets thing, the old reMarkable sync paths). can you go through ~/p/sync-padd read-only and tell me which legacy/compat/migration bits we can actually rip out now vs what has to stay? don't change anything, just write it up as a markdown file in your output dir.",
+      "expected_output": "Read-only report with base revision, evidence-backed verdicts, and kept items with reasons.",
+      "files": [],
+      "assertions": [
+        "Records the exact base revision (origin/main SHA) inspected",
+        "Every removal candidate cites evidence beyond its name or age (origin issue/PR state, consumer search, or census)",
+        "Kept items each name the live route, open issue, or missing proof that keeps them",
+        "States that the repository was not modified",
+        "Treats the not-yet-active selected-age secrets boundary as KEEP (ongoing cutover), not as removable",
+        "Distinguishes repository-contract evidence from persisted-data or deployed-client evidence for at least one candidate"
+      ]
+    }
+  ]
+}
