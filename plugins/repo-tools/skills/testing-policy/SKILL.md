@@ -1,6 +1,6 @@
 ---
 name: testing-policy
-description: Apply the shared testing policy when adding, removing, reviewing, or configuring tests and CI checks, including required jobs and operational control flags.
+description: Decide whether a test or CI check earns its cost and how required jobs and operational control flags must behave. Use when adding, deleting, reviewing, skipping or making required any test, CI job, path filter or enable/arm flag, or when asked whether a test is redundant, even if the word policy never comes up.
 ---
 
 # Testing policy

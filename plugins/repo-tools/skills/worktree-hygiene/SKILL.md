@@ -6,9 +6,8 @@ description: Safely create, use, and tear down git worktrees in a checkout that 
 # Worktree Hygiene
 
 Apply the user's task constraints first, including requests to work from local
-source without fetching. Homegit-managed files use the explicit workflow in
-the `homegit` skill; do not create a linked worktree for ordinary destination
-edits and captures. The rules below govern normal repository implementation.
+source without fetching. The rules below govern normal repository
+implementation.
 
 ## Why this exists
 
@@ -17,18 +16,13 @@ directory. If more than one Claude Code / Codex session (or a leftover
 background task, or a dev server) can point its cwd at the same checkout,
 any git-mutating command run there — `checkout`, `stash`, `reset`, `commit`,
 `gh pr merge` — can silently destroy or scramble another session's
-uncommitted work. This has happened in practice: a concurrent session's
-`git checkout <branch>` moved HEAD in a shared checkout mid-edit, and the
-in-progress edits were swept into a stash entry the editing session never
-asked for. `gh pr merge --delete-branch` is itself a git-mutating command
-with this exact race — after deleting the merged branch it runs a local
-`git checkout` to move HEAD off it, and can land on a completely unrelated
-concurrent session's in-progress branch.
+uncommitted work: a concurrent `checkout` can move HEAD mid-edit and sweep
+the edits into a stash nobody asked for. `gh pr merge --delete-branch` has the
+same race, because it runs a local `git checkout` after deleting the branch.
 
-**The fix, unconditionally: isolate any git-mutating work in its own
-worktree first** (`EnterWorktree` in Claude Code, or `git worktree add
-<path> origin/main -b <branch>` otherwise). Treat this as required even if
-the checkout looks clean right now — a concurrent session can start
+Isolate any git-mutating work in its own worktree first (`EnterWorktree` in
+Claude Code, or `git worktree add <path> origin/main -b <branch>` otherwise).
+Do this even if the checkout looks clean right now — a concurrent session can start
 mutating it moments later, and "it was clean when I checked" is not a
 guarantee. Only read-only inspection (`status`/`diff`/`log`) is safe
 directly in a primary/shared checkout.
@@ -83,23 +77,9 @@ checkout); otherwise fall back to the project's documented setup step
 (docs/skills). This skill only covers the git/process mechanics that are
 the same regardless of language or stack.
 
-**If using codebase-memory graph tools, index the new worktree first.** A freshly created
-worktree is a new path the `/codebase-memory-mcp` index does not yet know
-about — graph searches (`search_graph`, `trace_path`, `get_code_snippet`)
-will miss or mis-resolve symbols under it until it's indexed. After creating
-or entering any new worktree, trigger:
-
-```bash
-/codebase-memory-mcp index_repository repo_path=<worktree-path>
-```
-
-Run it before relying on graph tools for code discovery in that worktree.
-If that integration is unavailable or unnecessary, use ordinary file search;
-indexing is not a prerequisite for editing, testing, or delivery.
-Use the worktree path as `repo_path` (the index is keyed by path), and let
-the indexer derive the project name rather than overriding it. If the project
-was already indexed at its primary checkout, this picks up the worktree as a
-distinct path so the graph stays fresh for concurrent sessions working there.
+If a code-graph index keyed by path (for example `/codebase-memory-mcp
+index_repository repo_path=<worktree-path>`) will be used for discovery, index
+the new worktree first; ordinary file search needs no indexing.
 
 ## Tearing a worktree down safely
 
@@ -212,57 +192,9 @@ removal failures retain recovery evidence.
 
 ## Standing creation-age retention
 
-An owner's explicit retention grant authorizes retirement of linked checkouts
-older than that creation-age window within the approved repositories without
-asking again. For a three-day grant, the window is 72 hours. An unmerged tip,
-open PR or recent edit does not renew an old checkout's age. This procedure
-does not grant access or select a global default window.
-
-Use reliable Git-link filesystem birth time, never the HEAD commit date.
-Unknown or future creation time is KEEP. For an authorized three-day grant:
-
-```bash
-repo-prune-merged-worktrees --repo <primary> --retire-created-hours 72 <checkout>
-repo-prune-merged-worktrees --repo <primary> --retire-created-hours 72 --delete <checkout>
-```
-
-Pass the documented consumer resource adapter in audit and apply. This mode
-keeps branches and exact committed history, an independent index and staged
-objects, dirty working files and their absences, and private ignored/untracked
-inputs in verified recovery archives. Restore with the reported
-`repo-restore-worktree` command; it creates an empty checkout before restoring
-files and staging state, so deleted tracked files remain absent. Archives may
-contain credentials and must remain private. Disposal is separate authorization.
-Identity-only
-`config.worktree` files are separately checksummed and restored byte-for-byte
-into the new checkout's private Git administration directory; other keys,
-includes, redirected files, unsafe modes and changed extension semantics stay.
-Group writes require the current primary group.
-
-Version-4 archives additionally preserve ordinary merges whose index is fully
-resolved, including exact private operation files and available parent/advisory
-objects. A preexisting missing advisory `AUTO_MERGE` object is explicitly
-recorded and its reference bytes preserved; the tool never reconstructs it.
-Object inspection disables lazy fetching. Merge-control lock files still keep
-the checkout. A standalone empty, owned regular `MERGE_RR` is preserved
-byte-for-byte with its mode when no active merge metadata is present. An
-optional regular `ORIG_HEAD` is also preserved with its exact bytes and mode,
-and its available commit closure is protected. Nonempty
-rerere records, merge-control locks and other active operations stay; never
-clear a marker to make a checkout eligible.
-
-Keep live/locked/nested checkouts and unsupported split/sparse/unmerged indexes,
-worktree-only configuration beyond regular, owned `user.name` / `user.email`
-settings, sparse-checkout patterns and other in-progress Git operations with
-their exact reason and path. Never kill another session or use `--force-anyway` to bypass snapshot/occupancy refusals.
-The verified snapshot and retained path set are compared again under the
-consumer lock; changed snapshots and partial removal failures retain recovery
-evidence. The grant does not authorize deleting remote branches or treating
-unfinished implementation issues as completed.
-
-`--park-inactive --idle-hours N` remains an inactivity policy. It must not be
-used as a substitute for the creation-age policy or weakened to bypass a
-dirty/recent refusal.
+When an owner has granted a creation-age window for retiring linked checkouts,
+read [creation-age retention](references/creation-age-retention.md) before
+retiring any checkout under that grant.
 
 ## Syncing the primary checkout after a merge
 
@@ -300,10 +232,7 @@ been reset, report that separate synchronization failure. Never present merged
 work as fully cleaned up without either completing this sync or disclosing that
 blocker.
 
-## Related skills
+## Related commands
 
-- `stale-branch-cleanup` — auditing/deleting the branches these worktrees
-  point at, including the squash-merge false-negative trap.
-- `revive-tmux-session` — recovering an orphaned `claude`/`codex` process
-  (exactly the kind of thing the `/proc` scan above surfaces) into a fresh
-  tmux window instead of losing track of it.
+- `repo-audit-branches --help` audits and deletes the branches these worktrees
+  point at, including squash-merged branches that plain ancestry misses.

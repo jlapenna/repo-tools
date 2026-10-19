@@ -21,6 +21,7 @@
     "harness-maintenance",
     "autonomous-work",
     "complexity-sweep",
+    "legacy-cleanup",
     "diagnostic-hygiene"
   ]
 }

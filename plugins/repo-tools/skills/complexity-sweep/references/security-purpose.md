@@ -86,8 +86,7 @@ evidence and limits; do not claim a security improvement from deletion alone.
 
 Have the user- or project-designated security reviewer review these cuts before
 delivery; use the named agent or service when one is requested, rather than
-substituting a self-review. For example, a deployment may designate a secops
-OpenClaw agent. If no reviewer is designated, use an available independent
+substituting a self-review. If no reviewer is designated, use an available independent
 reviewer without creating a new service or approval system.
 
 Provide the exact base and head revisions, complete diffs, the boundary and
