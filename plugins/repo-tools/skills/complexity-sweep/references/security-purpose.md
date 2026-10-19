@@ -76,3 +76,27 @@ invalidation, production data conversion, relaxing access policy or deployment.
 Verify the supported operation and any meaningful rejection at the affected
 boundary. Report the removed operational cost, protection retained, exact
 evidence and limits; do not claim a security improvement from deletion alone.
+
+## Obtain independent security review
+
+Have the user- or project-designated security reviewer review these cuts before
+delivery; use the named agent or service when one is requested, rather than
+substituting a self-review. For example, a deployment may designate a secops
+OpenClaw agent. If no reviewer is designated, use an available independent
+reviewer without creating a new service or approval system.
+
+Provide the exact base and head revisions, complete diffs, the boundary and
+consumer evidence, checks performed and material proof gaps. Ask for a
+read-only review of concrete security and integrity regressions; a code review
+does not authorize scanning, secret access, credential changes or deployment.
+Do not include secret values in the packet or publish private fleet evidence.
+
+Hold pending delivery while the requested review is outstanding. Address
+actionable findings, verify corrections and obtain review of the changed head
+before resuming the normal protected delivery path. Keep unrelated preexisting
+findings separate from regressions introduced by the cut. If a reviewed change
+has already landed, review its exact merged revision and deliver a focused
+correction when needed; never present that as a pre-merge review. Record the
+reviewer, revisions, disposition and unproved behavior in the existing PR or
+sweep report. An unavailable required reviewer is a named delivery blocker;
+continue independent work without fabricating approval.
