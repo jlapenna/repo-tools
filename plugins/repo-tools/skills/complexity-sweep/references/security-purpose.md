@@ -47,6 +47,11 @@ Search source contents as well as filenames:
 encrypt|decrypt|cipher|crypto|hmac|signing|signature|nonce|token|secret|keyring|rotation|safety|secure|auth
 ```
 
+Trace test doubles too. A mock can still accept retired token fields or an
+obsolete authenticated operation after its real producer is gone, hiding a
+regression behind a successful fixture response. Keep its supported operations
+and meaningful malformed-input checks; make unsupported requests fail visibly.
+
 A key beside ciphertext can still separate a database export from filesystem
 access. A random token can enforce capability possession, prevent replay, bind
 a session or correlate one-time operations. Hashes can detect corruption or
@@ -95,6 +100,10 @@ consumer evidence, checks performed and material proof gaps. Ask for a
 read-only review of concrete security and integrity regressions; a code review
 does not authorize scanning, secret access, credential changes or deployment.
 Do not include secret values in the packet or publish private fleet evidence.
+Include untracked additions when reviewing an uncommitted patch. Bind the final
+published content to the reviewed files after formatting; distinguish absent
+files from empty files when recording hashes. A review's prose counts or
+transcribed hashes do not replace that source binding.
 
 Hold pending delivery while the requested review is outstanding. Address
 actionable findings, verify corrections and obtain review of the changed head
@@ -105,3 +114,17 @@ correction when needed; never present that as a pre-merge review. Record the
 reviewer, revisions, disposition and unproved behavior in the existing PR or
 sweep report. An unavailable required reviewer is a named delivery blocker;
 continue independent work without fabricating approval.
+
+## Keep evidence collection from exposing credentials
+
+Prefer the existing read-only client and bounded status or metadata needed for
+the finding. Authenticated HTTP-client exceptions can include request headers,
+cookies and bodies. Catch and sanitize failures inside the consuming process
+before a tool renders them; return a fixed error category and retain only
+credential-free request identity and status. Do not rely on an agent to redact
+an exception after it has already been printed.
+
+Treat an emitted live credential as an exposure and follow its owning incident
+and revocation procedure within existing authority. Replacing a saved credential
+does not by itself prove that the old one stopped authorizing requests. Keep
+remediation, source delivery and any missing operational authority explicit.
