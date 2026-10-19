@@ -77,6 +77,19 @@ same blocker, expand into an unrelated backlog, or add a polling service to
 keep the session busy. Finish independent work before declaring the task
 blocked.
 
+## Wait only on a live watcher
+
+Arm each wait with the harness's background facility and record its PID or
+task ID. Bound every wait with a timeout from the task's remaining budget; a
+timeout means still pending, not success. Check a PID with `kill -0`, an exact
+process name with `pgrep -x`, or a file or service state. Never loop on
+`pgrep -f <pattern>` when the pattern appears in the loop's own command line:
+the loop matches itself and never exits.
+
+End a turn "waiting on X" only when a live watcher you armed will wake it;
+otherwise check X now or keep working. Stop your own watchers before reporting
+done, and name any you deliberately leave running by PID or task ID.
+
 Before handing back a next step or asking approval for routine follow-through,
 check its live state: PR and issue comments, workflow or deploy runs, or the
 resource's own status output. Another session may already have done it. If it

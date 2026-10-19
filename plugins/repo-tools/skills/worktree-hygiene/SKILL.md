@@ -144,6 +144,14 @@ condition; it is not a reason to leave a completed checkout behind. Foreign
 sessions and detached task processes remain protected until their owner stops
 them. Keep exact blockers and retained paths in the completion record.
 
+The guard's dry-run verdict and its removal output are the cleanup receipt;
+keep them in the completion record. An absent path alone is not a receipt.
+Never substitute `git worktree remove --force`, `git branch -D`, or
+`--force-anyway` for a guard; report its exact refusal and path instead. A
+squash-merged branch fails `git branch -d` because its tip is not an ancestor
+of the base; `repo-audit-branches --delete` removes it on
+`landed:merged-pr-head` evidence.
+
 Standalone local/remote branches use `repo-audit-branches`; its `--delete`
 and `--delete-remote` flags are independent. After safe worktree teardown, use
 `repo-audit-branches --base origin/main --fetch --branch <merged-head> --delete-remote`
