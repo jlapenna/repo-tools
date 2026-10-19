@@ -1,3 +1,9 @@
 allowBuilds:
   esbuild: true
   nx: false
+
+# First-party publisher namespaces bypass release age, not other safety checks.
+# Third-party dependencies, including their transitives, retain pnpm defaults.
+minimumReleaseAgeExclude:
+  - "@jlapenna/*"
+  - "@supersprinklesracing/*"
