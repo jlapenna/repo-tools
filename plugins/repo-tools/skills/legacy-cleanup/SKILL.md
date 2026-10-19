@@ -42,6 +42,9 @@ owning interfaces past those words: unmarked obsolete branches count too.
 Read [retirement evidence](references/retirement-evidence.md) before removing
 anything. It covers tracing producers and consumers, the evidence each consumer
 class needs, and the name-pattern scan for auditors.
+For retired security protocols, encryption formats, keys or tokens, also read
+[security purpose](../complexity-sweep/references/security-purpose.md); retain
+current trust boundaries and prove stored-data and restore consumers retired.
 
 ## 3. Decide
 

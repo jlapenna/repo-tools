@@ -1,6 +1,6 @@
 ---
 name: complexity-sweep
-description: Sweep one repository or the active fleet for unnecessary complexity and stale maintenance paths, rank evidence-backed findings, and implement the highest-value simplifications, such as duplicated policy that has drifted, layers and indirection with no present need, and stale setup steps or generated projections. Use when the user asks for a complexity, freshness, simplification or cleanup pass across repositories, wants repos simpler or fresher, or asks what to refactor across a repository, even without naming a skill. Routes focused retirement of legacy code and behaviors to legacy-cleanup and leftover diagnostics to diagnostic-hygiene; not for feature work or dependency-update queues.
+description: Sweep one repository or the active fleet for unnecessary complexity and stale maintenance paths, rank evidence-backed findings, and implement the highest-value simplifications, including duplicated policy, needless layers, stale setup, and custom security, encryption, key or token schemes without a concrete protective purpose. Use for complexity, freshness, simplification or cleanup passes and reviews of security machinery added only for safety. Routes retired behaviors to legacy-cleanup and investigation leftovers to diagnostic-hygiene; not for general security hardening, feature work or dependency-update queues.
 ---
 
 # Complexity sweep
@@ -43,6 +43,9 @@ or skill upkeep goes to [harness-maintenance](../harness-maintenance/SKILL.md).
 
 Read [candidates](references/candidates.md) before ranking. It lists what to
 look for, what to record per candidate, and the name-pattern scan for auditors.
+For custom security, encryption, signing, keys, tokens or safety gates, also
+read [security purpose](references/security-purpose.md). It establishes the
+protected asset and trust boundary before judging a control unnecessary.
 
 ## 3. Decide
 

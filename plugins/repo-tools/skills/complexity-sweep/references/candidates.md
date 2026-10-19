@@ -14,6 +14,10 @@ existing checks to find:
   make a current operation harder to trace without serving a present need.
 - Stale documentation, setup steps or generated projections that disagree with
   their actual owner and make routine maintenance fail.
+- Custom security protocols, encryption, signing, key or token lifecycles and
+  safety gates whose protective purpose is unclear. Use
+  [security purpose](security-purpose.md) to distinguish unnecessary machinery
+  from controls with a real trust boundary or integrity contract.
 - Obsolete adapters, migrations, flags and compatibility paths, and leftover
   diagnostic machinery. They are in scope; decide them by the stricter
   evidence rules of [legacy-cleanup](../../legacy-cleanup/SKILL.md)
