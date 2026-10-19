@@ -22,6 +22,9 @@ Read the callers, deployment configuration and introduction history. Record:
   that can preserve the contract with less machinery.
 - **Consumers and evidence:** current callers, external clients, persisted
   formats and restore paths, inspected revision, origin and any proof gaps.
+  Check mixed-version deployment and rollback: can old code read records or
+  tokens written by new code, and can new code read in-flight old inputs?
+  Name any bounded incompatibility window and its recovery.
 
 Check the deployed binding, proxy and credential distribution before calling
 two components the same trust domain. Localhost, a private network or a single
@@ -61,6 +64,8 @@ integrity. Custom code is a maintenance lead, not proof of uselessness.
 the claimed failure, a redundant owner provides no independent enforcement,
 or a standard primitive preserves the same boundary with fewer moving parts.
 Name the attack or accidental failure that remains prevented after the change.
+State where rejection happens afterward and the platform's default behavior
+when the removed mechanism is absent; deletion must not silently fail open.
 Remove the obsolete helpers, settings, provisioning instructions and tests
 devoted solely to that mechanism; preserve checks for observable contracts.
 
