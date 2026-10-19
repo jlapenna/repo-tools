@@ -34,6 +34,11 @@ recover scope, decisions, completed work, and pending actions before proceeding.
 1. **Missing facts:** inspect files, history, configuration, existing tools,
    and authoritative documentation. Run a proportionate diagnostic rather
    than ask the user to supply information already available to the agent.
+   Match delegated evidence requirements to the worker's actual capabilities.
+   Return operator-owned observations through an existing authorized handoff;
+   an isolated worker need not acquire operator privileges to consume them.
+   Bind a receipt to its subject and distinguish a predecessor's evidence from
+   the identity and checks of a newly admitted successor.
 2. **Implementation choices:** follow accepted neighboring patterns and
    repository conventions. Choose the smallest change that satisfies the
    request and remains easy to review or reverse.
@@ -70,6 +75,12 @@ CI, review, merge, or post-delivery steps required by its workflow. Do not stop
 at a plan, the first passing check, or a PR link when later steps are part of
 the requested outcome. Finish required checks and investigate real failures;
 do not weaken checks or repeatedly rerun a product failure into green.
+
+A timed-out mutation can already have succeeded. Retain its exact target and
+supported idempotency key, read back the authoritative state, and recover the
+original result before issuing another admission or publication. Reuse the
+same supported key and inputs when recovering a lost response; a fresh request
+is not evidence that the earlier one failed.
 
 Use available alternatives when a tool or approach fails. Retry only when new
 evidence or a changed approach makes progress plausible. Do not spin on the
