@@ -1,6 +1,6 @@
 ---
 name: github-ci-monitor
-description: Watch GitHub Actions runs and armed auto-merge pull requests until they complete or need attention. Use after enabling auto-merge, while waiting for CI, or whenever a session would otherwise poll GitHub in an ad-hoc loop.
+description: Watch GitHub Actions runs and armed auto-merge pull requests until they complete or need attention. Use after enabling auto-merge, while waiting for CI, to check whether a push's CI passed or a PR merged, or whenever a session would otherwise poll GitHub with a `sleep` or `gh run list` loop.
 ---
 
 # GitHub CI Monitor

@@ -89,8 +89,8 @@ Repeat this loop until the current PR head is fully green:
 1. Monitor every required check. If one fails, inspect its actual logs and load
    the repository's CI-fix skill when available. Fix the cause within scope,
    verify locally, push, and restart the loop on the new head SHA.
-2. Inspect review summaries and thread-aware inline comments. Load
-   `gh-address-comments` when available; flat comment lists are not sufficient
+2. Inspect review summaries and thread-aware inline comments. Load a
+   thread-aware review-comment skill when one is available; flat comment lists are not sufficient
    for resolution state.
 3. Address every unambiguous actionable comment by default. Ask before acting
    when feedback is ambiguous, conflicts with another request, expands scope
