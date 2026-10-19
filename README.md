@@ -49,7 +49,10 @@ health checks.
   prompts, or payloads. It never repairs, installs, edits configuration, or
   uses the network. `--json` prints one object: `ok`, `package`,
   `repository`, and `checks` (`name`, `status` of `ok`/`warn`/`fail`,
-  `detail`).
+  `detail`). The homegit repo-tools bootstrap
+  (`.chezmoitemplates/homegit-repo-tools-bootstrap.sh`) runs it right after
+  installing this package, so a reconciliation fails on the named dependency
+  before chezmoi applies the Codex hook that delegates to it.
 - `repo-adopt [--target DIR] [--hooks auto|pre-commit|husky|none] [--repo-tools-rev SHA] [--check] [--force]`
   — idempotently install this package's generic conventions into a
   repository: the `repo-require-worktree` commit and push guards (merged into
