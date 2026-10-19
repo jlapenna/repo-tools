@@ -58,11 +58,19 @@ ready to implement.
   permissions, I/O, error handling and policy at their existing boundaries. Do
   not introduce modes, flags, generic registries or a cross-repository package
   to make two small callers fit one abstraction.
+- When repeated decoding is the cost, consider parsing once and carrying the
+  result through the existing flow before introducing a shared selector or
+  adapter. Carry the original storage handle alongside the decoded record:
+  its logical ID need not identify the document to update. Preserve validation
+  and failure timing, filtering, stable ordering and ties, limit placement, and
+  transaction read/write and retry boundaries.
 - Preserve supported CLI and API behavior, output protocols, failure semantics
   and safety checks. An intentional behavior correction exposed by duplication
   is an explicit fix with its own regression evidence, not a silent refactor.
-- When coverage changes, protect observable contracts, particularly both
-  consumers of a newly shared operation.
+- Verify shared behavior through each public consumer. For ownership-fenced or
+  partial-update transitions, preserve stale-owner rejection and existing
+  omitted-field versus zero/false semantics. Reuse relevant contract tests;
+  add coverage for unproved behavior rather than helper or file layout.
 
 ## Describe the reduction
 
