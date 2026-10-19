@@ -18,13 +18,8 @@
     "this uses 1536, the bottom of Mend's recommended 1.5-2.5 GB range",
     "(https://docs.renovatebot.com/mend-hosted/faq/)."
   ],
-  "extends": [
-    "config:recommended"
-  ],
-  "labels": [
-    "bot:renovate",
-    "type:dependency-update"
-  ],
+  "extends": ["config:recommended"],
+  "labels": ["bot:renovate", "type:dependency-update"],
   "platformAutomerge": true,
   "rebaseWhen": "auto",
   "pre-commit": {
@@ -36,11 +31,7 @@
   "packageRules": [
     {
       "description": "Group and automerge updates that preserve the declared compatibility range",
-      "matchUpdateTypes": [
-        "minor",
-        "patch",
-        "digest"
-      ],
+      "matchUpdateTypes": ["minor", "patch", "digest"],
       "groupName": "all non-major dependencies",
       "groupSlug": "all-minor-patch",
       "automerge": true,
@@ -48,36 +39,50 @@
     },
     {
       "description": "Major updates are never merged unattended, whichever bot authors the PR: they open as DRAFT pull requests with auto-merge off. Every member repo's agent-automerge-reusable.yml treats a bot login as auto-mergeable the moment a non-draft PR is opened, and it deliberately leaves drafts alone (draft is the fleet's parked state), so draftPR is the guard. Kept when self-hosted Renovate was reverted (2026-09-21): it protects the hosted-app repos too -- without it the 2026-09-20 mariadb 12->13 bump would have auto-merged on green without the MARIADB_AUTO_UPGRADE fix its data directory needed. Deliberately no status:needs-human label: that label means the maintainer must act, and a major upgrade is agent work.",
-      "matchUpdateTypes": [
-        "major"
-      ],
+      "matchUpdateTypes": ["major"],
       "draftPR": true,
       "automerge": false
     },
     {
       "description": "TypeScript 7 breaks Nx project-graph construction today. Hold only the 7.x line fleet-wide until Nx compatibility is proven, while leaving a later major available for its own review.",
-      "matchPackageNames": [
-        "typescript"
-      ],
+      "matchPackageNames": ["typescript"],
       "allowedVersions": "<7 || >=8"
     },
     {
       "description": "Images hosted only on LAN registries (docker-registry.lan.jlapenna.net, local/ tags) are unreachable from Renovate's hosted runner, so lookups fail as recurring 'Error obtaining docker token' repository problems. These pins are deliberate and updated by hand.",
-      "matchDatasources": [
-        "docker"
-      ],
-      "matchPackageNames": [
-        "local/**",
-        "docker-registry.lan.jlapenna.net/**"
-      ],
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["local/**", "docker-registry.lan.jlapenna.net/**"],
       "enabled": false
     },
     {
       "description": "Match pnpm 11's own default 24-hour minimumReleaseAge install-time policy, for every pnpm 11 consumer. Without this, Renovate can open and auto-merge an npm bump for a package published hours ago, landing a lockfile entry that pnpm itself then rejects on the very next install (agent-lcars#1345/#1391). Consumers without npm packages are unaffected.",
-      "matchManagers": [
-        "npm"
-      ],
+      "matchManagers": ["npm"],
       "minimumReleaseAge": "1 day"
+    },
+    {
+      "description": "Maintainer-owned source repositories are first-party releases and do not wait for release age; third-party dependencies in those repositories retain their normal policy.",
+      "matchSourceUrls": [
+        "https://github.com/jlapenna/**",
+        "https://github.com/supersprinklesracing/**"
+      ],
+      "minimumReleaseAge": "0 days"
+    },
+    {
+      "description": "Packages published by the maintainer, owned GitHub dependencies and locally built or published images are exempt from release-age delays even when source URL metadata is absent.",
+      "matchPackageNames": [
+        "@jlapenna/**",
+        "@supersprinklesracing/**",
+        "jlapenna/**",
+        "supersprinklesracing/**",
+        "ghcr.io/jlapenna/**",
+        "ghcr.io/supersprinklesracing/**",
+        "docker.io/jlapenna/**",
+        "docker.io/supersprinklesracing/**",
+        "docker-registry.lan.jlapenna.net/**",
+        "*-docker.pkg.dev/agent-lcars/**",
+        "local/**"
+      ],
+      "minimumReleaseAge": "0 days"
     }
   ]
 }
