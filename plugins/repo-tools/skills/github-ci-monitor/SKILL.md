@@ -106,7 +106,9 @@ merge directly once all gates pass and the task authorizes delivery.
 
 Transient GitHub or network errors are reported and retried. The pull-request
 watcher has no timeout because a quiet protected merge queue is normal; stop it
-only when the owning task is intentionally abandoned or parked.
+only when the owning task is intentionally abandoned or parked. The caller
+still bounds its own wait: run it in the background with a deadline and record
+the PID or task ID.
 
 ## Ownership boundary
 
