@@ -81,6 +81,8 @@ workflow.
 Run the repository's required checks before pushing. Never weaken a failing
 gate; check whether it also fails at the inspected base. Do not add tests
 asserting a file stays deleted or a layout stays as it is.
+Security-purpose cuts also receive the independent review described in
+[security purpose](references/security-purpose.md) before delivery.
 
 Report as [delivery and report](../complexity-sweep/references/sweep-report.md)
 describes: the revisions inspected, what changed, what was kept and why, and
