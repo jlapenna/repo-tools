@@ -26,8 +26,7 @@ Shared procedures live with complexity-sweep:
 
 Read [sweep scope](../complexity-sweep/references/sweep-scope.md) first. It
 selects the repositories, pins the revisions inspected, and checks for
-overlapping work. Never change another session's branch, local edits or running
-services. For several repositories, delegate read-only audits with
+overlapping work. For several repositories, delegate read-only audits with
 the [delegated audit](../complexity-sweep/references/delegated-audit.md) prompt
 and this skill's lens, [candidates](references/candidates.md).
 
@@ -78,18 +77,12 @@ workflow.
 
 ## 5. Verify and report
 
-Run the repository's required checks before pushing. Never weaken a failing
-gate; check whether it also fails at the inspected base. Do not add tests
-asserting a file stays deleted or a layout stays as it is.
 Security-purpose cuts also receive the independent review described in
 [security purpose](references/security-purpose.md) before delivery.
 
-Report as [delivery and report](../complexity-sweep/references/sweep-report.md)
-describes: the revisions inspected, what changed, what was kept and why, and
-repositories where nothing qualified.
+Verify and report as
+[delivery and report](../complexity-sweep/references/sweep-report.md)
+describes; it covers required checks, failing gates and the report contents.
 
 State the reduction concretely ("two workflows now delegate to one tested
 operation"); line count supports a claim but never justifies one.
-
-Stop when the selected set is done; a sweep does not authorize an unsolicited
-backlog or recurring automation.

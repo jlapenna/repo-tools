@@ -12,23 +12,14 @@ afterwards it is weight that agents retrieve, lint and reason about on every
 task. Remove that weight without touching the diagnostics that still protect
 production.
 
-| Skill | Removes or simplifies | Its evidence bar |
-| --- | --- | --- |
-| [complexity-sweep](../complexity-sweep/SKILL.md) | duplicated policy, needless layers, stale setup and projections | preserved consumer contracts and a concrete maintenance reduction |
-| [legacy-cleanup](../legacy-cleanup/SKILL.md) | retired feature modes, outdated defaults and workarounds, shims, finished migrations | retirement proof per consumer class, including persisted data |
-| [diagnostic-hygiene](../diagnostic-hygiene/SKILL.md) | evidence dumps, one-off probes, settled canaries, shipped plans | closed issue, no live route, durable lesson already owned |
-
-Shared procedures live with complexity-sweep:
-[sweep scope](../complexity-sweep/references/sweep-scope.md),
-[delegated audit](../complexity-sweep/references/delegated-audit.md) and
-[delivery and report](../complexity-sweep/references/sweep-report.md).
+Sibling skills and the shared procedures are listed in
+[complexity-sweep](../complexity-sweep/SKILL.md).
 
 ## 1. Scope the sweep
 
 Read [sweep scope](../complexity-sweep/references/sweep-scope.md) first. It
 selects the repositories, pins the revisions inspected, and checks for
-overlapping work. Never change another session's branch, local edits or running
-services. For several repositories, delegate read-only audits with
+overlapping work. For several repositories, delegate read-only audits with
 the [delegated audit](../complexity-sweep/references/delegated-audit.md) prompt
 and this skill's lens, [candidates](references/candidates.md).
 
@@ -78,17 +69,10 @@ workflow.
 
 ## 5. Verify and report
 
-Run the repository's required checks before pushing. Never weaken a failing
-gate; check whether it also fails at the inspected base. Do not add tests
-asserting a file stays deleted or a layout stays as it is.
-
-Report as [delivery and report](../complexity-sweep/references/sweep-report.md)
-describes: the revisions inspected, what changed, what was kept and why, and
-repositories where nothing qualified.
+Verify and report as
+[delivery and report](../complexity-sweep/references/sweep-report.md)
+describes; it covers required checks, failing gates and the report contents.
 
 List kept candidates with the route or open issue that keeps them, and
 load-bearing findings outside the sweep (a submodule pointing at a removed
 directory, a lane that never cut over).
-
-Stop when the selected set is done; a sweep does not authorize an unsolicited
-backlog or recurring automation.
