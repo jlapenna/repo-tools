@@ -28,6 +28,21 @@
         "States explicitly that nothing (or nothing diagnostic) qualified for deletion, rather than inventing cuts",
         "Report states the repos were not modified and no git mutation occurred"
       ]
+    },
+    {
+      "id": 3,
+      "prompt": "messages-control has a diagnose command, mock fixtures, a container config checker, a design prototype... feels like a lot of investigation leftovers. read-only sweep of ~/p/messages-control for diagnostic junk we can delete, and what has to stay. write it up as markdown in your output dir, no changes.",
+      "expected_output": "Read-only report with base revision, evidence-backed verdicts, and kept items with reasons.",
+      "files": [],
+      "assertions": [
+        "Records the exact base revision (origin/main SHA) inspected",
+        "Every removal candidate cites evidence beyond its name or age (origin issue/PR state, consumer search, or census)",
+        "Kept items each name the live route, open issue, or missing proof that keeps them",
+        "States that the repository was not modified",
+        "Keeps the shipped diagnose CLI command, citing its CLI registration or docs",
+        "Keeps tools/check-container-config.sh, citing the image workflow that runs it",
+        "Does not label the design prototype as diagnostic evidence to delete"
+      ]
     }
   ]
 }
