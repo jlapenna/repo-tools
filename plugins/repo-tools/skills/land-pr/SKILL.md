@@ -1,6 +1,6 @@
 ---
 name: land-pr
-description: "Carry a local change or existing pull request through the complete GitHub delivery lifecycle: verify and commit the intended scope, push a ready PR, monitor CI, address review feedback, reply to and resolve addressed threads, merge through branch protection, perform repository-required post-merge verification, and safely clean up branches and worktrees. Use when the user says to push, publish, ship, land, or merge a change or PR and expects completion rather than a handoff at PR creation."
+description: "Carry a local change or existing pull request through the complete GitHub delivery lifecycle: verify and commit the intended scope, push a ready PR, monitor CI, address review feedback, reply to and resolve addressed threads, merge through branch protection, perform repository-required post-merge verification, and safely clean up branches and worktrees. Use when the user says to push, publish, ship, land, or merge a change or PR and expects completion rather than a handoff at PR creation. Worktree creation and teardown belong to worktree-hygiene; CI waits outside a PR lifecycle belong to github-ci-monitor."
 ---
 
 # Land a Pull Request
@@ -8,7 +8,7 @@ description: "Carry a local change or existing pull request through the complete
 Finish the whole PR lifecycle. Do not stop after pushing a branch or opening a
 PR when the remaining gates can be completed safely.
 
-## Reconcile policy and authority
+## 1. Reconcile policy and authority
 
 1. Read the repository's `AGENTS.md`, contributing guide, and applicable local
    development or release skills before mutating Git or GitHub.
@@ -21,13 +21,13 @@ PR when the remaining gates can be completed safely.
    - reply to and resolve review threads only after their feedback is addressed;
    - delete the merged feature branch and remove its clean worktree.
 4. Loading a skill does not create authorization. Honor explicit local-only,
-   review-only, no-fetch, or no-publication limits. Do not bypass hooks or protection,
-   force-push, change unrelated issues, deploy unrelated services, discard a
-   dirty checkout, or guess through ambiguous feedback.
+   review-only, no-fetch, or no-publication limits. Do not bypass hooks or
+   protection, force-push, change unrelated issues, deploy unrelated services,
+   discard a dirty checkout, or guess through ambiguous feedback.
 5. Prefer a ready PR and squash merge unless the user or repository specifies
    otherwise. Create a draft only when explicitly requested or required.
 
-## Prepare the change
+## 2. Prepare the change
 
 1. Load and follow `worktree-hygiene` before Git mutation. Keep implementation,
    commits, and PR updates in an isolated feature worktree when concurrency is
@@ -41,21 +41,18 @@ PR when the remaining gates can be completed safely.
    head branch from local evidence rather than assumption.
 6. Use the installed `gh` command with its normal user login for interactive
    delivery. Do not put an identity-selecting wrapper named `gh` on `PATH` or
-   inject a repository-scoped App token across the lifecycle: Git credential
-   helpers, repository administration, and merge operations need one stable
-   authentication boundary. A repository-specific workflow may explicitly
-   supply an App token at its own automation boundary.
+   inject a repository-scoped App token across the lifecycle. A
+   repository-specific workflow may supply an App token only at its own
+   automation boundary; read
+   [authentication and provenance](references/authentication-and-provenance.md)
+   before changing which identity drives a delivery.
 
-## Open the PR
+## 3. Open the PR
 
-Create a ready PR with a concise title and body covering:
-
-- what changed;
-- why it changed and the root cause for fixes;
-- user or operational impact;
-- verification already performed;
-- provider/session or work-item provenance when the change was agent-authored;
-- issue-closing syntax only when the merged PR fully completes that issue.
+Create a ready PR with a concise title and a body covering what changed; why,
+with the root cause for fixes; user or operational impact; verification already
+performed; provider/session or work-item provenance when agent-authored; and
+issue-closing syntax only when the merged PR fully completes that issue.
 
 Request a reviewer only when the PR author differs from that reviewer; GitHub
 silently drops a review request for the PR's own author.
@@ -63,38 +60,39 @@ silently drops a review request for the PR's own author.
 Confirm required checks were actually created and that the PR head SHA matches
 the pushed commit. Arm protected auto-merge when supported, but keep monitoring.
 
-## Shepherd CI and review
+## 4. Shepherd CI and review
 
-Prefer a repository-provided lifecycle watcher when one exists. Otherwise use
-the watcher bundled with this plugin after arming auto-merge. Derive an
+Prefer a repository-provided lifecycle watcher when one exists. Otherwise run
+the watcher bundled with this plugin after arming auto-merge, as a background
+task whose wait you bound with a caller-side deadline (see `github-ci-monitor`);
+do not kill it merely because a protected merge queue is quiet. Derive an
 absolute plugin root from the path used to read this file (two directories
 above this `SKILL.md`), call it `$REPO_TOOLS_PLUGIN_ROOT`, and run from the
 target repository's checkout or pass `--repo <owner/name>`:
 
 ```bash
-bash "$REPO_TOOLS_PLUGIN_ROOT/scripts/repo-watch-prs.sh" <pr-number> [<pr-number>...]
+bash "$REPO_TOOLS_PLUGIN_ROOT/scripts/repo-watch-prs.sh" [--repo <owner/name>] <pr-number> [<pr-number>...]
 ```
 
 An npm installation of `@jlapenna/repo-tools` also exposes the equivalent
-`repo-watch-prs` command on `PATH`, but a plugin-only installation does not
-depend on that package.
-
-The default matches a non-strict ruleset and ignores `BEHIND`; pass `--strict`
-only when branch protection actually requires an up-to-date head.
+`repo-watch-prs` command on `PATH`; a plugin-only installation does not depend
+on that package. The default matches a non-strict ruleset and ignores
+`BEHIND`; pass `--strict` only when branch protection actually requires an
+up-to-date head.
 
 The watcher exits successfully only after every PR is actually merged. An
 `ATTENTION` verdict is a handoff back into the loop below, not a terminal
 status: diagnose the reported check, branch, or review-thread condition, update
 the PR, then restart the watcher against the current head.
 
-Repeat this loop until the current PR head is fully green:
+Repeat until the current PR head is fully green:
 
 1. Monitor every required check. If one fails, inspect its actual logs and load
    the repository's CI-fix skill when available. Fix the cause within scope,
    verify locally, push, and restart the loop on the new head SHA.
 2. Inspect review summaries and thread-aware inline comments. Load a
-   thread-aware review-comment skill when one is available; flat comment lists are not sufficient
-   for resolution state.
+   thread-aware review-comment skill when available; flat comment lists are not
+   sufficient for resolution state.
 3. Address every unambiguous actionable comment by default. Ask before acting
    when feedback is ambiguous, conflicts with another request, expands scope
    materially, or would introduce a regression.
@@ -107,37 +105,34 @@ Repeat this loop until the current PR head is fully green:
 6. Re-check for new comments after every push. Do not declare success while an
    actionable unresolved thread or required check remains.
 
-## Merge through protection
+## 5. Merge through protection
 
-Before merging, require all of the following:
-
-- the PR is mergeable and not a draft;
-- required checks on the current head passed;
-- actionable review feedback is addressed and its threads are resolved;
-- the intended merge method complies with repository policy;
-- no new commit invalidated the evidence.
+Before merging, require that the PR is mergeable and not a draft; required
+checks on the current head passed; actionable review feedback is addressed and
+its threads resolved; the merge method complies with repository policy; and no
+new commit invalidated the evidence.
 
 Merge or let auto-merge complete without administrative bypass. Verify the PR's
 actual `MERGED` state, merge timestamp, and merge commit; do not infer success
-from a CLI message or from checks turning green.
+from a CLI message or from checks turning green. `mergedBy` names the merge
+executor, not the implementer; preserve implementation provenance in the PR
+body and worktree-scoped commit author. Read
+[authentication and provenance](references/authentication-and-provenance.md)
+when interpreting who merged a PR.
 
-Treat `mergedBy` as the merge executor, not as implementation provenance.
-Protected auto-merge may report `github-actions`; direct merge reports the
-authenticated user or App. Preserve implementation provenance in the PR body
-and worktree-scoped commit author instead.
-
-## Verify and clean up
+## 6. Verify and clean up
 
 1. Follow repository-specific post-merge requirements. If it defines a
    canonical checkout, confirm it is clean and on the base branch, fetch, and
    fast-forward with `--ff-only`; verify its HEAD equals the upstream commit.
 2. Run live or deployment verification only when the user requested rollout or
-   repository policy makes it part of completion. Use the canonical deployment
-   identity and source when one is defined. Before attributing a failure or
-   success to the change, confirm the running or applied revision contains the
-   merge commit (for example the deploy controller's checkout or the deployed
-   image digest), and read only logs and events after that point. A run that
-   started before the change reached the deployer says nothing about it.
+   repository policy makes it part of completion, using the canonical
+   deployment identity and source when one is defined. Before attributing a
+   failure or success to the change, confirm the running or applied revision
+   contains the merge commit (for example the deploy controller's checkout or
+   the deployed image digest), and read only logs and events after that point.
+   A run that started before the change reached the deployer says nothing
+   about it.
 3. Confirm a linked issue closed only when the merged PR completed it. Do not
    close partial or follow-up work silently.
 4. Hand teardown to `worktree-hygiene`. Prove squash-merged content landed,
