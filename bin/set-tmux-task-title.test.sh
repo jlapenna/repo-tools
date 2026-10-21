@@ -52,7 +52,7 @@ test "$manual_output" = 'set @user_title for pane %42: manual pinned title'
 grep -Fx 'set-window-option -t %42 @user_title manual pinned title' "$calls"
 grep -Fx 'set-window-option -t %42 automatic-rename on' "$calls"
 grep -Fx 'refresh-client -S' "$calls"
-! grep -Fq 'display-message' "$calls"
+! grep -Fq 'display-message' "$calls" || { echo 'unexpected match: grep -Fq '\''display-message'\'' "$calls"' >&2; exit 1; }
 
 if TMUX=socket TMUX_PANE=%42 TMUX_BIN="$mock_tmux" TMUX_TEST_CALLS="$calls" \
   "$script" --force '' >"$tmpdir/stdout" 2>"$tmpdir/stderr"; then
