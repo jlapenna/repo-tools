@@ -87,7 +87,7 @@ grep -Eq "^KEEP[[:space:]].*/wt-live[[:space:]].*live" "$tmp/report"
 # 2. --delete removes exactly the SAFE set (nested child before its parent) and their branches.
 "$sweep" --repo "$primary" --base main --path "$tmp/wt-ancestor" > "$tmp/scoped" 2>&1
 [ "$(grep -c '^SAFE' "$tmp/scoped")" = 1 ]
-! grep -q 'wt-squash' "$tmp/scoped"
+! grep -q 'wt-squash' "$tmp/scoped" || { echo 'unexpected match: grep -q '\''wt-squash'\'' "$tmp/scoped"' >&2; exit 1; }
 "$sweep" --repo "$primary" --base main --delete > "$tmp/deleted" 2>&1 || { echo "delete run failed" >&2; cat "$tmp/deleted" >&2; exit 1; }
 for d in wt-squash wt-ancestor wt-parent/.claude/worktrees/child wt-parent wt-detached; do
   [ ! -e "$tmp/$d" ] || { echo "expected $d removed" >&2; cat "$tmp/deleted" >&2; exit 1; }

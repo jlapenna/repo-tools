@@ -60,7 +60,7 @@ run_watch pending
 grep -F 'PR #123: OPEN:WAITING reason=checks-pending:1' <<<"$output"
 grep -F 'PR #123: MERGED' <<<"$output"
 grep -Fqx 'VERDICT ALL-MERGED' <<<"$output"
-! grep -F 'PR #123: OPEN:BLOCKED' <<<"$output"
+! grep -F 'PR #123: OPEN:BLOCKED' <<<"$output" || { echo 'unexpected match: grep -F '\''PR #123: OPEN:BLOCKED'\'' <<<"$output"' >&2; exit 1; }
 echo 'watch-prs pending-to-merged test passed'
 
 run_watch failed

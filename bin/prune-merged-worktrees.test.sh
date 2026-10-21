@@ -85,7 +85,7 @@ export HOOK_CALLS="$scratch/calls"
 rc 0 --session-only --remove-hook "$scratch/hook"
 [[ ! -e $HOOK_CALLS ]]
 for name in claude codex manual dirty locked live open unmerged squash; do [[ -d ${!name} ]]; done
-! grep -Fq "$manual" "$scratch/report"
+! grep -Fq "$manual" "$scratch/report" || { echo 'unexpected match: grep -Fq "$manual" "$scratch/report"' >&2; exit 1; }
 grep -Eq '^KEEP.*locked' "$scratch/report"
 
 # Invalid/primary/out-of-scope named targets fail before mutation.
@@ -134,6 +134,6 @@ for hook_status in 1 75; do
   [[ ! -e $post ]]
   git -C "$repo" show-ref --verify --quiet "refs/heads/post-$hook_status"
   grep -Eq "^FAILED.*remove-hook exited $hook_status after removal; branch kept" "$scratch/report"
-  ! grep -Eq '^REMOVED' "$scratch/report"
+  ! grep -Eq '^REMOVED' "$scratch/report" || { echo 'unexpected match: grep -Eq '\''^REMOVED'\'' "$scratch/report"' >&2; exit 1; }
 done
 echo 'repo-prune-merged-worktrees: ok'
