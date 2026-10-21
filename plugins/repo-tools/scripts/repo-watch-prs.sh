@@ -54,8 +54,13 @@ interval=120
 strict=false
 repo=""
 prs=()
+usage='usage: watch-prs.sh [--strict] [--interval <seconds>] [--repo <owner/name>] <pr-number> [<pr-number>...]'
 while [ $# -gt 0 ]; do
   case "$1" in
+    -h|--help)
+      echo "$usage"
+      exit 0
+      ;;
     --interval)
       interval="$2"
       shift 2
@@ -70,6 +75,7 @@ while [ $# -gt 0 ]; do
       ;;
     -*)
       echo "unknown flag: $1" >&2
+      echo "$usage" >&2
       exit 1
       ;;
     *)
@@ -80,7 +86,7 @@ while [ $# -gt 0 ]; do
 done
 
 if [ ${#prs[@]} -eq 0 ]; then
-  echo "usage: watch-prs.sh [--strict] [--interval <seconds>] [--repo <owner/name>] <pr-number> [<pr-number>...]" >&2
+  echo "$usage" >&2
   exit 1
 fi
 

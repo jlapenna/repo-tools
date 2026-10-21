@@ -63,6 +63,10 @@ grep -Fqx 'VERDICT ALL-MERGED' <<<"$output"
 ! grep -F 'PR #123: OPEN:BLOCKED' <<<"$output" || { echo 'unexpected match: grep -F '\''PR #123: OPEN:BLOCKED'\'' <<<"$output"' >&2; exit 1; }
 echo 'watch-prs pending-to-merged test passed'
 
+help_out=$("$root/bin/watch-prs.sh" --help)
+grep -Fq 'usage: watch-prs.sh' <<<"$help_out" || { echo 'expected usage on --help' >&2; exit 1; }
+echo 'watch-prs help test passed'
+
 run_watch failed
 [ "$status" -eq 2 ]
 grep -F 'PR #123: OPEN:BLOCKED reason=checks-failed:Verify_Required' <<<"$output"
