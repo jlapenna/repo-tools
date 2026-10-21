@@ -78,8 +78,11 @@ installation also exposes `repo-watch-prs` on `PATH`; the plugin-relative
 script needs no package install.
 
 ```bash
-bash "$REPO_TOOLS_PLUGIN_ROOT/scripts/repo-watch-prs.sh" [--strict] [--interval <seconds>] <pr> [<pr>...]
+bash "$REPO_TOOLS_PLUGIN_ROOT/scripts/repo-watch-prs.sh" [--strict] [--interval <seconds>] [--repo <owner/name>] <pr> [<pr>...]
 ```
+
+Without `--repo`, run it from inside the target repository's checkout; it
+resolves the repository from cwd and exits 1 when it cannot.
 
 Use `--strict` only when the repository's branch protection requires the head
 to be current with its base. Without it, a merely-behind pull request is not an
@@ -104,7 +107,7 @@ particular, `auto-merge-unarmed` is a required decision point: use
 `gh pr merge --auto` when the repository supports protected auto-merge, or
 merge directly once all gates pass and the task authorizes delivery.
 
-Transient GitHub or network errors are reported and retried. The pull-request
+Transient GitHub or network errors after startup are reported and retried. The pull-request
 watcher has no timeout because a quiet protected merge queue is normal; stop it
 only when the owning task is intentionally abandoned or parked. The caller
 still bounds its own wait: run it in the background with a deadline and record

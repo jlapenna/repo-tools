@@ -108,8 +108,9 @@ health checks.
   the design should react to an event instead. With no files it checks every
   tracked file, so `--list` (or `git grep schedule-justification`) is the
   complete inventory. Also the `repo-check-schedules` pre-commit hook.
-- `repo-watch-prs` — watch auto-merge lifecycle for pull requests in the
-  current repository.
+- `repo-watch-prs [--strict] [--interval SECONDS] [--repo OWNER/NAME] PR...` —
+  watch auto-merge lifecycle for pull requests in the current repository, or
+  in `--repo`. An unresolvable repository exits 1 instead of retrying.
 - `repo-pr-status [--json] [--repo OWNER/NAME] [PR]` — one read-only
   snapshot of a pull request at its current head (default: the current
   branch's PR): head SHA, mergeability and merge state, required checks,

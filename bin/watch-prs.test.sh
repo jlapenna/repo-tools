@@ -7,8 +7,13 @@ trap 'rm -rf "$tmp"' EXIT
 
 cat >"$tmp/gh" <<'EOF'
 #!/usr/bin/env bash
+printf '%s\n' "$*" >>"$GH_CALLS_FILE"
 case "$*" in
-  'repo view --json owner,name --jq .owner.login + "/" + .name') echo 'owner/repo' ;;
+  'repo view --json owner,name --jq .owner.login + "/" + .name')
+    [ "$SCENARIO" = norepo ] && { echo 'not a git repository' >&2; exit 1; }
+    echo 'owner/repo'
+    ;;
+  'repo view other/name --json owner,name --jq .owner.login + "/" + .name') echo 'other/name' ;;
   *'pr view 123 --json state,mergeStateStatus,autoMergeRequest'*)
     case "$SCENARIO" in
       pending)
@@ -41,10 +46,11 @@ chmod +x "$tmp/gh"
 
 run_watch() {
   local scenario="$1"
-  rm -f "$tmp/state"
+  shift
+  rm -f "$tmp/state" "$tmp/calls"
   set +e
-  output=$(SCENARIO="$scenario" GH_STATE_FILE="$tmp/state" PATH="$tmp:$PATH" \
-    timeout 3 "$root/bin/watch-prs.sh" --interval 0 123 2>&1)
+  output=$(SCENARIO="$scenario" GH_STATE_FILE="$tmp/state" GH_CALLS_FILE="$tmp/calls" \
+    PATH="$tmp:$PATH" timeout 3 "$root/bin/watch-prs.sh" --interval 0 "$@" 123 2>&1)
   status=$?
   set -e
 }
@@ -80,3 +86,16 @@ run_watch unarmed
 grep -F 'PR #123: OPEN:BLOCKED reason=auto-merge-unarmed' <<<"$output"
 grep -Fqx 'VERDICT ATTENTION 123 auto-merge-unarmed' <<<"$output"
 echo 'watch-prs unarmed-auto-merge test passed'
+
+run_watch pending --repo other/name
+[ "$status" -eq 0 ]
+grep -Fqx 'VERDICT ALL-MERGED' <<<"$output"
+grep -q '^pr ' "$tmp/calls"
+[ -z "$(grep '^pr ' "$tmp/calls" | grep -vF -- '--repo other/name')" ]
+echo 'watch-prs explicit-repo test passed'
+
+run_watch norepo
+[ "$status" -eq 1 ]
+grep -F 'pass --repo <owner/name>' <<<"$output"
+[ "$(grep -c '^pr ' "$tmp/calls")" -eq 0 ]
+echo 'watch-prs unresolvable-repo test passed'

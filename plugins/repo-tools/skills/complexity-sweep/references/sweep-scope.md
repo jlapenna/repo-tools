@@ -43,5 +43,9 @@ findings are about.
   implementations before editing. Unrelated activity is not a reason to stop
   the sweep; a sibling session's branch, local edits and running services are
   never yours to change.
+- Sibling sessions can merge overlapping changes mid-task. Re-fetch the base
+  immediately before committing and rebase onto it; when the base renamed or
+  restructured what you are editing, adopt the new shape rather than reverting
+  it.
 - Do every edit and Git mutation in a dedicated worktree through
   [worktree-hygiene](../../worktree-hygiene/SKILL.md), and remove it at task end.

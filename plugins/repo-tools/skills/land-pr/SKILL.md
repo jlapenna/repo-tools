@@ -57,6 +57,9 @@ Create a ready PR with a concise title and body covering:
 - provider/session or work-item provenance when the change was agent-authored;
 - issue-closing syntax only when the merged PR fully completes that issue.
 
+Request a reviewer only when the PR author differs from that reviewer; GitHub
+silently drops a review request for the PR's own author.
+
 Confirm required checks were actually created and that the PR head SHA matches
 the pushed commit. Arm protected auto-merge when supported, but keep monitoring.
 
@@ -66,7 +69,7 @@ Prefer a repository-provided lifecycle watcher when one exists. Otherwise use
 the watcher bundled with this plugin after arming auto-merge. Derive an
 absolute plugin root from the path used to read this file (two directories
 above this `SKILL.md`), call it `$REPO_TOOLS_PLUGIN_ROOT`, and run from the
-target repository:
+target repository's checkout or pass `--repo <owner/name>`:
 
 ```bash
 bash "$REPO_TOOLS_PLUGIN_ROOT/scripts/repo-watch-prs.sh" <pr-number> [<pr-number>...]
@@ -130,7 +133,11 @@ and worktree-scoped commit author instead.
    fast-forward with `--ff-only`; verify its HEAD equals the upstream commit.
 2. Run live or deployment verification only when the user requested rollout or
    repository policy makes it part of completion. Use the canonical deployment
-   identity and source when one is defined.
+   identity and source when one is defined. Before attributing a failure or
+   success to the change, confirm the running or applied revision contains the
+   merge commit (for example the deploy controller's checkout or the deployed
+   image digest), and read only logs and events after that point. A run that
+   started before the change reached the deployer says nothing about it.
 3. Confirm a linked issue closed only when the merged PR completed it. Do not
    close partial or follow-up work silently.
 4. Hand teardown to `worktree-hygiene`. Prove squash-merged content landed,

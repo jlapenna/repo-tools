@@ -15,7 +15,10 @@
 # nothing pings the session; this exact gap cost hours on #4211/#4230).
 #
 # Usage:
-#   watch-prs.sh [--strict] [--interval <seconds>] <pr-number> [<pr-number>...]
+#   watch-prs.sh [--strict] [--interval <seconds>] [--repo <owner/name>] <pr-number> [<pr-number>...]
+#
+# Without --repo, the repository is resolved from cwd. An unresolvable
+# repository exits 1 at startup instead of retrying forever.
 #
 # Output: one timestamped operational state per classification change, then a
 # final verdict. GitHub's raw mergeStateStatus is deliberately not exposed:
@@ -43,12 +46,13 @@
 # This plugin-bundled file is the single implementation: consumer repositories
 # hold no copies, and the public package's `repo-watch-prs` bin is only a thin
 # wrapper around it. The script is fully repo-neutral (repository identity is
-# discovered from cwd), so no parameterization hook is needed.
+# discovered from cwd or --repo), so no parameterization hook is needed.
 
 set -euo pipefail
 
 interval=120
 strict=false
+repo=""
 prs=()
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -59,6 +63,10 @@ while [ $# -gt 0 ]; do
     --strict)
       strict=true
       shift
+      ;;
+    --repo)
+      repo="$2"
+      shift 2
       ;;
     -*)
       echo "unknown flag: $1" >&2
@@ -72,31 +80,28 @@ while [ $# -gt 0 ]; do
 done
 
 if [ ${#prs[@]} -eq 0 ]; then
-  echo "usage: watch-prs.sh [--strict] [--interval <seconds>] <pr-number> [<pr-number>...]" >&2
+  echo "usage: watch-prs.sh [--strict] [--interval <seconds>] [--repo <owner/name>] <pr-number> [<pr-number>...]" >&2
   exit 1
 fi
 
 declare -A merged=()
 declare -A last=()
 
-# Owner/name for the GraphQL review-thread query, derived once from cwd.
-repo_owner=""
-repo_name=""
-discover_repo() {
-  [ -n "$repo_owner" ] && return 0
-  if repo_json=$(gh repo view --json owner,name --jq '.owner.login + "/" + .name' 2>/dev/null); then
-    repo_owner="${repo_json%%/*}"
-    repo_name="${repo_json##*/}"
-    return 0
-  fi
-  return 1
-}
-discover_repo || true
+# Resolve owner/name once, from --repo or cwd, and pass it to every gh call.
+# Every later gh error is then a transient one worth retrying.
+if ! repo_json=$(gh repo view ${repo:+"$repo"} --json owner,name \
+  --jq '.owner.login + "/" + .name' 2>&1); then
+  echo "watch-prs: cannot resolve repository ${repo:-from $PWD}: $repo_json" >&2
+  echo "run inside the target repository's checkout or pass --repo <owner/name>" >&2
+  exit 1
+fi
+repo_owner="${repo_json%%/*}"
+repo_name="${repo_json##*/}"
+repo_args=(--repo "$repo_owner/$repo_name")
 
 unresolved_thread_count() {
   # Prints the PR's unresolved review-thread count (0 on any error, so a
   # GraphQL hiccup can never fabricate an attention verdict).
-  discover_repo || { echo 0; return; }
   local counts
   if ! counts=$(gh api graphql --paginate \
     -F owner="$repo_owner" -F name="$repo_name" -F pr="$1" -f query='
@@ -149,7 +154,8 @@ while true; do
     [ "${merged[$pr]:-}" = "1" ] && continue
 
     if ! status=$(gh pr view "$pr" --json state,mergeStateStatus,autoMergeRequest \
-      --jq '[.state, .mergeStateStatus, (.autoMergeRequest != null)] | @tsv' 2>/dev/null); then
+      --jq '[.state, .mergeStateStatus, (.autoMergeRequest != null)] | @tsv' \
+      "${repo_args[@]}" 2>/dev/null); then
       # Transient gh/network error: report once, keep watching.
       all_merged=false
       [ "${last[$pr]:-}" != "gh-error" ] && log "PR #$pr: gh lookup failed (will retry)"
@@ -195,7 +201,7 @@ while true; do
     # pass / fail / pending / skipping / cancel). The command exits
     # non-zero while anything is pending or failed; only the output
     # matters here.
-    buckets=$(gh pr checks "$pr" --required --json name,bucket 2>/dev/null || true)
+    buckets=$(gh pr checks "$pr" --required --json name,bucket "${repo_args[@]}" 2>/dev/null || true)
     # The human-readable log line keeps the original names; the verdict line
     # gets sanitized ones, because `reason` must stay one token.
     failed_raw=$(printf '%s' "$buckets" |
