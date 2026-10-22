@@ -4,10 +4,10 @@
   "private": false,
   "description": "General repository-management commands for worktree safety and CI monitoring.",
   "license": "MIT",
-  "packageManager": "pnpm@11.28.6",
+  "packageManager": "pnpm@11.28.7",
   "engines": {
     "node": "24",
-    "pnpm": "11.28.6"
+    "pnpm": "11.28.7"
   },
   "bin": {
     "repo-docs": "bin/docs.mjs",
