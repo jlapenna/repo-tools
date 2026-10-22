@@ -1,6 +1,6 @@
 ---
 name: autonomous-work
-description: Complete an authorized task without optional questions when the user says they are unavailable, AFK, unable to answer, "keep going", "don't ask me", or asks to keep working autonomously. Resolve routine ambiguity from evidence and reversible defaults, make judgment calls instead of handing back options, continue independent work around blockers, wait only on live bounded watchers, and check every item before reporting it as the user's. Use for hands-off execution of a bounded task, and again before writing the final report of an autonomous run. Do not use it to start an unsolicited backlog, schedule work, or grant new permissions.
+description: Complete a bounded, authorized task without optional questions when the user is unavailable or asks to "keep going", "don't ask me", or work autonomously. Resolve routine choices, continue around blockers, and verify completion before handing work back. Does not authorize new scope, external actions, or scheduled work.
 ---
 
 # Autonomous work
@@ -25,9 +25,8 @@ unrequested publication, deployment, deletion, spending, or messages to others.
 Do not ask again about an operation the user already authorized.
 
 Keep autonomous execution active for this task while the user is unavailable.
-Treat incoming
-corrections and status requests as steering; continue unless they ask to stop
-or change the objective. On resumption or compaction, recover scope, decisions,
+Treat incoming corrections and status requests as steering; continue unless
+they ask to stop or change the objective. On resumption or compaction, recover scope, decisions,
 completed work, and pending actions before proceeding.
 
 ## 2. Resolve each decision where it arises
@@ -46,9 +45,10 @@ completed work, and pending actions before proceeding.
 4. **Judgment calls and policy choices:** when several options are reasonable,
    pick one, say why in a sentence or two, and carry it out. If a standing rule
    requires review first (spec-first or design review), the decision is still
-   yours: write the reviewable artifact with your choice filled in, publish it
-   where the reviewer will see it, and continue other work. A spec with a
-   recommendation is finished work; a list of options without a choice hands
+   yours: prepare the reviewable artifact with your choice filled in. Post it
+   through an already-authorized review channel, or retain it locally when
+   posting needs permission. Honor the review gate before dependent actions
+   and continue independent work. A spec with a recommendation is finished work; a list of options without a choice hands
    your job back.
 5. **Consequential uncertainty:** if incompatible interpretations would change
    scope, destroy work, expose data, or require new authorization, defer the
@@ -87,12 +87,11 @@ blocked.
 
 ## 4. Wait only on a live watcher
 
-Arm each wait with the harness's background facility and record its PID or
-task ID. Bound every wait with a timeout from the task's remaining budget; a
-timeout means still pending, not success. Check a PID with `kill -0`, an exact
-process name with `pgrep -x`, or a file or service state. Never loop on
-`pgrep -f <pattern>` when the pattern appears in the loop's own command line:
-the loop matches itself and never exits.
+Use the harness's wait or background facility for asynchronous work. Keep a
+handle to the actual task, process, or run and bound the wait by a timeout
+appropriate to the task. A timeout means still pending, not success. If using a shell watcher,
+check the actual target; a `pgrep -f` pattern embedded in the watcher's own
+command can match itself indefinitely.
 
 End a turn "waiting on X" only when a live watcher you armed will wake it;
 otherwise check X now or keep working. Stop your own watchers before reporting
@@ -116,8 +115,9 @@ out. Before an item goes into your report as the user's, run these tests:
    own artifacts, or following a documented procedure: do it now, then report
    it as done.
 2. **Is it a choice between options?** Make the choice (step 2, item 4). If a
-   review gate applies, publish the artifact with the decision filled in and
-   report "spec posted with decision X, awaiting review", not "pick one".
+   review gate applies, prepare the artifact with the decision filled in and
+   report its actual location and review status, not "pick one". Posting still
+   requires an authorized channel.
 3. **Did I defer it earlier?** An item set aside earlier in the session, or one
    a compaction summary lists as left alone, gets these tests again. "I left
    them alone" records a past choice; it is not a constraint.
@@ -125,16 +125,20 @@ out. Before an item goes into your report as the user's, run these tests:
    issue body, or your own earlier note saying "needs <user>" is a guess about
    ownership. Check it against what the user actually reserved.
 
-Only these stay with the user: their credentials or identity (logins, signing,
-2FA), money or legal commitments, physical-world actions, actions the user
-explicitly reserved for themselves, and approvals a tool or policy enforces.
-For each, name the specific missing authority. "This is a policy choice" is
-not on that list. When unsure where an item falls, read the
-[boundary examples](references/boundary-examples.md).
+An item belongs with the user only when it needs authority, access, facts, or
+physical action you cannot obtain within the task. Examples include an
+interactive login, a commitment not already authorized, an explicitly reserved
+decision, or an enforced approval. Check existing tools and grants before
+calling a credential or financial operation user-only. "This is a policy
+choice" alone is not a blocker. For a missing fact, name what you checked and
+why choosing a reversible default would not suffice. Read the
+[boundary examples](references/boundary-examples.md) when the distinction is
+unclear.
 
 When the response style asks for a closing next action, under autonomy that
 action is yours: the next thing you will do, or the event you are waiting on.
-A chore for the user belongs there only when it is a reserved item above.
+A chore for the user belongs there only when it meets the blocker criteria
+above.
 
 Send concise, nonblocking updates with what now works, consequential
 assumptions, and what remains. A status question is not a reason to abandon
@@ -162,7 +166,7 @@ with its unblock condition. Distinguish implemented, verified, published, and
 deployed results. Checks of skill formatting and links do not prove that an
 agent's future behavior improved.
 
-Sort remaining items into three groups: done, still in progress (yours, with
-what you are doing next), and blocked (reserved items only, each naming the
-missing authority). There is no fourth group of things for the user to decide.
-If you are about to write one, go back to step 5.
+For any unfinished work, distinguish active work with a concrete next step
+from blocked work with a specific missing authority, capability, or fact.
+Do not turn routine choices into a user to-do list. If nothing remains, report
+completion without inventing a next action or empty status categories.
