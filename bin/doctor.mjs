@@ -16,7 +16,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const commands = Object.keys(JSON.parse(readFileSync(path.join(packageRoot, 'package.json'), 'utf8')).bin);
+const manifest = JSON.parse(readFileSync(path.join(packageRoot, 'package.json'), 'utf8'));
+const commands = Object.keys(manifest.bin);
 
 // Required by every command and hook helper; the rest serve specific commands.
 const RUNTIME = { git: true, bash: true, gh: false, jq: false };
@@ -82,6 +83,16 @@ function versions(dir) {
 const newest = (list) =>
   [...list].sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).at(-1) ?? null;
 
+// This package declares one stable major with an explicit patch floor.
+function nodeMeetsEngines(version, range) {
+  const actual = /^(\d+)\.(\d+)\.(\d+)$/.exec(version);
+  const required = /^>=(\d+)\.(\d+)\.(\d+) <(\d+)$/.exec(range);
+  if (!actual || !required) return false;
+  const [major, minor, patch] = actual.slice(1).map(Number);
+  const [floorMajor, floorMinor, floorPatch, ceiling] = required.slice(1).map(Number);
+  return major < ceiling && (major - floorMajor || minor - floorMinor || patch - floorPatch) >= 0;
+}
+
 export function diagnose({ env = process.env, cwd = process.cwd() } = {}) {
   const checks = [];
   const add = (name, status, detail) => checks.push({ name, status, detail });
@@ -96,8 +107,8 @@ export function diagnose({ env = process.env, cwd = process.cwd() } = {}) {
     // an installed package is not a git checkout
   }
 
-  const major = Number(process.versions.node.split('.')[0]);
-  add('runtime:node', major >= 24 ? 'ok' : 'warn', `${process.execPath} v${process.versions.node}${major >= 24 ? '' : ' (package engines require 24)'}`);
+  const nodeSupported = nodeMeetsEngines(process.versions.node, manifest.engines.node);
+  add('runtime:node', nodeSupported ? 'ok' : 'warn', `${process.execPath} v${process.versions.node}${nodeSupported ? '' : ` (package engines require ${manifest.engines.node})`}`);
   for (const [name, required] of Object.entries(RUNTIME)) {
     const found = which(name, env);
     add(`runtime:${name}`, found ? 'ok' : required ? 'fail' : 'warn', found ?? `missing ${name} on PATH`);

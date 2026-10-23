@@ -166,3 +166,24 @@ test('a disabled Codex plugin needs no cache', () => {
   assert.equal(status, 0);
   assert.equal(check(json, 'plugin:codex'), undefined);
 });
+
+// Exercise the real CLI with the version reported by its current process.
+// A patch floor must not be reduced to a major-only health check.
+test('runtime diagnosis rejects vulnerable patches and unsupported majors', () => {
+  const fx = fixture();
+  const preload = path.join(tmp, 'runtime-version.mjs');
+  for (const [version, expected] of [
+    ['24.22.0', 'warn'], ['24.22.1', 'ok'], ['24.23.0', 'ok'],
+    ['22.23.4', 'warn'], ['25.0.0', 'warn'], ['26.12.1', 'warn'],
+  ]) {
+    writeFileSync(preload, `Object.defineProperty(process.versions, 'node', {value: ${JSON.stringify(version)}});`);
+    const result = spawnSync(process.execPath, ['--import', preload, script, '--json'], {
+      cwd: tmp, encoding: 'utf8',
+      env: { HOME: tmp, PATH: fx.path, CODEX_HOME: fx.codex, CLAUDE_CONFIG_DIR: fx.claude },
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const runtime = check(JSON.parse(result.stdout), 'runtime:node');
+    assert.equal(runtime.status, expected, version);
+    if (expected === 'warn') assert.match(runtime.detail, /package engines require >=24\.22\.1 <25/);
+  }
+});
