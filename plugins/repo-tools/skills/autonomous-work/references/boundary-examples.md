@@ -24,3 +24,24 @@ back" in [SKILL.md](../SKILL.md).
   intended result is clear; preserve disputed changes and name the blocker
   when it is not. Other open PRs are outside this task unless included in the
   request. Do not hand a routine branch update back to the user.
+- **A contributor push encounters guidance for signed maintainer landings.**
+  Inspect which operation and role the signing requirement governs. Use the
+  documented contributor path when applicable; do not demand signing access
+  for a gate that belongs to the later upstream merge. Honor any actual
+  contributor signing requirement.
+- **Several upstream PRs await maintainer decisions; one still needs an
+  author-side fix.** Finish the fix and its authorized delivery. Record the
+  remaining upstream owners and gates. Do not mark a merge goal complete just
+  because the author work is done, or declare all work blocked while that fix
+  remains executable.
+- **"Keep going" arrives after the goal was marked blocked.** Recheck goal
+  state and the underlying blockers. Do available work now. If only the user
+  can reactivate automatic continuation, identify the supported resume action
+  explicitly; do not assume the message changed scheduler state or rewrite
+  internal storage to simulate it.
+- **A required local test cannot collect because a private dependency is
+  unavailable.** Check existing authorized setup and access paths. If the
+  applicable workflow explicitly requires that test before pushing, hosted CI
+  is not an automatic exception. Finish independent preparation, then name
+  the missing access or scoped exception and its owner. Do not substitute a
+  stub, weaken the test, or treat an unanswered approval question as consent.
