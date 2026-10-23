@@ -29,6 +29,12 @@ Treat incoming corrections and status requests as steering; continue unless
 they ask to stop or change the objective. On resumption or compaction, recover scope, decisions,
 completed work, and pending actions before proceeding.
 
+Keep the full requested outcome in the existing task plan or tracker. Finishing
+one item, handing one item to another owner, or encountering one blocker does
+not finish a request covering several items. An interrupted side task does not
+cancel the parent task: honor that operation's stop or retry restriction, then
+return to independent authorized work unless the user changed the objective.
+
 ## 2. Resolve each decision where it arises
 
 1. **Missing facts:** inspect files, history, configuration, existing tools,
@@ -97,6 +103,11 @@ End a turn "waiting on X" only when a live watcher you armed will wake it;
 otherwise check X now or keep working. Stop your own watchers before reporting
 done, and name any you deliberately leave running by PID or task ID.
 
+Another session watching an item establishes ownership of that item, not a
+wakeup for this session or a blocker for the rest of your task. Preserve its
+operation, finish independent work, and verify how your own session will resume
+before describing a wait as active.
+
 Before handing back a next step or asking approval for routine follow-through,
 check its live state: PR and issue comments, workflow or deploy runs, or the
 resource's own status output. Another session may already have done it. If it
@@ -159,6 +170,24 @@ waiting indefinitely, or claiming success. Do not schedule a retry unless the
 user requested one.
 
 ## 7. Report the actual result
+
+Before ending the turn, compare the requested outcome with the current plan
+and evidence. If a safe, authorized action remains executable, do it now. A
+status answer, explanation, plan, cleanup receipt, or promise to resume is not
+a stopping condition; send a nonblocking update and continue the work.
+
+A terminal handoff is justified when the full outcome is verified, the user
+explicitly stops or replaces the task, or every remaining action has a current
+blocker established in section 6. A verified wait may yield only through a
+supported harness mechanism that will resume this task; a final response alone
+does not arm continuation. Keep an existing goal active while work or a verified
+wait remains, subject to the harness's actual goal controls and stop conditions.
+Do not add a scheduler, retry a forbidden operation, or bypass an approval to
+manufacture continuation.
+
+For examples of premature returns and valid stopping conditions, read
+[continuation cases](references/continuation-cases.md) when deciding whether
+to hand work back.
 
 Lead with the completed outcome and its concrete artifact or location. Include
 verification actually run, consequential assumptions, and any unfinished action
