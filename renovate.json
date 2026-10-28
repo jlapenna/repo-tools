@@ -8,9 +8,5 @@
       "matchPackageNames": ["pnpm"],
       "matchUpdateTypes": ["major"]
     }
-  ],
-  "vulnerabilityAlerts": {
-    "enabled": true,
-    "labels": ["bot:renovate", "type:security"]
-  }
+  ]
 }

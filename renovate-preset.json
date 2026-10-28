@@ -28,6 +28,19 @@
   "toolSettings": {
     "nodeMaxMemory": 1536
   },
+  "vulnerabilityAlerts": {
+    "labels": ["bot:renovate", "type:security"]
+  },
+  "osvVulnerabilityAlerts": true,
+  "lockFileMaintenance": {
+    "enabled": true,
+    "description": [
+      "Refreshes transitive versions within their declared ranges, which security PRs cannot reach (they only bump declared dependencies). Monday-wide schedule because Mend controls hosted run timing and a narrow window can starve it (repo-tools#188). Rides the grouped automerge path like other in-range updates."
+    ],
+    "schedule": ["* * * * 1"],
+    "automerge": true,
+    "automergeType": "pr"
+  },
   "packageRules": [
     {
       "description": "Group and automerge updates that preserve the declared compatibility range",
