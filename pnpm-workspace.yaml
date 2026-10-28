@@ -7,3 +7,8 @@ allowBuilds:
 minimumReleaseAgeExclude:
   - "@jlapenna/*"
   - "@supersprinklesracing/*"
+
+# @nx/devkit's nx peer range also admits nx 24, so pnpm cannot select the
+# patched 23.x release without an override. Scoped to the vulnerable range.
+overrides:
+  "nx@>=23.0.0 <23.2.1": 23.3.1
