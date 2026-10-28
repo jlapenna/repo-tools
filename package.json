@@ -47,7 +47,7 @@
     "test": "bash bin/nx-global-cache.test.sh && bash bin/install-husky-hooks.test.sh && bash bin/check-dependencies.test.sh && bash bin/scan-live-processes.test.sh && bash bin/safe-remove-worktree.test.sh && bash bin/sweep-worktrees.test.sh && bash bin/prune-merged-worktrees.test.sh && node --test bin/park-worktrees.test.mjs bin/created-worktrees.test.mjs && bash bin/watch-prs.test.sh && bash bin/set-tmux-task-title.test.sh && bash bin/github-app-token.test.sh && bash bin/adopt-agent-identity.test.sh && node --test bin/adopt.test.mjs bin/doctor.test.mjs bin/pr-status.test.mjs bin/check-runner-labels.test.mjs bin/check-schedules.test.mjs plugins/manifests.test.mjs plugins/agent-context.test.mjs && node --test scripts/release.test.mjs renovate-preset.test.mjs && pnpm run build && node --test eslint/test/consumer-contract.test.mjs && vitest run eslint/test/rules"
   },
   "dependencies": {
-    "@nx/devkit": "23.3.1",
+    "@nx/devkit": "24.0.2",
     "@typescript-eslint/utils": "8.72.1",
     "yaml": "2.9.1"
   },
