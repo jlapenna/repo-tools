@@ -81,8 +81,25 @@ env PATH="$fixture/bin:$PATH" XDG_CONFIG_HOME="$fixture/config" TEST_HEALTH_STAT
 mkdir -p node_modules/.bin
 printf '#!/bin/sh\necho direct-nx "$@"\n' > node_modules/.bin/nx
 chmod +x node_modules/.bin/nx
-out="$(env PATH="$fixture/bin:$PATH" XDG_CONFIG_HOME="$fixture/config" TEST_HEALTH_STATUS=7 \
-  TEST_EXPECTED_SERVER=unused TEST_EXPECTED_TOKEN=unused bash "$here/nx.sh" --version)"
-[[ "$out" == "direct-nx --outputStyle=stream --version" ]] || { echo "unexpected: $out" >&2; exit 45; }
+direct() {
+  env PATH="$fixture/bin:$PATH" XDG_CONFIG_HOME="$fixture/config" TEST_HEALTH_STATUS=7 \
+    TEST_EXPECTED_SERVER=unused TEST_EXPECTED_TOKEN=unused bash "$here/nx.sh" "$@"
+}
+out="$(direct --version)"
+[[ "$out" == "direct-nx --version" ]] || { echo "unexpected: $out" >&2; exit 45; }
+# `--outputStyle=stream` reaches only the task-running commands and the
+# `nx <target> [project]` shorthand. `nx migrate` swallows the flag and applies
+# nothing ("No updates were applied"), so it and the other non-task commands
+# run without it.
+out="$(direct run-many -t build)"
+[[ "$out" == "direct-nx --outputStyle=stream run-many -t build" ]] || { echo "unexpected: $out" >&2; exit 46; }
+out="$(direct build console --configuration=production)"
+[[ "$out" == "direct-nx --outputStyle=stream build console --configuration=production" ]] || { echo "unexpected: $out" >&2; exit 47; }
+out="$(direct migrate 24.0.2)"
+[[ "$out" == "direct-nx migrate 24.0.2" ]] || { echo "unexpected: $out" >&2; exit 48; }
+out="$(direct migrate --run-migrations)"
+[[ "$out" == "direct-nx migrate --run-migrations" ]] || { echo "unexpected: $out" >&2; exit 49; }
+out="$(direct show project console --json)"
+[[ "$out" == "direct-nx show project console --json" ]] || { echo "unexpected: $out" >&2; exit 50; }
 rm -r node_modules
 echo 'account-wide Nx cache fallback passed'
