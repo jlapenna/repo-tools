@@ -226,15 +226,35 @@ if [ -z "${NODE_COMPILE_CACHE:-}" ]; then
   export NODE_COMPILE_CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/node-compile-cache"
 fi
 
+# `--outputStyle=stream` is a task-runner option: `run`, `run-many`,
+# `affected`, `release` and the `nx <target> [project]` shorthand declare it.
+# Nx's other commands do not, and `nx migrate <version>` in particular swallows
+# the unknown flag, applies nothing and reports "No updates were applied"
+# (sprinkles and agent-lcars Nx 24.0.2 upgrades, 2026-10-28, had to bypass this
+# wrapper). Add the flag only when the first argument is not one of Nx 24's
+# non-task commands (or their aliases), so unknown first arguments still get
+# it as a project target.
+case "${1:-}" in
+"" | -h | --help | -v | --version | \
+  add | c | connect | connect-to-nx-cloud | completion | configure-ai-agents | \
+  daemon | exec | fix-ci | start-ci-run | complete-ci-run | record | \
+  format | format:check | format:write | g | generate | graph | dep-graph | \
+  import | init | list | login | logout | mcp | migrate | new | \
+  register | activate-powerpack | repair | report | reset | clear-cache | \
+  show | sync | sync:check | view-logs | watch | \
+  apply-locally | download-cloud-client | start-agent | start-nx-agents | stop-all-agents) ;;
+*) set -- --outputStyle=stream "$@" ;;
+esac
+
 # Run the workspace-local nx binary directly when it is present. `pnpm exec`
 # stays resident as a waiting parent (~145 MiB RSS) for the whole Nx run, which
 # a memory-bounded CI runner pays on top of every task; Nx already puts
 # node_modules/.bin on PATH for the commands it runs. pnpm exec remains the
 # fallback, e.g. from a directory without node_modules.
 if [ -x "./node_modules/.bin/nx" ]; then
-  exec ./node_modules/.bin/nx --outputStyle=stream "$@"
+  exec ./node_modules/.bin/nx "$@"
 elif command -v pnpm >/dev/null 2>&1; then
-  exec pnpm exec nx --outputStyle=stream "$@"
+  exec pnpm exec nx "$@"
 else
   echo "CRITICAL: pnpm or nx NOT FOUND"
   exit 1
