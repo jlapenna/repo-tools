@@ -173,8 +173,8 @@ test('runtime diagnosis rejects vulnerable patches and unsupported majors', () =
   const fx = fixture();
   const preload = path.join(tmp, 'runtime-version.mjs');
   for (const [version, expected] of [
-    ['24.22.0', 'warn'], ['24.22.1', 'ok'], ['24.23.0', 'ok'],
-    ['22.23.4', 'warn'], ['25.0.0', 'warn'], ['26.12.1', 'warn'],
+    ['26.12.0', 'warn'], ['26.12.1', 'ok'], ['26.13.0', 'ok'],
+    ['24.22.2', 'warn'], ['25.0.0', 'warn'], ['27.0.0', 'warn'],
   ]) {
     writeFileSync(preload, `Object.defineProperty(process.versions, 'node', {value: ${JSON.stringify(version)}});`);
     const result = spawnSync(process.execPath, ['--import', preload, script, '--json'], {
@@ -184,6 +184,6 @@ test('runtime diagnosis rejects vulnerable patches and unsupported majors', () =
     assert.equal(result.status, 0, result.stderr);
     const runtime = check(JSON.parse(result.stdout), 'runtime:node');
     assert.equal(runtime.status, expected, version);
-    if (expected === 'warn') assert.match(runtime.detail, /package engines require >=24\.22\.1 <25/);
+    if (expected === 'warn') assert.match(runtime.detail, /package engines require >=26\.12\.1 <27/);
   }
 });
