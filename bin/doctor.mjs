@@ -86,11 +86,14 @@ const newest = (list) =>
 // This package declares one stable major with an explicit patch floor.
 function nodeMeetsEngines(version, range) {
   const actual = /^(\d+)\.(\d+)\.(\d+)$/.exec(version);
-  const required = /^>=(\d+)\.(\d+)\.(\d+) <(\d+)$/.exec(range);
-  if (!actual || !required) return false;
+  if (!actual) return false;
   const [major, minor, patch] = actual.slice(1).map(Number);
-  const [floorMajor, floorMinor, floorPatch, ceiling] = required.slice(1).map(Number);
-  return major < ceiling && (major - floorMajor || minor - floorMinor || patch - floorPatch) >= 0;
+  return range.split('||').some((alternative) => {
+    const required = /^>=(\d+)\.(\d+)\.(\d+) <(\d+)$/.exec(alternative.trim());
+    if (!required) return false;
+    const [floorMajor, floorMinor, floorPatch, ceiling] = required.slice(1).map(Number);
+    return major < ceiling && (major - floorMajor || minor - floorMinor || patch - floorPatch) >= 0;
+  });
 }
 
 export function diagnose({ env = process.env, cwd = process.cwd() } = {}) {
