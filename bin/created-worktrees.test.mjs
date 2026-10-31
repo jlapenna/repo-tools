@@ -62,6 +62,29 @@ test('landed checkouts are removed outright, leftover edits included, and never 
     const report=f.prune();assert.equal(report.status,0,report.stderr);assert.match(report.stdout,/SAFE.*landed:ancestor/);
     const r=f.prune('--delete');assert.equal(r.status,0,r.stderr+r.stdout);
     assert.match(r.stdout,/REMOVED/);assert.equal(existsSync(f.path),false);assert.deepEqual(f.archives(),[]);
+    // Checkout retirement keeps the branch even when it skips the archive.
+    assert.match(f.git('branch','--list','feature'),/feature/);
+  }
+  // A primary parked on the checkout's unmerged commit does not make it landed.
+  {
+    const f=fixture(t);
+    writeFileSync(join(f.root,'bin','gh'),'#!/bin/sh\nprintf "[[]]\\n"\n',{mode:0o700});
+    writeFileSync(join(f.path,'mixed'),'unlanded\n');f.git('-C',f.path,'commit','-qam','unlanded');
+    f.git('checkout','-q','--detach',f.git('-C',f.path,'rev-parse','HEAD'));
+    const r=f.prune('--delete');assert.equal(r.status,0,r.stderr+r.stdout);
+    assert.match(r.stdout,/PARKED/);assert.equal(f.archives().length,1);
+  }
+  // A landed parent never takes a nested checkout with it.
+  {
+    const f=fixture(t),child=join(f.path,'nested-child');
+    writeFileSync(join(f.root,'bin','gh'),'#!/bin/sh\nprintf "[[]]\\n"\n',{mode:0o700});
+    f.git('worktree','add','-qb','child',child);f.git('worktree','lock',child);
+    writeFileSync(join(child,'mixed'),'child work\n');
+    for(const mode of [['--retire-created-hours','72'],['--park-unmerged']]) {
+      const r=f.run('bash',[join(here,'prune-merged-worktrees.sh'),'--repo',f.primary,...mode,'--delete',f.path]);
+      assert.equal(r.status,1,r.stderr+r.stdout);assert.match(r.stdout,/KEEP.*nested-worktree/);
+      assert.equal(readFileSync(join(child,'mixed'),'utf8'),'child work\n');assert.deepEqual(f.archives(),[]);
+    }
   }
   // Unlanded work in the same mode is still archived.
   const f=fixture(t);
