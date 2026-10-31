@@ -73,18 +73,27 @@ COMMON=$(git -C "$REPO" rev-parse --path-format=absolute --git-common-dir 2>/dev
   { echo "not a git repository: $REPO" >&2; exit 1; }
 RECORDS=$(git --git-dir="$COMMON" worktree list --porcelain)
 PRIMARY=$(printf '%s\n' "$RECORDS" | sed -n 's/^worktree //p' | head -n 1)
+# Landing is judged against the integration branch, never the primary's HEAD:
+# a primary parked on an unmerged commit must not make that commit "landed".
+# Retirement without an integration branch archives instead.
 if [ -z "$BASE" ]; then
-  if [[ $PARK_INACTIVE == true || $CREATED_HOURS != 0 ]]; then BASE=HEAD
-  elif git -C "$PRIMARY" rev-parse -q --verify origin/main >/dev/null 2>&1; then BASE=origin/main
-  else BASE=main; fi
+  if git -C "$PRIMARY" rev-parse -q --verify origin/main >/dev/null 2>&1; then BASE=origin/main
+  elif [[ $PARK_INACTIVE != true && $CREATED_HOURS == 0 ]] ||
+    git -C "$PRIMARY" rev-parse -q --verify main >/dev/null 2>&1; then BASE=main
+  fi
 fi
-git -C "$PRIMARY" rev-parse -q --verify "$BASE^{commit}" >/dev/null || { echo "unknown base ref: $BASE" >&2; exit 1; }
-
-BASE=$(git -C "$PRIMARY" rev-parse "$BASE^{commit}")
+if [ -n "$BASE" ]; then
+  git -C "$PRIMARY" rev-parse -q --verify "$BASE^{commit}" >/dev/null || { echo "unknown base ref: $BASE" >&2; exit 1; }
+  BASE=$(git -C "$PRIMARY" rev-parse "$BASE^{commit}")
+fi
 # Landed work is finished, so the archiving modes remove it instead.
 archiving() { [[ $CREATED_HOURS != 0 || $PARK_INACTIVE == true || $PARK_UNMERGED == true ]]; }
 # Retirement modes keep working without GitHub; they only lose the landed check.
 needs_prs() { [[ $PARK_INACTIVE != true && $CREATED_HOURS == 0 ]]; }
+landed_evidence() {
+  [[ -n $BASE ]] || { echo unverified:no-integration-base; return 1; }
+  cleanup_evidence "$PRIMARY" "$BASE" "$1" "$2"
+}
 
 if ! cleanup_load_prs "$PRIMARY"; then
   if ! needs_prs; then
@@ -102,14 +111,14 @@ worktree_evidence() {
     reason=$(python3 "$here/created-worktree.py" eligible "$3" "$CREATED_HOURS" 2>&1) || {
       echo "$reason"; return 1;
     }
-    if landed=$(cleanup_evidence "$PRIMARY" "$BASE" "$1" "$2" 2>/dev/null); then echo "$landed"; else echo "$reason"; fi
+    if landed=$(landed_evidence "$1" "$2" 2>/dev/null); then echo "$landed"; else echo "$reason"; fi
     return 0
   fi
   # Explicit cold-checkout retirement does not discard Git history or claim a
   # merge. Local inactivity/occupancy and preservation are its authority; PRs
   # and branches remain available. Landed work is removed, never archived.
   if [[ $PARK_INACTIVE == true ]]; then
-    if landed=$(cleanup_evidence "$PRIMARY" "$BASE" "$1" "$2" 2>/dev/null); then echo "$landed"; else echo parkable:inactive; fi
+    if landed=$(landed_evidence "$1" "$2" 2>/dev/null); then echo "$landed"; else echo parkable:inactive; fi
     return 0
   fi
   if reason=$(cleanup_evidence "$PRIMARY" "$BASE" "$1" "$2"); then
@@ -202,7 +211,7 @@ while IFS= read -r line; do
         elif [ "$locked" = true ]; then
           emit KEEP "$path" "$branch" "locked"
         elif [[ $CREATED_HOURS == 0 ]] && dirty=$(dirty_count "$path") && [ "$dirty" -gt 0 ] &&
-          ! { archiving && cleanup_evidence "$PRIMARY" "$BASE" "$branch" "$head" >/dev/null 2>&1; }; then
+          ! { archiving && landed_evidence "$branch" "$head" >/dev/null 2>&1; }; then
           emit KEEP "$path" "$branch" "dirty: $dirty uncommitted change(s)"
         elif ! live=$(live_count "$path"); then
           emit KEEP "$path" "$branch" 'occupancy-unverifiable'
@@ -269,7 +278,13 @@ for i in $order; do
   # The remover re-checks live processes and cleanliness right before acting.
   # Archiving modes reach here only with landed evidence, whose leftovers go.
   remover=$REMOVER
-  if archiving; then remover="$here/remove-landed-worktree.sh"; fi
+  if archiving; then
+    # A parent's landing never authorizes deleting a checkout nested inside it.
+    if git --git-dir="$COMMON" worktree list --porcelain | sed -n 's/^worktree //p' | awk -v p="$p/" 'index($0, p) == 1 { found=1 } END { exit !found }'; then
+      emit KEEP "$p" "$b" 'nested-worktree-inside'; continue
+    fi
+    remover="$here/remove-landed-worktree.sh"
+  fi
   hook_status=0
   if [[ -n $REMOVE_HOOK ]]; then
     out=$("$REMOVE_HOOK" "$p" "$remover" 2>&1) || hook_status=$?
@@ -294,7 +309,10 @@ for i in $order; do
     continue
   fi
   note="removed"
-  if [ -n "$b" ]; then
+  # Checkout retirement keeps every branch; only merged-cleanup deletes them.
+  if [ -n "$b" ] && ! needs_prs; then
+    note="removed; branch $b kept"
+  elif [ -n "$b" ]; then
     if cleanup_delete_branch "$PRIMARY" "$b" "$h" false >/dev/null 2>&1; then note="removed; branch $b deleted"; else note="removed; branch $b kept (occupied or changed)"; fi
   fi
   emit REMOVED "$p" "$b" "$note"

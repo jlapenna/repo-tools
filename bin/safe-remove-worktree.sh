@@ -385,6 +385,17 @@ if [ "$dirty" -gt 0 ] && [ "$FORCE_ANYWAY" != true ] && [ "$DISCARD_CHANGES" != 
   exit 3
 fi
 
+# Discarding a landed checkout's changes must not take a nested checkout with
+# it: the uncommitted-change refusal is what normally protects those.
+if [ "$DISCARD_CHANGES" = true ]; then
+  nested=$(git --git-dir="$GIT_COMMON_DIR" worktree list --porcelain | sed -n 's/^worktree //p' | awk -v p="$WT_ABS/" 'index($0, p) == 1 { print; exit }')
+  [ -n "$nested" ] || nested=$(find "$WT_ABS" -mindepth 2 -name .git -print -quit 2>/dev/null || true)
+  if [ -n "$nested" ]; then
+    echo "REFUSING: $WT_ABS contains another checkout ($nested); remove it first." >&2
+    exit 3
+  fi
+fi
+
 echo "== removing $WT_ABS =="
 if [ "$DRY_RUN" = true ]; then
   echo "DRY RUN: git --git-dir=\"$GIT_COMMON_DIR\" worktree remove \"$WT_ABS\" --force"
