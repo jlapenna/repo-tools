@@ -11,7 +11,7 @@ minimumReleaseAgeExclude:
 # @nx/devkit's nx peer range also admits nx 24, so pnpm cannot select the
 # patched 23.x release without an override. Scoped to the vulnerable range.
 overrides:
-  "nx@>=23.0.0 <23.2.1": 24.0.2
+  "nx@>=23.0.0 <23.2.1": 24.0.3
   # nx 23.3.1 (and 24.x) pin undici 7.29.0 exactly; no nx release carries
   # the patched 7.30.1 yet. Scoped to the vulnerable range.
   "undici@>=7.0.0 <7.30.1": 7.30.1
