@@ -15,6 +15,9 @@
 # Anything else is KEEP with the reason. Nothing is removed without --delete.
 # Nested worktrees are removed before their parents. Removal goes through
 # safe-remove-worktree, which re-checks live processes and cleanliness.
+# Archiving modes (--park-*, --retire-created-hours) never archive landed work:
+# a verified-landed checkout is removed outright and its leftover uncommitted
+# files are discarded. Without PR data they fall back to archiving.
 #
 # Output: one tab-separated line per worktree: VERDICT  path  branch  reason,
 # where VERDICT is SAFE, REMOVED, FAILED, or KEEP. Lines starting with '#' are
@@ -78,26 +81,37 @@ fi
 git -C "$PRIMARY" rev-parse -q --verify "$BASE^{commit}" >/dev/null || { echo "unknown base ref: $BASE" >&2; exit 1; }
 
 BASE=$(git -C "$PRIMARY" rev-parse "$BASE^{commit}")
-if [[ $PARK_INACTIVE != true && $CREATED_HOURS == 0 ]]; then
-  if ! cleanup_load_prs "$PRIMARY"; then
-    if [[ -n $CLEANUP_PRS_AUTH_FAILED ]]; then
-      echo '# ERROR: GitHub rejected the gh credential; PR verdicts are impossible until it is repaired' >&2
-    else
-      echo '# PR data unavailable; keeping unverified worktrees' >&2
-    fi
+# Landed work is finished, so the archiving modes remove it instead.
+archiving() { [[ $CREATED_HOURS != 0 || $PARK_INACTIVE == true || $PARK_UNMERGED == true ]]; }
+# Retirement modes keep working without GitHub; they only lose the landed check.
+needs_prs() { [[ $PARK_INACTIVE != true && $CREATED_HOURS == 0 ]]; }
+
+if ! cleanup_load_prs "$PRIMARY"; then
+  if ! needs_prs; then
+    echo '# PR data unavailable; landed checkouts are archived like unmerged ones' >&2
+  elif [[ -n $CLEANUP_PRS_AUTH_FAILED ]]; then
+    echo '# ERROR: GitHub rejected the gh credential; PR verdicts are impossible until it is repaired' >&2
+  else
+    echo '# PR data unavailable; keeping unverified worktrees' >&2
   fi
 fi
 
 worktree_evidence() {
   local reason
   if [[ $CREATED_HOURS != 0 ]]; then
-    python3 "$here/created-worktree.py" eligible "$3" "$CREATED_HOURS" 2>&1
-    return $?
+    reason=$(python3 "$here/created-worktree.py" eligible "$3" "$CREATED_HOURS" 2>&1) || {
+      echo "$reason"; return 1;
+    }
+    if landed=$(cleanup_evidence "$PRIMARY" "$BASE" "$1" "$2" 2>/dev/null); then echo "$landed"; else echo "$reason"; fi
+    return 0
   fi
   # Explicit cold-checkout retirement does not discard Git history or claim a
   # merge. Local inactivity/occupancy and preservation are its authority; PRs
-  # and branches remain available. No GitHub lookup or write is needed.
-  if [[ $PARK_INACTIVE == true ]]; then echo parkable:inactive; return 0; fi
+  # and branches remain available. Landed work is removed, never archived.
+  if [[ $PARK_INACTIVE == true ]]; then
+    if landed=$(cleanup_evidence "$PRIMARY" "$BASE" "$1" "$2" 2>/dev/null); then echo "$landed"; else echo parkable:inactive; fi
+    return 0
+  fi
   if reason=$(cleanup_evidence "$PRIMARY" "$BASE" "$1" "$2"); then
     echo "$reason"; return 0
   fi
@@ -187,7 +201,8 @@ while IFS= read -r line; do
           emit KEEP "$path" "$branch" "directory missing (git worktree prune)"
         elif [ "$locked" = true ]; then
           emit KEEP "$path" "$branch" "locked"
-        elif [[ $CREATED_HOURS == 0 ]] && dirty=$(dirty_count "$path") && [ "$dirty" -gt 0 ]; then
+        elif [[ $CREATED_HOURS == 0 ]] && dirty=$(dirty_count "$path") && [ "$dirty" -gt 0 ] &&
+          ! { archiving && cleanup_evidence "$PRIMARY" "$BASE" "$branch" "$head" >/dev/null 2>&1; }; then
           emit KEEP "$path" "$branch" "dirty: $dirty uncommitted change(s)"
         elif ! live=$(live_count "$path"); then
           emit KEEP "$path" "$branch" 'occupancy-unverifiable'
@@ -212,7 +227,7 @@ done <<<"$RECORDS
 
 # A dead credential pins every worktree KEEP on every run, so fail loudly
 # (EX_NOPERM) instead of reporting a clean sweep. Nothing can be SAFE here.
-if [[ -n ${CLEANUP_PRS_AUTH_FAILED:-} ]]; then
+if [[ -n ${CLEANUP_PRS_AUTH_FAILED:-} ]] && needs_prs; then
   echo '# ERROR: gh credential rejected (bad credentials / not logged in); KEEP unverified:gh-auth-failed is not a verdict.' >&2
   echo '# Fix on this host as this user: gh auth status, then gh auth login -h github.com' >&2
   exit 77
@@ -226,7 +241,7 @@ order=$(for i in "${!safe_paths[@]}"; do printf '%s\t%s\n' "$(tr -cd '/' <<<"${s
 for i in $order; do
   p=${safe_paths[$i]}; b=${safe_branches[$i]}
   h=${safe_heads[$i]}
-  if { [[ $PARK_INACTIVE != true && $CREATED_HOURS == 0 ]] && ! cleanup_load_prs "$PRIMARY"; } ||
+  if { needs_prs && ! cleanup_load_prs "$PRIMARY"; } ||
     ! current_reason=$(worktree_evidence "$b" "$h" "$p") ||
     [[ $(git -C "$p" rev-parse HEAD) != "$h" ]] ||
     { [[ $CREATED_HOURS == 0 ]] && ! cleanup_worktree_idle "$p" "$b" "$IDLE_HOURS" >/dev/null; }; then
@@ -252,11 +267,14 @@ for i in $order; do
     continue
   fi
   # The remover re-checks live processes and cleanliness right before acting.
+  # Archiving modes reach here only with landed evidence, whose leftovers go.
+  remover=$REMOVER
+  if archiving; then remover="$here/remove-landed-worktree.sh"; fi
   hook_status=0
   if [[ -n $REMOVE_HOOK ]]; then
-    out=$("$REMOVE_HOOK" "$p" "$REMOVER" 2>&1) || hook_status=$?
+    out=$("$REMOVE_HOOK" "$p" "$remover" 2>&1) || hook_status=$?
   else
-    out=$("$REMOVER" "$p" 2>&1) || true
+    out=$("$remover" "$p" 2>&1) || true
   fi
   [[ -z $out ]] || printf '%s\n' "$out" >&2
   if [[ $hook_status != 0 ]]; then

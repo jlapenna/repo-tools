@@ -17,6 +17,10 @@ repo-prune-merged-worktrees --repo <primary> --retire-created-hours 72 <checkout
 repo-prune-merged-worktrees --repo <primary> --retire-created-hours 72 --delete <checkout>
 ```
 
+A checkout whose exact head is verified landed is removed outright, leftover
+uncommitted files included; landed work is never archived. Only unlanded work,
+or work whose landing GitHub cannot confirm, is archived.
+
 Pass the documented consumer resource adapter in audit and apply. This mode
 keeps branches and exact committed history, an independent index and staged
 objects, dirty working files and their absences, and private ignored/untracked
