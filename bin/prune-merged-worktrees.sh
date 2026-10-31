@@ -29,15 +29,19 @@ reported repo-restore-worktree command. Missing PR data still keeps work.
 checkout/ref activity within N hours, checked again before removal.
 
 --park-inactive is explicit cold-checkout retirement, requiring a positive
---idle-hours window. It archives even an open-PR or already-merged checkout,
-always keeps branches/history, and performs no GitHub reads or writes.
-Local writes, live processes, dirty/locked/nested checkouts and resource
-adapter refusals still keep it.
+--idle-hours window. It archives even an open-PR checkout and always keeps
+branches/history. Local writes, live processes, dirty/locked/nested checkouts
+and resource adapter refusals still keep it.
+
+Landed work is never archived. In every archiving mode a checkout whose exact
+head is verified landed is removed outright, leftover uncommitted files
+included. GitHub is read only to prove landing; without it, retirement modes
+archive as before.
 
 --retire-created-hours N is explicitly authorized checkout retirement measured
 from the Git link file's reliable creation time. Recent edits do not renew age.
 It preserves dirty files, staging state, exact history and private local inputs
-in a verified recovery snapshot before removal, without GitHub access. Live,
+of unlanded work in a verified recovery snapshot before removal. Live,
 locked, nested, split/sparse-index and in-progress-operation checkouts stay.
 Use the owner's positive creation-age window; unknown creation age stays.
 

@@ -169,6 +169,10 @@ not reads. Recent, dirty, live, locked, nested, open-PR-owned, and unverifiable
 checkouts stay. Pass the consumer's documented resource adapter in audit and
 apply just as for merged removal. Do not bypass a refusal.
 
+Never archive landed work. In every parking or retirement mode, a checkout
+whose exact head is verified landed is removed outright and its leftover
+uncommitted files are discarded; archives exist only for unlanded work.
+
 The report supplies `repo-restore-worktree <archive-directory>`, also saved
 beside the private manifest. Reinstall dependencies through the repository's
 setup command after restoration. Do not share archives: ignored local inputs
@@ -177,8 +181,9 @@ may contain credentials. Archive disposal is separate from checkout cleanup.
 If the owner authorizes retirement by inactivity regardless of PR status, use
 `--park-inactive --idle-hours 36` instead of `--park-unmerged`, restricted to
 the authorized paths. It needs a positive window and Linux process evidence,
-preserves every branch and exact commit, and archives non-cache local files.
-It performs no GitHub reads or writes and does not require a merge. An open PR
+preserves every branch and exact commit, and archives non-cache local files
+of unlanded work. It reads GitHub only to prove landing and does not require a
+merge. An open PR
 alone does not retain a checkout in this explicitly selected mode; recent
 writes, live processes, locks, dirty/nested trees, and consumer resource
 refusals still do. Retiring the local checkout does not abandon or finish its

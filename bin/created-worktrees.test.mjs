@@ -54,6 +54,23 @@ test('creation-age mode is explicit, has no audit side effects, and rejects fres
   assert.equal(f.prune('--park-inactive','--idle-hours','72').status,2);
 });
 
+test('landed checkouts are removed outright, leftover edits included, and never archived',t=>{
+  for(const state of ['clean','dirty']) {
+    const f=fixture(t);
+    writeFileSync(join(f.root,'bin','gh'),'#!/bin/sh\nprintf "[[]]\\n"\n',{mode:0o700});
+    if(state==='dirty'){writeFileSync(join(f.path,'mixed'),'leftover\n');writeFileSync(join(f.path,'untracked'),'leftover\n');}
+    const report=f.prune();assert.equal(report.status,0,report.stderr);assert.match(report.stdout,/SAFE.*landed:ancestor/);
+    const r=f.prune('--delete');assert.equal(r.status,0,r.stderr+r.stdout);
+    assert.match(r.stdout,/REMOVED/);assert.equal(existsSync(f.path),false);assert.deepEqual(f.archives(),[]);
+  }
+  // Unlanded work in the same mode is still archived.
+  const f=fixture(t);
+  writeFileSync(join(f.root,'bin','gh'),'#!/bin/sh\nprintf "[[]]\\n"\n',{mode:0o700});
+  writeFileSync(join(f.path,'mixed'),'unlanded\n');f.git('-C',f.path,'commit','-qam','unlanded');
+  const r=f.prune('--delete');assert.equal(r.status,0,r.stderr+r.stdout);
+  assert.match(r.stdout,/PARKED/);assert.equal(f.archives().length,1);
+});
+
 test('dirty index and working files round-trip after GC, without resurrecting tracked deletions',t=>{
   const f=fixture(t);
   writeFileSync(join(f.path,'mixed'),'staged\n');f.git('-C',f.path,'add','mixed');writeFileSync(join(f.path,'mixed'),'working\n');

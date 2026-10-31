@@ -6,17 +6,22 @@
 # still-in-use or crashed-but-unmerged session, not garbage. Override only
 # after you've personally reviewed what it would refuse to remove.
 #
-# Usage: safe-remove-worktree.sh <worktree-path> [--git-dir <owner>] [--force-anyway] [--dry-run]
+# Usage: safe-remove-worktree.sh <worktree-path> [--git-dir <owner>] [--force-anyway] [--discard-changes] [--dry-run]
+#
+# --discard-changes waives only the uncommitted-change refusal. Pass it only for
+# a checkout whose exact head is verified landed (remove-landed-worktree.sh).
 set -euo pipefail
-WT="${1:?usage: safe-remove-worktree.sh <worktree-path> [--git-dir <owner>] [--force-anyway] [--dry-run]}"
+WT="${1:?usage: safe-remove-worktree.sh <worktree-path> [--git-dir <owner>] [--force-anyway] [--discard-changes] [--dry-run]}"
 shift
 FORCE_ANYWAY=false
+DISCARD_CHANGES=false
 DRY_RUN=false
 OWNER=""
 VERIFIED_SNAPSHOT=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --force-anyway) FORCE_ANYWAY=true ;;
+    --discard-changes) DISCARD_CHANGES=true ;;
     --dry-run) DRY_RUN=true ;;
     --verified-snapshot)
       [ "$#" -ge 2 ] || exit 64
@@ -372,7 +377,7 @@ if [[ -z $VERIFIED_SNAPSHOT ]]; then
   git -C "$WT_ABS" status --porcelain || true
   dirty=$(git -C "$WT_ABS" status --porcelain 2>/dev/null | wc -l)
 fi
-if [ "$dirty" -gt 0 ] && [ "$FORCE_ANYWAY" != true ] && [[ -z $VERIFIED_SNAPSHOT ]]; then
+if [ "$dirty" -gt 0 ] && [ "$FORCE_ANYWAY" != true ] && [ "$DISCARD_CHANGES" != true ] && [[ -z $VERIFIED_SNAPSHOT ]]; then
   echo "REFUSING: worktree has $dirty uncommitted change(s)." >&2
   echo "This may be un-pushed WIP from a crashed session, not garbage." >&2
   echo "Review with: git -C \"$WT_ABS\" diff" >&2
