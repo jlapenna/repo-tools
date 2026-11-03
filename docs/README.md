@@ -14,15 +14,9 @@ Use the smallest source that owns the question.
 | Maintain agent context, documentation, and skills | [`../plugins/repo-tools/skills/harness-maintenance/SKILL.md`](../plugins/repo-tools/skills/harness-maintenance/SKILL.md) |
 | Continue authorized work while the user is unavailable | [`../plugins/repo-tools/skills/autonomous-work/SKILL.md`](../plugins/repo-tools/skills/autonomous-work/SKILL.md) |
 | Maintain Renovate updates | [`../plugins/repo-tools/skills/renovate-maintenance/SKILL.md`](../plugins/repo-tools/skills/renovate-maintenance/SKILL.md) |
-| Reduce code complexity and stale maintenance paths | [`../plugins/repo-tools/skills/complexity-sweep/SKILL.md`](../plugins/repo-tools/skills/complexity-sweep/SKILL.md) |
+| Analyze or clean up complexity, legacy paths, diagnostics, or a combination | [`../plugins/repo-tools/skills/complexity-sweep/SKILL.md`](../plugins/repo-tools/skills/complexity-sweep/SKILL.md) |
 
 Command implementation and regression tests live in `bin/`; shared ESLint
 behavior lives in `eslint/`; provider manifests and skills live in `plugins/`.
 Link new durable guides here. Regenerate the interface inventory through
 `repo-docs` rather than editing it manually.
-
-Retiring obsolete legacy code and behaviors follows the
-[legacy-cleanup skill](../plugins/repo-tools/skills/legacy-cleanup/SKILL.md).
-Retiring obsolete diagnostic machinery (evidence dumps, probes, canaries,
-shipped plans) follows the
-[diagnostic-hygiene skill](../plugins/repo-tools/skills/diagnostic-hygiene/SKILL.md).

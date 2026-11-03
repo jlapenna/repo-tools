@@ -1,10 +1,10 @@
 # Sweep scope
 
-Shared by the sweep family: [complexity-sweep](../SKILL.md),
-[legacy-cleanup](../../legacy-cleanup/SKILL.md) and
-[diagnostic-hygiene](../../diagnostic-hygiene/SKILL.md). Read it once at the
-start of a sweep; it decides which repositories and which revisions the
-findings are about.
+Shared by the optional lenses in [complexity-sweep](../SKILL.md). Read it once
+at the start of a sweep; it decides which repositories and which revisions the
+findings are about. Record the selected lenses, any explicit exclusions, and
+whether the request authorizes analysis only or implementation. Preserve that
+scope across audits and handoffs.
 
 ## Select the repositories
 

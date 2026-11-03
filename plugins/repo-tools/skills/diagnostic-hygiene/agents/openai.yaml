@@ -1,3 +1,0 @@
-interface:
-  display_name: "Diagnostic Hygiene"
-  short_description: "Retire obsolete probes, evidence, and plans"

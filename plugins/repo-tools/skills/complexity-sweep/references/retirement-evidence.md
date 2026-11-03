@@ -1,8 +1,8 @@
 # Retirement evidence
 
-The lens for [legacy-cleanup](../SKILL.md). Read it before removing any
-candidate; hand it to auditors through the
-[delegated audit](../../complexity-sweep/references/delegated-audit.md).
+The legacy lens for [complexity-sweep](../SKILL.md). Read it before judging a
+legacy candidate; hand it to auditors through the
+[delegated audit](delegated-audit.md).
 
 ## What to look for
 
@@ -54,9 +54,16 @@ not preserve hypothetical compatibility forever.
 
 ## Remove the complete path
 
-Step 4 of the skill lists what goes with the branch. Also update current
-runbooks that describe the old path, and preserve historical records such as
-changelogs and incident entries.
+When implementation is authorized, remove the branch with its helpers,
+imports, flags, config examples, workflow variables and tests that exist only
+for it. Collapse callers onto the supported interface. Where old input can
+still arrive, return an actionable unsupported-input error at the existing
+validation boundary rather than silently reinterpreting it.
+
+Update current runbooks that describe the old path, and preserve historical
+records such as changelogs and incident entries. Favor deletion over another
+abstraction or a permanent audit framework. When proof is missing, name the
+census or consumer that would settle it and continue independent removals.
 
 ## Verify
 

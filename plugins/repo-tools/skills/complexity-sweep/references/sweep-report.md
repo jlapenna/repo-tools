@@ -1,7 +1,12 @@
 # Sweep delivery and report
 
-Shared by the sweep family. Read it when changes are ready to land and again
-before the final report.
+Shared by the lenses in [complexity-sweep](../SKILL.md). Read it before the
+final report and, when changes are authorized, before delivery.
+
+For analysis-only requests, skip change grouping and delivery. Report findings,
+evidence, ranking and retained candidates without making edits, opening PRs or
+creating an implementation worktree. Mark change verification as not performed
+when there was no change; do not imply that analysis verified a proposed cut.
 
 ## Group changes
 
@@ -53,12 +58,14 @@ source cleanup.
   database cases skipped does not verify the durable store; inspect the owning
   connected-backend gate when that boundary changed. Distinguish superseded or
   draft-run cancellations from failures on the current reviewed head.
-- Production actions are governed by step 4 of the calling skill.
+- Production actions are governed by the skill's "Change when authorized"
+  section and the repository's owning workflow.
 
 ## Report
 
 Per repository:
 
+- Selected lenses, explicit exclusions and actual coverage, including gaps.
 - Base revision inspected and freshness status.
 - Changes made, grouped as above, with PR URLs and merge state.
 - Candidates kept, each with the live route, open issue or missing proof that

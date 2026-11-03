@@ -1,3 +1,0 @@
-interface:
-  display_name: "Legacy Cleanup"
-  short_description: "Retire obsolete legacy code and behaviors"
