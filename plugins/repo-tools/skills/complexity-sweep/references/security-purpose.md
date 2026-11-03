@@ -85,7 +85,7 @@ encrypted data or recovery contract remains unverified. Gather reachable
 read-only evidence and continue independent work. Staged controls awaiting a
 documented external cutover are not retired merely because current entry
 points do not call them. If the original purpose
-ended, use [retirement evidence](../../legacy-cleanup/references/retirement-evidence.md)
+ended, use [retirement evidence](retirement-evidence.md)
 for every consumer class. Source cleanup does not authorize credential
 invalidation, production data conversion, relaxing access policy or deployment.
 

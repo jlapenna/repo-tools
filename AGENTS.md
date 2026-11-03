@@ -24,10 +24,8 @@ copying procedures into always-loaded context.
 | Test/CI policy | `plugins/repo-tools/skills/testing-policy/SKILL.md` | policy examples and consumer checks |
 | Harness, documentation, or skill upkeep | `plugins/repo-tools/skills/harness-maintenance/SKILL.md` | native docs checks and observed consumer use |
 | Authorized work while the user is unavailable | `plugins/repo-tools/skills/autonomous-work/SKILL.md` | task verification and an honest completion report |
-| Retire obsolete legacy code and behaviors | `plugins/repo-tools/skills/legacy-cleanup/SKILL.md` | consumer retirement evidence and supported-path checks |
-| Retire obsolete diagnostics, evidence, probes, or shipped plans | `plugins/repo-tools/skills/diagnostic-hygiene/SKILL.md` | per-candidate route evidence and closed-issue references |
 | Renovate maintenance | `plugins/repo-tools/skills/renovate-maintenance/SKILL.md` | skill-defined queue evidence |
-| Complexity or freshness sweep | `plugins/repo-tools/skills/complexity-sweep/SKILL.md` | preserved consumer contracts and concrete maintenance reduction |
+| Complexity, legacy, diagnostic or combined sweep | `plugins/repo-tools/skills/complexity-sweep/SKILL.md` | selected-lens evidence, preserved consumer contracts and concrete maintenance reduction |
 | Add or change a CLI | `ARCHITECTURE.md`, matching `bin/*.test.*` | focused test, then `pnpm test` |
 | Change plugin manifests | `ARCHITECTURE.md`, `plugins/manifests.test.mjs` | manifest and docs checks |
 | Change shared ESLint behavior | `eslint/`, consumer contract | build and rule tests |

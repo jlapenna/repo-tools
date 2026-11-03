@@ -1,7 +1,8 @@
 # Complexity candidates
 
-The lens for [complexity-sweep](../SKILL.md). Read it before ranking anything;
-hand it to auditors through the [delegated audit](delegated-audit.md).
+The complexity lens for [complexity-sweep](../SKILL.md). Read it before ranking
+complexity candidates; hand it to auditors through the
+[delegated audit](delegated-audit.md).
 
 ## What to look for
 
@@ -19,9 +20,10 @@ existing checks to find:
   [security purpose](security-purpose.md) to distinguish unnecessary machinery
   from controls with a real trust boundary or integrity contract.
 - Obsolete adapters, migrations, flags and compatibility paths, and leftover
-  diagnostic machinery. They are in scope; decide them by the stricter
-  evidence rules of [legacy-cleanup](../../legacy-cleanup/SKILL.md)
-  or [diagnostic-hygiene](../../diagnostic-hygiene/SKILL.md).
+  diagnostic machinery when those lenses are selected. Decide them by the
+  stricter evidence rules of [retirement evidence](retirement-evidence.md)
+  or [diagnostic candidates](diagnostic-candidates.md). A crossing candidate
+  needs the relevant lens before a verdict; respect explicit exclusions.
 
 Size, nesting, churn and duplicate-block matches are leads. Generated outputs,
 deployment bundles, snapshot references and independently shipped modules can

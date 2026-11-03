@@ -1,8 +1,8 @@
 # Diagnostic candidates
 
-The lens for [diagnostic-hygiene](../SKILL.md). Read it before deciding any
-candidate; hand it to auditors through the
-[delegated audit](../../complexity-sweep/references/delegated-audit.md).
+The diagnostics lens for [complexity-sweep](../SKILL.md). Read it before
+deciding a diagnostic candidate; hand it to auditors through the
+[delegated audit](delegated-audit.md).
 
 ## What to look for
 
@@ -79,3 +79,15 @@ untouched for months and run on every image, while a harness touched last
 week is obsolete if its issue closed and nothing runs it. When the consumer
 may live in another repository, check it before deleting the producer. For a
 candidate tied to an open issue, say which issue must close first.
+
+## Remove or fold when authorized
+
+Remove the artifact with its test, fixtures, CI step, debug task, catalog
+entry, skill row and router reference. Keep the durable conclusion as prose
+where the obsolete procedure used to be. Extend an ignore rule in the same
+change when an artifact slipped past it.
+
+Verify through [delivery and report](sweep-report.md). List kept candidates
+with their live route or open issue, and report load-bearing findings outside
+the sweep, such as a submodule pointing at a removed directory or a lane that
+never cut over.

@@ -350,11 +350,6 @@ The plugin exposes the authoritative skills listed in the generated inventory:
 - `harness-maintenance` applies observed feedback to documentation, skills,
   context routes, and their owning contracts. Consumers keep local truth and
   authorization; structural checks do not prove better worker behavior.
-- `diagnostic-hygiene` retires obsolete diagnostic machinery: committed
-  evidence, one-off probes and measurement harnesses, canaries for settled
-  upgrades, incident logs nobody appends, shipped plans, and CI steps guarding
-  deleted facilities. Each cut is tied to a closed issue and an empty set of
-  live routes; live monitoring and open investigations stay.
 - `autonomous-work` completes authorized tasks when the user is unavailable:
   resolve optional questions from evidence and reversible defaults, continue
   independent work around blockers, and report any unfinished actions. It is
@@ -366,9 +361,17 @@ The plugin exposes the authoritative skills listed in the generated inventory:
 - `renovate-maintenance` audits and lands Renovate updates within a repository,
   with risk-based verification, sequential merges, combined-main validation,
   and explicit separation from deployment and production-state checks.
-- `complexity-sweep` identifies active repositories, ranks unnecessary code
-  complexity and stale maintenance paths, and implements verified priority
-  fixes while preserving each repository's consumer contracts.
+- `complexity-sweep` analyzes unnecessary complexity, retired legacy behavior
+  and obsolete diagnostics through optional references. Request one lens, any
+  combination, or a broad sweep of all three. Analysis-only requests produce
+  findings; cleanup requests implement verified changes while preserving
+  consumer contracts. For example: "analyze legacy paths only", "find duplicate
+  policy and obsolete probes", or "clean up across all three lenses".
+
+Version 4 consolidates the former `legacy-cleanup` and `diagnostic-hygiene`
+skills into `complexity-sweep`; update explicit invocations and links to the
+single entry point. Their retirement and diagnostic evidence rules remain in
+its references.
 
 The plugin bundles the auto-merge watcher under `scripts/`, so
 `github-ci-monitor` and `land-pr` work in a plugin-only installation. The npm

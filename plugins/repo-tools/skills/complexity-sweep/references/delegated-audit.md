@@ -8,10 +8,11 @@ widen into edits.
 
 ## Audit prompt
 
-Fill the bracketed fields. `[lens]` is the calling skill's candidate reference
-(for example `diagnostic-hygiene/references/candidates.md`); paste the whole
-file, or point the auditor at it. `[default]` is the repository's default
-branch.
+Fill the bracketed fields. `[lenses]` contains only the selected candidate
+references from [complexity-sweep](../SKILL.md), for example
+`references/diagnostic-candidates.md`; paste the files, or point the auditor
+at them. Pass explicit exclusions too. `[default]` is the repository's default
+branch. Do not ask the auditor to load every lens for a focused request.
 
 ```text
 READ-ONLY AUDIT. Do not edit files or run any git command that mutates state
@@ -25,7 +26,8 @@ Repository: [repo path] ([owner/name]). Audit `origin/[default]` with
 mislead you. Read-only `gh issue view`, `gh pr list` and `gh run list` are
 allowed.
 
-Goal and candidate rules: [lens].
+Goal and candidate rules: [lenses]. Explicit exclusions: [exclusions].
+This audit is read-only even when the parent task authorizes later cleanup.
 
 Live production monitoring, alerting, backup and drift timers are KEEP by
 default; list them only with evidence they are dead (not deployed, target
@@ -39,7 +41,7 @@ sentence of reason. Be skeptical of keeping anything whose subject is resolved
 and that nothing invokes; be equally skeptical of removing anything a live
 route invokes.
 
-Leads: [paths from the lens's name-pattern scan].
+Leads: [paths from the selected lenses' name-pattern scans].
 
 Also report what an implementer needs: branch protection and required checks,
 the agent guide's worktree and deletion rules, test and docs-check commands,
@@ -57,7 +59,8 @@ from outside the repository; keep until a named issue closes. Concrete paths onl
 
 Run against the fetched default branch and treat hits as leads to read, never
 as verdicts. Set `lens_pattern` to the calling lens's pattern and `default` to
-the default branch.
+the default branch. For combined audits, use the selected patterns and
+deduplicate findings; do not count one path once per lens.
 
 ```bash
 git -C "$repo" ls-tree -r --name-only "origin/$default" \
