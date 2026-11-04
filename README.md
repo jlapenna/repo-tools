@@ -33,6 +33,19 @@ web routes, and heading anchors are not checked. Nx inventories include only
 explicit targets, not inferred targets. These are source contracts, not runtime
 health checks.
 
+- `repo-skill-evals [--root DIR]... [--evals-root DIR]... [--skill NAME]... [--list | --dry-run] [--out DIR] [--runs N] [--trigger-only] [--json] [-- <claude plugin eval options>]`
+  — score a repository's skills with the stock Claude Code runner. It finds
+  every `*/SKILL.md` below the roots, reads each skill's committed
+  skill-creator `evals/evals.json` (or `<evals-root>/<skill>/evals.json`),
+  generates one `claude plugin eval` case per prompt inside a temporary
+  wrapper plugin (a `tool_used` grader proving the skill fired plus an `llm`
+  grader from the entry's assertions), runs it, and prints one row per
+  skill: cases, mean score, runs that fired the skill, failed graders.
+  `--list` reports coverage without running anything; `--trigger-only`
+  keeps just the skill-fired grader at three turns. Runs and judges are
+  real model calls on the caller's account; pass `-- --max-cost-usd N` to
+  bound them. Exit status is the runner's. The `skill-evals` skill owns
+  when and how to use it.
 - `repo-doctor [--json]` — read-only check that the installed runtime is
   usable before an agent relies on it. It reports the repo-tools package
   root (and commit, for a checkout), the enclosing repository if any, the

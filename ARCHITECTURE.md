@@ -32,6 +32,7 @@ repository policy, check names, deployment rules, and product behavior.
 | Harness context and skill maintenance | `harness-maintenance` skill | native documentation checks and outcome evidence from consumers |
 | Autonomous execution within granted scope | `autonomous-work` skill | task-native verification and observed agent use |
 | Complexity, legacy and diagnostic sweeps | `complexity-sweep` skill with optional lens references | current-source findings, consumer retirement and live-route evidence, preserved contracts and maintenance reduction |
+| Skill eval coverage and scoring | `skill-evals` skill and `repo-skill-evals` | wrapper and case generation tests, runner results per skill |
 | Plugin topology | `.claude-plugin/`, `.agents/`, `plugins/` manifests | `plugins/manifests.test.mjs` |
 | ESLint rules | `eslint/` | build, consumer contract, Vitest rules |
 | Shared Renovate preset | `renovate-preset.json` (`github>jlapenna/repo-tools//renovate-preset`) | `renovate-preset.test.mjs` and Renovate config validation in consumers |
