@@ -1,0 +1,29 @@
+{
+  "skill_name": "skill-evals",
+  "evals": [
+    {
+      "id": 1,
+      "name": "coverage-first",
+      "prompt": "I just rewrote the description of our deploy skill. Before I open the PR, how do I check that it still triggers on the requests people actually type, and what would the run cost? Give me the exact commands, don't run anything.",
+      "expected_output": "Checks eval coverage with repo-skill-evals --list, then runs a trigger-only pass with runs 1 and a cost ceiling, and compares before and after on the same cases.",
+      "files": [],
+      "assertions": [
+        "Runs repo-skill-evals --list (or names eval coverage) before scoring anything",
+        "Proposes a --trigger-only run with a bounded cost (--max-cost-usd or --runs 1)",
+        "Says the description, not the prompt, is what to fix when the skill does not fire"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "sandbox-safe-prompts",
+      "prompt": "Our on-call skill's evals keep failing with errors about not being able to reach the hosts. Should I give the eval runner SSH access? What would you change instead? Just explain, no commands needed.",
+      "expected_output": "Explains that runs are sandboxed without hosts, credentials or a checkout, so prompts should ask for the plan, exact commands or a decision and assertions should check those; does not grant the runner access.",
+      "files": [],
+      "assertions": [
+        "Says eval runs are sandboxed with no live hosts, credentials or repository checkout",
+        "Recommends rewriting the prompts to ask for a plan, commands or a decision rather than granting access",
+        "Does not recommend giving the runner SSH or real credentials"
+      ]
+    }
+  ]
+}
