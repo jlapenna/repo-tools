@@ -41,5 +41,9 @@ tone or about work that happens outside the sandbox. Two or three per entry
 is enough; one obvious prompt and one that uses the user's plain wording
 covers most description regressions.
 
+A skill with `disable-model-invocation: true` never fires on its own: its
+cases carry no `skill-fired` grader, `--trigger-only` skips it, and a behavior
+case sends `/<skill-name> <prompt>` so the judge grades the skill's work.
+
 A `--trigger-only` run keeps only the `skill-fired` grader and caps each run
 at three turns, so an entry with just a `prompt` is a valid trigger test.

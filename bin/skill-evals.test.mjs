@@ -75,6 +75,8 @@ test('builds a case per eval entry with a skill-fired grader and a rubric from a
   const manual = { name: 'handoff', dir: path.join(root, 'repo/skills/handoff'), manualOnly: true };
   const manualEntries = loadEntries(path.join(manual.dir, 'evals/evals.json'));
   assert.deepEqual(buildCase(manual, manualEntries[0], {}).graders.map((g) => g.name), ['criteria'], 'a manual-only skill is graded on behavior, never on firing');
+  assert.equal(buildCase(manual, manualEntries[0], {}).execution.prompt, '/handoff Write the handoff.', 'a manual-only case invokes the skill the way a user does');
+  assert.equal(buildCase(skill, entries[0], {}).execution.prompt, entries[0].prompt);
   assert.throws(() => buildCase(manual, { ...manualEntries[1], expected: '' }, {}), /nothing to grade/);
   const central = loadEntries(path.join(root, 'central/repo/land-pr/evals.json'))[0];
   const landed = buildCase({ name: 'land-pr', dir: '' }, central, {});
@@ -98,6 +100,8 @@ test('fixtures must stay inside the evals directory and runner overrides stay in
   write('repo/.agents/skills/oncall/evals/evals.json', JSON.stringify({ evals: [{ prompt: 'x', files: ['files/tree'] }] }));
   const skill = { name: 'oncall', dir: path.join(root, 'repo/.agents/skills/oncall'), evals, entries: loadEntries(evals) };
   assert.throws(() => writeWrapper(path.join(root, 'out-escape'), [skill], {}), /links outside the evals directory \(nested\)/);
+  write('bad/evals.json', JSON.stringify({ evals: [{ prompt: 'x', assertions: [{ name: 'Names the host', type: 'llm' }, { text: 'Refuses to deploy' }, 'plain'] }] }));
+  assert.deepEqual(loadEntries(path.join(root, 'bad/evals.json'))[0].checks, ['Names the host', 'Refuses to deploy', 'plain']);
   write('bad/evals.json', JSON.stringify({ evals: [{ prompt: 'x', plugin_eval: { max_turns: 999 } }] }));
   assert.throws(() => loadEntries(path.join(root, 'bad/evals.json')), /max_turns must be an integer from 1 to 200/);
   write('bad/evals.json', JSON.stringify({ evals: [{ prompt: 'x', plugin_eval: { allowed_tools: ['Bash; rm -rf /'] } }] }));
