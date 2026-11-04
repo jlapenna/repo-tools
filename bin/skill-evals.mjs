@@ -40,6 +40,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse } from 'yaml';
+import { createHash } from 'node:crypto';
+import { beginRun, finishRun, findRuns, historyRoot } from './eval-history.mjs';
 
 const SKIP_DIRS = new Set(['node_modules', '.git', 'results', '.venv', 'dist', 'build']);
 const MAX_DEPTH = 8;
@@ -406,7 +408,7 @@ export function plan(options) {
   return skills;
 }
 
-export function main(argv, { log = console.log, spawn = spawnSync, exec = spawnSync } = {}) {
+export function main(argv, { log = console.log, warn = console.error, spawn = spawnSync, exec = spawnSync } = {}) {
   const options = parseArgs(argv);
   // Read the baseline before anything paid runs: a bad file must not cost a run.
   const baseline = options.baseline ? loadBaseline(options.baseline) : null;
@@ -419,7 +421,10 @@ export function main(argv, { log = console.log, spawn = spawnSync, exec = spawnS
     return 0;
   }
   if (!withEvals.length) throw new Error(`none of the ${skills.length} skills has an evals.json; use --list to see them`);
-  const outDir = options.out ?? mkdtempSync(path.join(tmpdir(), 'repo-skill-evals-'));
+  const store = historyRoot();
+  if (!options.out && !options.dryRun) mkdirSync(path.join(store, 'work'), { recursive: true, mode: 0o700 });
+  const outDir = options.out ?? mkdtempSync(path.join(options.dryRun ? tmpdir() : path.join(store, 'work'), 'repo-skill-evals-'));
+  if (!options.dryRun && (outDir === store || store.startsWith(outDir + path.sep))) throw Error('--out must not contain the evaluation history store');
   mkdirSync(outDir, { recursive: true });
   const { plugin, manifest } = writeWrapper(outDir, withEvals, options);
   const resultsFile = path.join(outDir, 'results.json');
@@ -428,23 +433,40 @@ export function main(argv, { log = console.log, spawn = spawnSync, exec = spawnS
     log(`${manifest.cases.length} cases for ${withEvals.length} skills written under ${plugin}\n${command[0]} ${command[1].map((a) => (/\s/.test(a) ? JSON.stringify(a) : a)).join(' ')}`);
     return 0;
   }
-  // The nested runner is non-interactive; the parent session's marker would only make it refuse to start.
-  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => key !== 'CLAUDECODE'));
-  // The runner's own progress lines stay out of --json output; they are kept in runner.log instead.
-  const run = spawn(command[0], command[1], { cwd: plugin, stdio: ['ignore', options.json ? 'pipe' : 'inherit', 'inherit'], env, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
-  if (run.error) throw new Error(`could not run claude: ${run.error.message}`);
-  if (options.json && run.stdout) writeFileSync(path.join(outDir, 'runner.log'), run.stdout);
-  if (!existsSync(resultsFile)) throw new Error(`claude plugin eval exited ${run.status} without writing ${resultsFile}`);
-  const results = JSON.parse(readFileSync(resultsFile, 'utf8'));
-  // Skills without evals stay visible in the run output, as in --list, so coverage gaps are reported with the scores.
-  const rows = [...summarize(results, manifest), ...skills.filter((s) => !s.entries.length).map((s) => ({ skill: s.name, evals: null, manualOnly: s.manualOnly, cases: 0, runs: 0, fired: 0, scores: [], failed: [], errors: 0, score: null }))].sort((a, b) => a.skill.localeCompare(b.skill, 'en'));
-  const comparison = baseline ? compareBaseline(rows, baseline) : null;
-  if (options.report) writeReport(options.report, { options, rows, results, manifest, run, comparison, exec });
-  const summary = { ok: run.status === 0, exit: run.status, partial: results.partial ?? false, partialReason: results.partialReason ?? null, costUsd: results.costUsd ?? null, durationSeconds: results.durationSeconds ?? null, out: outDir, report: options.report ?? null, baseline: comparison, skills: rows };
-  const changes = comparison ? `\n\n${renderChanges(comparison)}` : '';
-  const report = options.report ? `, report in ${options.report}` : '';
-  log(options.json ? JSON.stringify(summary, null, 2) : `\n${renderTable(rows)}${changes}\n\nexit ${run.status}${results.partial ? ` (partial: ${results.partialReason})` : ''}, runner cost estimate $${Number(results.costUsd ?? 0).toFixed(2)} (list price, not billed spend), ${results.durationSeconds ?? '?'}s, results in ${outDir}${report}`);
-  return run.status ?? 1;
+  const filesBelow = (dir) => readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name)).flatMap(e => e.isDirectory() ? filesBelow(path.join(dir, e.name)) : e.isFile() ? [path.join(dir, e.name)] : []);
+  const inputFiles = filesBelow(plugin);
+  const inputs = { files: Object.fromEntries(inputFiles.map(file => [path.relative(plugin, file), createHash('sha256').update(readFileSync(file)).digest('hex')])),
+    arguments: options.passthrough, modelAlias: process.env.ANTHROPIC_MODEL ?? 'client default' };
+  const subject = manifest.skills.map(s => s.name).sort().join(',');
+  const previous = findRuns({ root: store, kind: 'skill', subject, inputs });
+  if (previous.length) warn(`Evaluation history: ${previous.length} recent matching attempt(s); latest ${previous[0].id} is ${previous[0].status}. Inspect prior evidence before repeating a hill climb.`);
+  const history = beginRun({ root: store, kind: 'skill', subject, inputs, summary: 'Stock skill evaluation started' });
+  let results, run, outcome;
+  try {
+    // The nested runner is non-interactive; the parent session's marker would only make it refuse to start.
+    const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => key !== 'CLAUDECODE'));
+    // The runner's own progress lines stay out of --json output; they are kept in runner.log instead.
+    run = spawn(command[0], command[1], { cwd: plugin, stdio: ['ignore', options.json ? 'pipe' : 'inherit', 'inherit'], env, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+    if (run.error) throw new Error(`could not run claude: ${run.error.message}`);
+    if (options.json && run.stdout) writeFileSync(path.join(outDir, 'runner.log'), run.stdout);
+    if (!existsSync(resultsFile)) throw new Error(`claude plugin eval exited ${run.status} without writing ${resultsFile}`);
+    results = JSON.parse(readFileSync(resultsFile, 'utf8'));
+    // Skills without evals stay visible in the run output, as in --list, so coverage gaps are reported with the scores.
+    const rows = [...summarize(results, manifest), ...skills.filter((s) => !s.entries.length).map((s) => ({ skill: s.name, evals: null, manualOnly: s.manualOnly, cases: 0, runs: 0, fired: 0, scores: [], failed: [], errors: 0, score: null }))].sort((a, b) => a.skill.localeCompare(b.skill, 'en'));
+    const comparison = baseline ? compareBaseline(rows, baseline) : null;
+    if (options.report) writeReport(options.report, { options, rows, results, manifest, run, comparison, exec });
+    const summary = { ok: run.status === 0, exit: run.status, partial: results.partial ?? false, partialReason: results.partialReason ?? null, costUsd: results.costUsd ?? null, durationSeconds: results.durationSeconds ?? null, out: outDir, report: options.report ?? null, baseline: comparison, history: { id: history.id, store, previous: previous.map(r => r.id) }, skills: rows };
+    outcome = summary;
+    const changes = comparison ? `\n\n${renderChanges(comparison)}` : '';
+    const report = options.report ? `, report in ${options.report}` : '';
+    log(options.json ? JSON.stringify(summary, null, 2) : `\n${renderTable(rows)}${changes}\n\nexit ${run.status}${results.partial ? ` (partial: ${results.partialReason})` : ''}, runner cost estimate $${Number(results.costUsd ?? 0).toFixed(2)} (list price, not billed spend), ${results.durationSeconds ?? '?'}s, results in ${outDir}${report}`);
+    return run.status ?? 1;
+  } finally {
+    const traces = (results?.cases ?? []).flatMap(c => Object.values(c.arms ?? {}).flatMap(runs => runs.map(r => r.tracePath).filter(p => typeof p === 'string' && existsSync(p))));
+    const artifacts = [...filesBelow(outDir), ...traces];
+    if (options.report) for (const name of ['report.md', 'result.json']) { const p = path.join(options.report, name); if (existsSync(p)) artifacts.push(p); }
+    finishRun(store, history.id, { status: results?.partial ? 'partial' : outcome?.ok ? 'completed' : 'failed', summary: outcome ? `Stock runner exit ${run.status}` : 'Runner failed before producing a usable result', result: outcome ?? { exit: run?.status ?? null }, artifacts: [...new Set(artifacts)] });
+  }
 }
 
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {

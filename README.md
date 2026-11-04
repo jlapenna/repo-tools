@@ -52,7 +52,12 @@ health checks.
   Write, Edit, WebFetch or an `mcp__*` tool is refused because LCARS
   worker pods have no sandbox backend; `--allow-gated-tools` opts out for
   workstation runs. Exit status is the runner's. The `skill-evals` skill
-  owns when and how to use it.
+  owns when and how to use it. Actual runs retain input snapshots, results
+  and available traces in the private evaluation history, including failures.
+- `repo-eval-history begin|finish|record|find|show` — retain and search regular
+  skill/model evaluations and optimization attempts, including rejected
+  hypotheses. See [evaluation history](docs/evaluation-history.md) for the
+  private store, fingerprints, artifact retention and cross-host discovery.
 - `repo-doctor [--json]` — read-only check that the installed runtime is
   usable before an agent relies on it. It reports the repo-tools package
   root (and commit, for a checkout), the enclosing repository if any, the

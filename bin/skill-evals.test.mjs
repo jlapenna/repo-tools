@@ -10,12 +10,16 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { findRuns, readRun } from './eval-history.mjs';
 import { buildCase, compareBaseline, discoverSkills, findEvals, fixturePath, gatedTool, loadBaseline, loadEntries, main, parseArgs, renderTable, summarize, writeWrapper } from './skill-evals.mjs';
 
 const script = fileURLToPath(new URL('./skill-evals.mjs', import.meta.url));
 
 function fixture(t) {
   const root = mkdtempSync(path.join(tmpdir(), 'skill-evals-'));
+  const originalHistory = process.env.EVAL_HISTORY_DIR;
+  process.env.EVAL_HISTORY_DIR = path.join(root, 'history');
+  t.after(() => { if (originalHistory === undefined) delete process.env.EVAL_HISTORY_DIR; else process.env.EVAL_HISTORY_DIR = originalHistory; });
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const write = (file, text) => { mkdirSync(path.dirname(path.join(root, file)), { recursive: true }); writeFileSync(path.join(root, file), text); };
   write('repo/.agents/skills/oncall/SKILL.md', '---\nname: oncall\ndescription: Triage alerts.\n---\n# Oncall\n');
@@ -182,6 +186,41 @@ test('runs the stock runner from the wrapper and propagates its exit status', (t
   assert.deepEqual(summary.skills[0].failed, ['oncall--eval-1/skill-fired']);
   assert.equal(readFileSync(path.join(root, 'out/runner.log'), 'utf8'), 'Wrote results.json\n');
   assert.throws(() => parseArgs(['--runs', '0']), /--runs/);
+});
+
+test('default runs persist snapshots and results, warn about prior identical work, and archive only selected traces', t => {
+  const { root, write } = fixture(t);
+  write('sandbox/config/private-auth.json', 'DO NOT COPY SDK STATE');
+  write('sandbox/out/trace.jsonl', '{"type":"result"}\n');
+  const outputs = [], warnings = [];
+  const spawn = (cmd, args) => {
+    writeFileSync(args[args.indexOf('--json') + 1], JSON.stringify({ costUsd: 0.1, cases: [{ name: 'oncall--eval-1', arms: { with: [{ tracePath: path.join(root, 'sandbox/out/trace.jsonl'), graders: [{ name: 'skill-fired', passed: true }, { name: 'criteria', passed: true }] }] }, aggregates: { score: 1 } }] }));
+    return { status: 0, stdout: '' };
+  };
+  const args = ['--root', path.join(root, 'repo'), '--skill', 'oncall', '--json'];
+  main(args, { spawn, log: s => outputs.push(JSON.parse(s)), warn: s => warnings.push(s) });
+  assert.ok(outputs[0].out.startsWith(path.join(root, 'history/work')));
+  const store = path.join(root, 'history');
+  const record = readRun(store, outputs[0].history.id);
+  assert.equal(record.status, 'completed');
+  assert.ok(record.artifacts.some(f => f.source.endsWith('SKILL.md')));
+  assert.ok(record.artifacts.some(f => f.source.endsWith('trace.jsonl')));
+  assert.ok(!record.artifacts.some(f => f.source.includes('private-auth')));
+  rmSync(outputs[0].out, { recursive: true });
+  const result = record.artifacts.find(f => f.source.endsWith('results.json'));
+  assert.equal(JSON.parse(readFileSync(path.join(store, 'runs', record.id, result.path))).costUsd, 0.1);
+  main(args, { spawn, log: s => outputs.push(JSON.parse(s)), warn: s => warnings.push(s) });
+  assert.equal(outputs[1].history.previous[0], record.id);
+  assert.match(warnings[0], /recent matching/);
+});
+
+test('runner startup errors retain a failed attempt without masking the original failure', t => {
+  const { root } = fixture(t);
+  assert.throws(() => main(['--root', path.join(root, 'repo'), '--skill', 'oncall'], { spawn: () => ({ error: new Error('CLI unavailable') }) }), /CLI unavailable/);
+  const records = findRuns({ root: path.join(root, 'history') });
+  assert.equal(records.length, 1);
+  assert.equal(records[0].status, 'failed');
+  assert.ok(records[0].artifacts.length > 0);
 });
 
 test('refuses a committed case that grants a gated tool unless --allow-gated-tools', (t) => {
