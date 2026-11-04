@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "General repository-management commands and skills for safe worktrees, CI monitoring, testing policy, PR delivery, harness maintenance, autonomous work, complexity sweeps with optional legacy and diagnostic analyses, Renovate maintenance, and skill evals. Same plugin as the Codex marketplace in .agents/plugins/marketplace.json.",
-    "version": "4.3.0"
+    "version": "4.3.1"
   },
   "plugins": [
     {
