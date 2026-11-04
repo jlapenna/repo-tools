@@ -1,6 +1,6 @@
 ---
 name: skill-evals
-description: Measure whether a repository's agent skills trigger and behave as intended by running their committed evals.json prompts through the stock Claude Code runner (claude plugin eval), and keep eval coverage honest. Use when asked to eval, test, benchmark, score or validate a skill or a repository's skills, to check that a skill description triggers, to add evals to a skill, or before and after editing a SKILL.md description or body. Not for evaluating models or inference servers.
+description: Measure whether a repository's agent skills trigger and behave as intended by running their committed evals.json prompts through the stock Claude Code runner (claude plugin eval), and keep eval coverage honest. Use when asked to eval, test, benchmark, score or validate a skill or a repository's skills, to check that a skill description triggers on real requests, to write or fix eval prompts and assertions, when a skill's evals fail, error, or seem to need hosts, credentials or a checkout, or before and after editing a SKILL.md description or body. Not for evaluating models or inference servers.
 ---
 
 # Skill evals
