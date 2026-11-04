@@ -16,9 +16,14 @@
 //
 // Usage: repo-skill-evals [--root DIR]... [--evals-root DIR]... [--skill NAME]...
 //                         [--list | --dry-run] [--out DIR] [--runs N]
-//                         [--trigger-only] [--json] [-- <claude plugin eval options>]
+//                         [--trigger-only] [--json] [--report DIR] [--baseline FILE]
+//                         [--allow-gated-tools] [-- <claude plugin eval options>]
 // --list prints eval coverage and exits without running anything. --dry-run
 // writes the wrapper plugin and prints the command instead of running it.
+// --report writes `<dir>/report.md` (a Markdown job report) and
+// `<dir>/result.json` ({ report, complete, data }) for automation such as an
+// LCARS recipe. --baseline compares the per-skill rows with a previous
+// result.json (or its `data` object) and lists regressions first.
 // Everything after `--` is passed to `claude plugin eval` (for example
 // `--ablation with-without`, `--max-cost-usd 5`, `--case 'oncall--*'`).
 // Exit status is the runner's (0 every case at threshold, 1 a case below
@@ -26,7 +31,9 @@
 // The wrapper is passed with --trust-plugin because it holds only copies of
 // skills the caller chose to score; the runner's sandbox still applies, and a
 // case's allowed_tools cannot grant Bash, Write, Edit, WebFetch or MCP tools
-// without the operator's own `-- --allow-tools` grant.
+// without the operator's own `-- --allow-tools` grant. LCARS worker pods have
+// no sandbox backend at all, so a committed case that grants one of those
+// tools is refused outright unless --allow-gated-tools (workstation runs).
 import { spawnSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -37,6 +44,9 @@ import { parse } from 'yaml';
 const SKIP_DIRS = new Set(['node_modules', '.git', 'results', '.venv', 'dist', 'build']);
 const MAX_DEPTH = 8;
 const DEFAULT_TOOLS = ['Skill', 'Read', 'Glob', 'Grep'];
+// Tools the runner only grants with the operator's `--allow-tools`, which needs a sandbox backend.
+const GATED_TOOLS = new Set(['Bash', 'PowerShell', 'Write', 'Edit', 'WebFetch']);
+const LOW_SCORE = 0.67;
 const CASE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 export function skillMetadata(text, file) {
@@ -130,9 +140,16 @@ export function criteria(entry) {
   return undefined;
 }
 
+// `Bash(git status)` names Bash; `mcp__server__tool` names an MCP tool.
+export const gatedTool = (tools) => tools.find((t) => { const base = t.replace(/\(.*$/, ''); return GATED_TOOLS.has(base) || base.startsWith('mcp__'); });
+
 export function buildCase(skill, entry, options) {
   const name = `${skill.name}--${entry.slug}`;
   if (!CASE_NAME.test(name)) throw new Error(`cannot derive a valid case name from ${name}`);
+  const gated = gatedTool(entry.options.allowed_tools ?? []);
+  if (gated && !options.allowGatedTools) {
+    throw new Error(`${skill.name}: case ${name} grants the tool ${gated}; the eval runner has no sandbox in LCARS worker pods, so such cases must not be committed. Pass --allow-gated-tools for a workstation run.`);
+  }
   const graders = [];
   if (!skill.manualOnly) {
     graders.push({ name: 'skill-fired', type: 'tool_used', tool: 'Skill', input_match: `"skill"\\s*:\\s*"(?:[\\w-]+:)?${skill.name.replaceAll('-', '\\-')}"` });
@@ -183,7 +200,7 @@ export function writeWrapper(outDir, skills, options) {
       }
       // YAML is a superset of JSON, so the case file needs no YAML writer.
       writeFileSync(path.join(caseDir, 'case.yaml'), JSON.stringify(spec, null, 2) + '\n');
-      manifest.cases.push({ name: spec.name, skill: skill.name });
+      manifest.cases.push({ name: spec.name, skill: skill.name, prompt: spec.execution.prompt });
     }
   }
   writeFileSync(path.join(outDir, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
@@ -225,8 +242,134 @@ export function renderTable(rows) {
   return lines.join('\n');
 }
 
+// A baseline is a previous --report result.json, or just its `data` object.
+export function loadBaseline(file) {
+  let parsed;
+  try { parsed = JSON.parse(readFileSync(file, 'utf8')); } catch (error) { throw new Error(`--baseline ${file}: ${error.message}`); }
+  const data = parsed && typeof parsed === 'object' && Array.isArray(parsed.data?.skills) ? parsed.data : parsed;
+  if (!Array.isArray(data?.skills)) throw new Error(`--baseline ${file}: expected a result.json (or its "data" object) with a "skills" array`);
+  return data;
+}
+
+const firedRate = (row) => (row.manualOnly || !row.runs ? null : row.fired / row.runs);
+export function compareBaseline(rows, baseline) {
+  const previous = new Map(baseline.skills.filter((s) => s && typeof s.skill === 'string').map((s) => [s.skill, s]));
+  const comparison = { regressions: [], improvements: [], unchanged: 0, new: [], removed: [] };
+  for (const row of rows) {
+    const prev = previous.get(row.skill);
+    if (!prev) { comparison.new.push(row.skill); continue; }
+    const change = { skill: row.skill, score: row.score, previousScore: prev.score ?? null, fired: row.fired, runs: row.runs, previousFired: prev.fired ?? 0, previousRuns: prev.runs ?? 0 };
+    const deltas = [];
+    if (typeof row.score === 'number' && typeof prev.score === 'number') deltas.push(row.score - prev.score);
+    const rate = firedRate(row);
+    const prevRate = firedRate(prev);
+    if (rate !== null && prevRate !== null) deltas.push(rate - prevRate);
+    if (deltas.some((d) => d < 0)) comparison.regressions.push(change);
+    else if (deltas.some((d) => d > 0)) comparison.improvements.push(change);
+    else comparison.unchanged += 1;
+  }
+  for (const name of previous.keys()) if (!rows.some((r) => r.skill === name)) comparison.removed.push(name);
+  return comparison;
+}
+
+const clip = (text, max) => { const s = String(text ?? ''); return s.length > max ? `${s.slice(0, max)}…` : s; };
+const fence = (text) => `\n\`\`\`text\n${String(text).replace(/`{3}/g, '⁣``')}\n\`\`\`\n`;
+const cell = (value) => String(value ?? '').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
+const fmtFired = (r) => (r.manualOnly ? 'manual' : r.runs ? `${r.fired}/${r.runs}` : '-');
+const fmtScore = (r) => (r.cases === 0 ? 'no evals' : r.score ?? '-');
+const changeLine = (c) => `- ${c.skill}: score ${c.previousScore ?? '-'} -> ${c.score ?? '-'}, fired ${c.previousFired}/${c.previousRuns} -> ${c.fired}/${c.runs}`;
+
+export function renderChanges(comparison) {
+  const lines = ['## Changes since baseline', ''];
+  lines.push(`### Regressions (${comparison.regressions.length})`, '');
+  lines.push(...(comparison.regressions.length ? comparison.regressions.map(changeLine) : ['- none']), '');
+  lines.push(`### Improvements (${comparison.improvements.length})`, '');
+  lines.push(...(comparison.improvements.length ? comparison.improvements.map(changeLine) : ['- none']), '');
+  lines.push(`- Unchanged: ${comparison.unchanged}`);
+  lines.push(`- New skills: ${comparison.new.length ? comparison.new.join(', ') : 'none'}`);
+  lines.push(`- Removed skills: ${comparison.removed.length ? comparison.removed.join(', ') : 'none'}`);
+  return lines.join('\n');
+}
+
+export function renderReport({ roots, revision, runnerVersion, date, exit, results, rows, manifest, comparison }) {
+  const partial = results.partial ?? false;
+  const casesTotal = results.aggregates?.casesTotal ?? (results.cases ?? []).length;
+  const casesPassed = results.aggregates?.casesPassed ?? (results.cases ?? []).filter((c) => c.aggregates?.passRate === 1).length;
+  const lines = ['# Skill evals report', ''];
+  lines.push(`- Roots: ${roots.map((r) => `\`${r}\``).join(', ')}`);
+  if (revision) lines.push(`- Revision: \`${revision}\``);
+  if (runnerVersion) lines.push(`- Runner: ${runnerVersion}`);
+  lines.push(`- Date: ${date}`);
+  lines.push(`- Exit: ${exit}${partial ? ` (partial: ${results.partialReason ?? 'unknown reason'})` : ''}`);
+  lines.push(`- Cases passed: ${casesPassed}/${casesTotal}`);
+  lines.push(`- Runner list-price cost estimate (not billed spend): $${Number(results.costUsd ?? 0).toFixed(2)}`);
+  lines.push(`- Duration: ${results.durationSeconds ?? '?'}s`, '');
+  lines.push('## Results', '', '| Skill | Cases | Score | Fired | Failed graders | Run errors |', '| --- | --- | --- | --- | --- | --- |');
+  for (const r of rows) lines.push(`| ${cell(r.skill)} | ${r.cases} | ${fmtScore(r)} | ${fmtFired(r)} | ${cell(r.failed.join(', '))} | ${r.errors} |`);
+  lines.push('');
+  const noEvals = rows.filter((r) => r.cases === 0).map((r) => r.skill);
+  lines.push('## Skills without evals', '', ...(noEvals.length ? noEvals.map((s) => `- ${s}`) : ['- none']), '');
+  const owner = (name) => manifest.cases.find((m) => m.name === name);
+  const errored = [];
+  for (const c of results.cases ?? []) {
+    (c.arms?.with ?? []).forEach((run, i) => {
+      if ((run.error && !/maximum number of turns/i.test(run.error)) || run.aborted) errored.push(`- ${c.name} (run ${i + 1}): ${clip(run.error ?? 'aborted', 300)}`);
+    });
+  }
+  lines.push('## Runs that errored', '', ...(errored.length ? errored : ['- none']), '');
+  if (comparison) lines.push(renderChanges(comparison), '');
+  const weak = rows.filter((r) => r.cases > 0 && ((!r.manualOnly && r.fired < r.runs) || (typeof r.score === 'number' && r.score < LOW_SCORE)));
+  if (weak.length) {
+    lines.push('## Failures', '');
+    for (const r of weak) {
+      lines.push(`### ${r.skill}`, '');
+      const reasons = [];
+      if (!r.manualOnly && r.fired < r.runs) reasons.push(`fired ${r.fired}/${r.runs}`);
+      if (typeof r.score === 'number' && r.score < LOW_SCORE) reasons.push(`score ${r.score} < ${LOW_SCORE}`);
+      lines.push(reasons.join(', '), '');
+      for (const c of (results.cases ?? []).filter((c) => owner(c.name)?.skill === r.skill)) {
+        const failures = [];
+        (c.arms?.with ?? []).forEach((run, i) => {
+          for (const g of run.graders ?? []) if (g.passed === false) failures.push({ run: i + 1, grader: g });
+        });
+        if (!failures.length) continue;
+        lines.push(`#### ${c.name}`, '', 'Prompt:', fence(clip(c.promptMarkdown ?? owner(c.name)?.prompt ?? '', 300)));
+        for (const { run, grader } of failures) {
+          lines.push(`- \`${grader.name}\` failed in run ${run}${grader.explanation ? `: ${clip(grader.explanation, 300)}` : ''}`);
+          if (grader.evidence) lines.push(fence(clip(grader.evidence, 600)));
+        }
+        lines.push('');
+      }
+    }
+  }
+  return { markdown: `${lines.join('\n').replace(/\n{3,}/g, '\n\n').trimEnd()}\n`, casesTotal, casesPassed };
+}
+
+// Best-effort probes for the report header; a missing binary or non-repo root is not an error.
+function probe(exec, cmd, args, cwd) {
+  const run = exec(cmd, args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  return run.error || run.status !== 0 ? null : String(run.stdout).trim() || null;
+}
+
+export function writeReport(dir, { options, rows, results, manifest, run, comparison, exec, now = new Date() }) {
+  const revision = probe(exec, 'git', ['rev-parse', 'HEAD'], options.roots[0]);
+  const runnerVersion = probe(exec, 'claude', ['--version'], undefined) ?? (results.claudeVersion ? `${results.claudeVersion} (Claude Code)` : null);
+  const exit = run.status ?? 1;
+  const partial = results.partial ?? false;
+  const { markdown, casesTotal, casesPassed } = renderReport({ roots: options.roots.map((r) => path.resolve(r)), revision, runnerVersion, date: now.toISOString(), exit, results, rows, manifest, comparison });
+  const result = {
+    report: markdown,
+    complete: exit === 0 && !partial,
+    data: { skills: rows, exit, partial, partialReason: results.partialReason ?? null, costUsd: results.costUsd ?? null, durationSeconds: results.durationSeconds ?? null, casesTotal, casesPassed, baseline: comparison ?? null },
+  };
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(path.join(dir, 'report.md'), markdown);
+  writeFileSync(path.join(dir, 'result.json'), JSON.stringify(result, null, 2) + '\n');
+  return result;
+}
+
 export function parseArgs(argv) {
-  const options = { roots: [], evalsRoots: [], only: [], passthrough: [], list: false, dryRun: false, json: false, triggerOnly: false };
+  const options = { roots: [], evalsRoots: [], only: [], passthrough: [], list: false, dryRun: false, json: false, triggerOnly: false, allowGatedTools: false };
   const args = [...argv];
   while (args.length) {
     const arg = args.shift();
@@ -235,6 +378,8 @@ export function parseArgs(argv) {
     else if (arg === '--evals-root' && args.length) options.evalsRoots.push(args.shift());
     else if (arg === '--skill' && args.length) options.only.push(args.shift());
     else if (arg === '--out' && args.length) options.out = path.resolve(args.shift());
+    else if (arg === '--report' && args.length) options.report = path.resolve(args.shift());
+    else if (arg === '--baseline' && args.length) options.baseline = path.resolve(args.shift());
     else if (arg === '--runs' && args.length) {
       options.runs = Number(args.shift());
       if (!Number.isInteger(options.runs) || options.runs < 1 || options.runs > 50) throw new Error('--runs takes an integer from 1 to 50');
@@ -242,6 +387,7 @@ export function parseArgs(argv) {
     else if (arg === '--dry-run') options.dryRun = true;
     else if (arg === '--json') options.json = true;
     else if (arg === '--trigger-only') options.triggerOnly = true;
+    else if (arg === '--allow-gated-tools') options.allowGatedTools = true;
     else throw new Error(`Unknown or incomplete option: ${arg}`);
   }
   if (!options.roots.length) options.roots.push(process.cwd());
@@ -260,8 +406,10 @@ export function plan(options) {
   return skills;
 }
 
-export function main(argv, { log = console.log, spawn = spawnSync } = {}) {
+export function main(argv, { log = console.log, spawn = spawnSync, exec = spawnSync } = {}) {
   const options = parseArgs(argv);
+  // Read the baseline before anything paid runs: a bad file must not cost a run.
+  const baseline = options.baseline ? loadBaseline(options.baseline) : null;
   const skills = plan(options);
   if (!skills.length) throw new Error(`no SKILL.md found under ${options.roots.join(', ')}`);
   const withEvals = skills.filter((s) => s.entries.length);
@@ -288,9 +436,14 @@ export function main(argv, { log = console.log, spawn = spawnSync } = {}) {
   if (options.json && run.stdout) writeFileSync(path.join(outDir, 'runner.log'), run.stdout);
   if (!existsSync(resultsFile)) throw new Error(`claude plugin eval exited ${run.status} without writing ${resultsFile}`);
   const results = JSON.parse(readFileSync(resultsFile, 'utf8'));
-  const rows = summarize(results, manifest);
-  const summary = { ok: run.status === 0, exit: run.status, partial: results.partial ?? false, partialReason: results.partialReason ?? null, costUsd: results.costUsd ?? null, durationSeconds: results.durationSeconds ?? null, out: outDir, skills: rows };
-  log(options.json ? JSON.stringify(summary, null, 2) : `\n${renderTable(rows)}\n\nexit ${run.status}${results.partial ? ` (partial: ${results.partialReason})` : ''}, cost $${Number(results.costUsd ?? 0).toFixed(2)}, ${results.durationSeconds ?? '?'}s, results in ${outDir}`);
+  // Skills without evals stay visible in the run output, as in --list, so coverage gaps are reported with the scores.
+  const rows = [...summarize(results, manifest), ...skills.filter((s) => !s.entries.length).map((s) => ({ skill: s.name, evals: null, manualOnly: s.manualOnly, cases: 0, runs: 0, fired: 0, scores: [], failed: [], errors: 0, score: null }))].sort((a, b) => a.skill.localeCompare(b.skill, 'en'));
+  const comparison = baseline ? compareBaseline(rows, baseline) : null;
+  if (options.report) writeReport(options.report, { options, rows, results, manifest, run, comparison, exec });
+  const summary = { ok: run.status === 0, exit: run.status, partial: results.partial ?? false, partialReason: results.partialReason ?? null, costUsd: results.costUsd ?? null, durationSeconds: results.durationSeconds ?? null, out: outDir, report: options.report ?? null, baseline: comparison, skills: rows };
+  const changes = comparison ? `\n\n${renderChanges(comparison)}` : '';
+  const report = options.report ? `, report in ${options.report}` : '';
+  log(options.json ? JSON.stringify(summary, null, 2) : `\n${renderTable(rows)}${changes}\n\nexit ${run.status}${results.partial ? ` (partial: ${results.partialReason})` : ''}, runner cost estimate $${Number(results.costUsd ?? 0).toFixed(2)} (list price, not billed spend), ${results.durationSeconds ?? '?'}s, results in ${outDir}${report}`);
   return run.status ?? 1;
 }
 
