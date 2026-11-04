@@ -13,7 +13,7 @@ function fixture(t) {
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const store = path.join(root, 'source'), remote = path.join(root, 'objects'), destination = path.join(root, 'restored');
   mkdirSync(remote);
-  const config = { remote: `:local:${remote}`, rcloneConfig: path.join(root, 'empty.conf') };
+  const config = { remote: `:local:${remote}`, rcloneConfig: path.join(root, 'empty.conf'), cacheDir: path.join(root, 'catalog') };
   writeFileSync(config.rcloneConfig, '');
   const artifact = path.join(root, 'trace.txt'); writeFileSync(artifact, 'private failed experiment\n');
   const run = beginRun({ root: store, kind: 'autoresearch', subject: 'storage-fixture', inputs: { seed: 42 } });
@@ -70,4 +70,22 @@ test('CLI auto-archives terminal records and finds them from an empty second sto
   assert.deepEqual(JSON.parse(cli(f.destination, 'find', '--local').stdout), []);
   const fetched = cli(f.destination, 'fetch', '--all'); assert.equal(fetched.status, 0, fetched.stderr);
   assert.equal(JSON.parse(fetched.stdout).length, 1);
+});
+
+test('shared lookups batch new markers and reuse immutable cached records', { skip: !available }, t => {
+  const f = fixture(t), shim = path.join(f.root, 'bin'), log = path.join(f.root, 'commands');
+  const native = spawnSync('which', ['rclone'], { encoding: 'utf8' }).stdout.trim();
+  mkdirSync(shim);
+  const script = "#!/usr/bin/env node\n" +
+    "import { appendFileSync } from 'node:fs'; import { spawnSync } from 'node:child_process';\n" +
+    `appendFileSync(${JSON.stringify(log)}, process.argv[2] + '\\n'); const run = spawnSync(${JSON.stringify(native)}, process.argv.slice(2), {stdio:'inherit'}); process.exitCode=run.status??1;\n`;
+  writeFileSync(path.join(shim, 'rclone'), script, { mode: 0o755 });
+  archiveRun(f.store, f.record.id, f.config);
+  const originalPath = process.env.PATH; process.env.PATH = shim + path.delimiter + originalPath;
+  t.after(() => { process.env.PATH = originalPath; });
+  assert.equal(remoteFind({ days: 0 }, f.config)[0].id, f.record.id);
+  // A second lookup must read the cached immutable marker, not download it again.
+  rmSync(path.join(f.remote, 'runs'), { recursive: true });
+  assert.equal(remoteFind({ days: 0 }, f.config)[0].id, f.record.id);
+  assert.deepEqual(readFileSync(log, 'utf8').trim().split('\n'), ['copy', 'copy']);
 });
