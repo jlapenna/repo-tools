@@ -39,13 +39,16 @@ const MAX_DEPTH = 8;
 const DEFAULT_TOOLS = ['Skill', 'Read', 'Glob', 'Grep'];
 const CASE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
-export function skillName(text, file) {
+export function skillMetadata(text, file) {
   const match = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(text);
   const data = match ? parse(match[1], { uniqueKeys: true }) : undefined;
   const name = typeof data?.name === 'string' && data.name.trim() ? data.name.trim() : path.basename(path.dirname(file));
   if (!/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(name)) throw new Error(`${file}: skill name ${JSON.stringify(name)} is not lowercase letters, digits and hyphens`);
-  return name;
+  // A skill Claude may not invoke on its own can only be scored on behavior, never on triggering.
+  const manualOnly = ['true', 'yes', 'on', '1'].includes(String(data?.['disable-model-invocation'] ?? '').toLowerCase());
+  return { name, manualOnly };
 }
+export const skillName = (text, file) => skillMetadata(text, file).name;
 
 export function discoverSkills(roots) {
   const skills = new Map();
@@ -54,9 +57,9 @@ export function discoverSkills(roots) {
     try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
     if (entries.some((e) => e.isFile() && e.name === 'SKILL.md')) {
       const file = path.join(dir, 'SKILL.md');
-      const name = skillName(readFileSync(file, 'utf8'), file);
+      const { name, manualOnly } = skillMetadata(readFileSync(file, 'utf8'), file);
       if (skills.has(name)) throw new Error(`skill ${name} found twice: ${skills.get(name).dir} and ${dir}`);
-      skills.set(name, { name, dir });
+      skills.set(name, { name, dir, manualOnly });
       return; // a skill does not nest skills
     }
     if (depth >= MAX_DEPTH) return;
@@ -128,14 +131,13 @@ export function criteria(entry) {
 export function buildCase(skill, entry, options) {
   const name = `${skill.name}--${entry.slug}`;
   if (!CASE_NAME.test(name)) throw new Error(`cannot derive a valid case name from ${name}`);
-  const graders = [{
-    name: 'skill-fired',
-    type: 'tool_used',
-    tool: 'Skill',
-    input_match: `"skill"\\s*:\\s*"(?:[\\w-]+:)?${skill.name.replaceAll('-', '\\-')}"`,
-  }];
+  const graders = [];
+  if (!skill.manualOnly) {
+    graders.push({ name: 'skill-fired', type: 'tool_used', tool: 'Skill', input_match: `"skill"\\s*:\\s*"(?:[\\w-]+:)?${skill.name.replaceAll('-', '\\-')}"` });
+  }
   const rubric = criteria(entry);
   if (rubric && !options.triggerOnly) graders.push({ name: 'criteria', type: 'llm', criteria: rubric });
+  if (!graders.length) throw new Error(`${skill.name}: ${entry.slug} has nothing to grade (manual-only skill without assertions or expected_output)`);
   const execution = {
     prompt: entry.prompt,
     max_turns: options.triggerOnly ? 3 : entry.options.max_turns ?? 8,
@@ -166,7 +168,7 @@ export function writeWrapper(outDir, skills, options) {
   const manifest = { skills: [], cases: [] };
   for (const skill of skills) {
     cpSync(skill.dir, path.join(plugin, 'skills', skill.name), { recursive: true, filter: (src) => !SKIP_DIRS.has(path.basename(src)) || src === skill.dir });
-    manifest.skills.push({ name: skill.name, dir: skill.dir, evals: skill.evals ?? null, cases: skill.entries?.length ?? 0 });
+    manifest.skills.push({ name: skill.name, dir: skill.dir, evals: skill.evals ?? null, cases: skill.entries?.length ?? 0, manualOnly: skill.manualOnly ?? false });
     for (const entry of skill.entries ?? []) {
       const spec = buildCase(skill, entry, options);
       const caseDir = path.join(plugin, 'evals', spec.name);
@@ -186,7 +188,7 @@ export function writeWrapper(outDir, skills, options) {
 }
 
 export function summarize(results, manifest) {
-  const bySkill = new Map(manifest.skills.map((s) => [s.name, { skill: s.name, evals: s.evals, cases: 0, runs: 0, fired: 0, scores: [], failed: [], errors: 0 }]));
+  const bySkill = new Map(manifest.skills.map((s) => [s.name, { skill: s.name, evals: s.evals, manualOnly: s.manualOnly ?? false, cases: 0, runs: 0, fired: 0, scores: [], failed: [], errors: 0 }]));
   for (const c of results.cases ?? []) {
     const owner = manifest.cases.find((m) => m.name === c.name)?.skill;
     const row = bySkill.get(owner);
@@ -214,7 +216,8 @@ export function renderTable(rows) {
   const lines = [`${pad('skill', 32)} ${pad('cases', 6)} ${pad('score', 6)} ${pad('fired', 8)} failed graders`];
   for (const r of rows) {
     const score = r.cases === 0 ? 'no evals' : r.score ?? '-';
-    lines.push(`${pad(r.skill, 32)} ${pad(r.cases, 6)} ${pad(score, 6)} ${pad(r.runs ? `${r.fired}/${r.runs}` : '-', 8)} ${r.failed.join(', ')}${r.errors ? ` (${r.errors} run error${r.errors > 1 ? 's' : ''})` : ''}`);
+    const fired = r.manualOnly ? 'manual' : r.runs ? `${r.fired}/${r.runs}` : '-';
+    lines.push(`${pad(r.skill, 32)} ${pad(r.cases, 6)} ${pad(score, 6)} ${pad(fired, 8)} ${r.failed.join(', ')}${r.errors ? ` (${r.errors} run error${r.errors > 1 ? 's' : ''})` : ''}`);
   }
   return lines.join('\n');
 }
@@ -248,6 +251,8 @@ export function plan(options) {
   for (const skill of skills) {
     skill.evals = findEvals(skill, options.evalsRoots) ?? null;
     skill.entries = skill.evals ? loadEntries(skill.evals) : [];
+    // --trigger-only has nothing to measure for a skill the model may not invoke.
+    if (options.triggerOnly && skill.manualOnly) skill.entries = [];
   }
   return skills;
 }
@@ -258,7 +263,7 @@ export function main(argv, { log = console.log, spawn = spawnSync } = {}) {
   if (!skills.length) throw new Error(`no SKILL.md found under ${options.roots.join(', ')}`);
   const withEvals = skills.filter((s) => s.entries.length);
   if (options.list) {
-    const rows = skills.map((s) => ({ skill: s.name, evals: s.evals, cases: s.entries.length, runs: 0, fired: 0, failed: [], errors: 0, score: null }));
+    const rows = skills.map((s) => ({ skill: s.name, evals: s.evals, cases: s.entries.length, manualOnly: s.manualOnly, runs: 0, fired: 0, failed: [], errors: 0, score: null }));
     log(options.json ? JSON.stringify({ skills: rows }, null, 2) : `${renderTable(rows)}\n\n${withEvals.length}/${skills.length} skills have evals (${withEvals.reduce((n, s) => n + s.entries.length, 0)} cases)`);
     return 0;
   }

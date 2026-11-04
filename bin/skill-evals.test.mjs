@@ -27,6 +27,8 @@ function fixture(t) {
   write('repo/.agents/skills/oncall/evals/results/old/report.html', '<html>');
   write('repo/skills/land-pr/SKILL.md', '---\nname: land-pr\ndescription: Land it.\n---\n');
   write('repo/skills/plain/SKILL.md', '---\ndescription: No name field, so the directory names it.\n---\n');
+  write('repo/skills/handoff/SKILL.md', '---\nname: handoff\ndescription: Write a handoff.\ndisable-model-invocation: true\n---\n');
+  write('repo/skills/handoff/evals/evals.json', JSON.stringify({ evals: [{ id: 1, prompt: 'Write the handoff.', assertions: ['Names the next step'] }, { id: 2, prompt: 'Trigger only.', expected_output: 'Writes it.' }] }));
   write('repo/node_modules/dep/skills/ignored/SKILL.md', '---\nname: ignored\ndescription: x\n---\n');
   write('central/repo/land-pr/evals.json', JSON.stringify({ skill_name: 'land-pr', evals: [{ id: 1, prompt: 'Land PR 7.', expectations: ['Waits for CI'], plugin_eval: { max_turns: 2, allowed_tools: ['Skill'] } }] }));
   return { root, write };
@@ -35,10 +37,11 @@ function fixture(t) {
 test('discovers skills below roots, skipping dependencies and nested results', (t) => {
   const { root } = fixture(t);
   const skills = discoverSkills([path.join(root, 'repo')]);
-  assert.deepEqual(skills.map((s) => s.name), ['land-pr', 'oncall', 'plain']);
-  assert.equal(findEvals(skills[1], []), path.join(root, 'repo/.agents/skills/oncall/evals/evals.json'));
-  assert.equal(findEvals(skills[0], []), undefined);
-  assert.equal(findEvals(skills[0], [path.join(root, 'central')]), path.join(root, 'central/repo/land-pr/evals.json'));
+  assert.deepEqual(skills.map((s) => s.name), ['handoff', 'land-pr', 'oncall', 'plain']);
+  assert.deepEqual(skills.map((s) => s.manualOnly), [true, false, false, false]);
+  assert.equal(findEvals(skills[2], []), path.join(root, 'repo/.agents/skills/oncall/evals/evals.json'));
+  assert.equal(findEvals(skills[1], []), undefined);
+  assert.equal(findEvals(skills[1], [path.join(root, 'central')]), path.join(root, 'central/repo/land-pr/evals.json'));
 });
 
 test('rejects a skill name that would not be a valid plugin skill', (t) => {
@@ -69,6 +72,10 @@ test('builds a case per eval entry with a skill-fired grader and a rubric from a
   assert.match(second.graders[1].criteria, /Stops the model container/);
   assert.equal(buildCase(skill, entries[1], { triggerOnly: true }).graders.length, 1);
   assert.equal(buildCase(skill, entries[1], { triggerOnly: true }).execution.max_turns, 3);
+  const manual = { name: 'handoff', dir: path.join(root, 'repo/skills/handoff'), manualOnly: true };
+  const manualEntries = loadEntries(path.join(manual.dir, 'evals/evals.json'));
+  assert.deepEqual(buildCase(manual, manualEntries[0], {}).graders.map((g) => g.name), ['criteria'], 'a manual-only skill is graded on behavior, never on firing');
+  assert.throws(() => buildCase(manual, { ...manualEntries[1], expected: '' }, {}), /nothing to grade/);
   const central = loadEntries(path.join(root, 'central/repo/land-pr/evals.json'))[0];
   const landed = buildCase({ name: 'land-pr', dir: '' }, central, {});
   assert.deepEqual(landed.execution.allowed_tools, ['Skill']);
@@ -107,11 +114,14 @@ test('real CLI lists coverage and writes a runnable wrapper plugin on --dry-run'
   assert.match(list.stdout, /^land-pr\s+1\s/m);
   assert.match(list.stdout, /^oncall\s+2\s/m);
   assert.match(list.stdout, /^plain\s+0\s+no evals/m);
-  assert.match(list.stdout, /2\/3 skills have evals \(3 cases\)/);
+  assert.match(list.stdout, /^handoff\s+2\s/m);
+  assert.match(list.stdout, /3\/4 skills have evals \(5 cases\)/);
+  const trigger = run('--list', '--trigger-only');
+  assert.match(trigger.stdout, /^handoff\s+0\s+no evals\s+manual/m, 'manual-only skills drop out of a trigger-only run');
   const out = path.join(root, 'out');
   const dry = run('--dry-run', '--out', out, '--evals-root', path.join(root, 'central'), '--', '--ablation', 'none');
   assert.equal(dry.status, 0, dry.stderr);
-  assert.match(dry.stdout, /3 cases for 2 skills/);
+  assert.match(dry.stdout, /5 cases for 3 skills/);
   assert.match(dry.stdout, /claude plugin eval .* --trust-plugin --no-publish --json .*results\.json --output-dir .* --ablation none$/m);
   const plugin = path.join(out, 'plugin');
   assert.equal(JSON.parse(readFileSync(path.join(plugin, '.claude-plugin/plugin.json'), 'utf8')).name, 'skill-evals');
@@ -121,7 +131,7 @@ test('real CLI lists coverage and writes a runnable wrapper plugin on --dry-run'
   const spec = JSON.parse(readFileSync(path.join(plugin, 'evals/oncall--eval-1/case.yaml'), 'utf8'));
   assert.equal(spec.execution.prompt, 'Headscale probe is failing, what now?');
   assert.equal(readFileSync(path.join(plugin, 'evals/oncall--eval-1/resources/probe.log'), 'utf8'), 'probe failed\n');
-  assert.deepEqual(JSON.parse(readFileSync(path.join(out, 'manifest.json'), 'utf8')).cases.map((c) => c.skill), ['land-pr', 'oncall', 'oncall']);
+  assert.deepEqual(JSON.parse(readFileSync(path.join(out, 'manifest.json'), 'utf8')).cases.map((c) => c.skill), ['handoff', 'handoff', 'land-pr', 'oncall', 'oncall']);
   const only = run('--list', '--skill', 'oncall');
   assert.match(only.stdout, /1\/1 skills have evals/);
   assert.equal(run('--list', '--skill', 'nope').status, 1);
