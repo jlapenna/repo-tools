@@ -11,6 +11,20 @@ of proof is a committed eval prompt with checkable assertions, run through
 [evals format](references/evals-format.md) before writing or editing an
 `evals.json`.
 
+Before running, consult [evaluation history](https://github.com/jlapenna/repo-tools/blob/main/docs/evaluation-history.md)
+and the consumer's shared registry/memory for prior matching attempts. Keep
+baselines, failed runs and discarded hill climbs for at least 90 days. The
+runner now archives private snapshots/results/traces automatically and reports
+recent matches; record why an unchanged input needs another run. This lookup
+does not replace required regression checks or establish model-version parity.
+Before scratch cleanup, verify the archived run ID and evidence. Publish a
+bounded summary with that ID, owning host/path and protected report reference
+to the consumer's already-authorized registry/memory; a missing local worktree
+or local-store miss does not erase another host's run. Keep raw traces and
+credentials out of public source. When retention/publication is already part
+of the user's request, complete it without asking for the same permission
+again; a new external destination still needs its own authority.
+
 ## 1. Check coverage first
 
 Run from the repository root (or pass `--root` for a skills directory):
@@ -42,7 +56,7 @@ expected_output, fixture files under `resources/`), runs
 `claude plugin eval` there, and prints one row per skill: cases, mean score,
 how many runs fired the skill, and the graders that failed. `--json` prints
 the same as one object. Results, the wrapper and `results.json` stay under
-`--out` (default: a timestamped directory in the system temp dir).
+`--out` (default: a private directory under the durable evaluation history).
 
 Cost and scope rules:
 
@@ -86,11 +100,14 @@ as an LCARS recipe reads `result.json` directly.
   prompt its owner expects it to. Fix the description (what it does and when
   to use it, including the plain phrasing users actually type), not the
   prompt, unless the prompt was out of scope.
-- A failed `criteria` grader with the skill fired means the body did not
-  carry the behavior the assertion names. Read the run in `report.html`
-  under the results directory before changing anything; the judge sees the
-  final message and the trace, so assertions about intermediate steps need
-  the step to be visible there.
+- For a failed `criteria` grader with the skill fired, inspect the actual
+  evidence and judge-vote spread in `report.html` before changing guidance.
+  Preserve the original score; a disputed grade is not an automatic pass or
+  proof of a missing rule. Check the recorded grader `focus`: `last_message`
+  does not expose the full tool trace to that judge. A plan-only prompt must
+  be judged on its proposed workflow, not on forbidden real execution. Keep
+  intermediate-action claims with a trace-aware check and record any proposed
+  grading-contract change as a new comparison, never a silent score fix.
 - Exit status is the runner's: 0 when every case met the threshold (default
   1.0, override with `-- --threshold 0.67` for noisy cases), 1 for a case
   below threshold or a load error, 2 for a partial run stopped by the cost

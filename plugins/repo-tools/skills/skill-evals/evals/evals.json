@@ -24,6 +24,17 @@
         "Recommends rewriting the prompts to ask for a plan, commands or a decision rather than granting access",
         "Does not recommend giving the runner SSH or real credentials"
       ]
+    },
+    {
+      "id": 3,
+      "name": "retained-evidence-before-repeat",
+      "prompt": "Use the skill-evals workflow to advise on this evaluation, using only the supplied facts and without executing commands or contacting services. Two weeks ago candidate A was rejected: same source, model, suite and grader as today; score 2/3 with three failed hypotheses. Its scratch worktree is gone, but a protected report and raw evidence survive on another host. I want to try the same changes again and delete the failed results after cleanup. Give the next actions and the retention/publication boundary. Do not launch a new experiment.",
+      "assertions": [
+        "The proposed plan checks retained evidence and shared registry/memory before repeating, and recognizes that a missing local worktree or local-store miss does not erase another host's effort. Actual tool execution is forbidden and is not required to pass.",
+        "The advice calls for a recorded change in conditions or a reason for additional samples before repeating rejected changes, and says failed/discarded evidence must remain for at least 90 days.",
+        "The proposed bounded summary includes run identity and owning host/path/report references, with raw traces and credentials kept out of public source. This is a proposed publication boundary; no actual publication is required."
+      ],
+      "files": []
     }
   ]
 }
