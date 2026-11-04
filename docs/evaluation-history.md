@@ -75,8 +75,11 @@ record a new one and link its predecessor in the inputs/result.
 `repo-skill-evals` now keeps default output under the durable history root,
 records an attempt before starting the stock runner, and archives its input
 snapshot, reports, raw results and available per-run traces even on failure.
-It does not copy the sandbox's credential/configuration directory. Explicit
-`--out` remains supported; selected evidence is still copied into history before
+It does not copy the sandbox's credential/configuration directory. Runner
+temporary directories are held until the trace copy completes, then
+recognized account-owned scaffolds are removed. Passing `-- --keep-temp`
+retains those scaffolds for debugging. Other temporary layouts are left alone.
+Explicit `--out` remains supported; selected evidence is still copied into history before
 returning. `--list` and `--dry-run` do not create evaluation records.
 
 Before inference it reports recent matches for the generated input snapshot,

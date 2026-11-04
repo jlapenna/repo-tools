@@ -130,7 +130,7 @@ test('real CLI lists coverage and writes a runnable wrapper plugin on --dry-run'
   const dry = run('--dry-run', '--out', out, '--evals-root', path.join(root, 'central'), '--', '--ablation', 'none');
   assert.equal(dry.status, 0, dry.stderr);
   assert.match(dry.stdout, /5 cases for 3 skills/);
-  assert.match(dry.stdout, /claude plugin eval .* --trust-plugin --no-publish --json .*results\.json --output-dir .* --ablation none$/m);
+  assert.match(dry.stdout, /claude plugin eval .* --trust-plugin --no-publish --keep-temp --json .*results\.json --output-dir .* --ablation none$/m);
   const plugin = path.join(out, 'plugin');
   assert.equal(JSON.parse(readFileSync(path.join(plugin, '.claude-plugin/plugin.json'), 'utf8')).name, 'skill-evals');
   assert.ok(existsSync(path.join(plugin, 'skills/oncall/SKILL.md')));
@@ -212,6 +212,31 @@ test('default runs persist snapshots and results, warn about prior identical wor
   main(args, { spawn, log: s => outputs.push(JSON.parse(s)), warn: s => warnings.push(s) });
   assert.equal(outputs[1].history.previous[0], record.id);
   assert.match(warnings[0], /recent matching/);
+});
+
+test('stock temporary traces survive archive while owned SDK state is cleaned, with explicit debug opt-out', t => {
+  const { root } = fixture(t);
+  const run = keep => {
+    const temp = mkdtempSync(path.join(tmpdir(), 'claude-eval-history-test-'));
+    t.after(() => rmSync(temp, { recursive: true, force: true }));
+    mkdirSync(path.join(temp, 'out')); mkdirSync(path.join(temp, 'config'));
+    const trace = path.join(temp, 'out/trace.jsonl');
+    writeFileSync(trace, 'native trace bytes\n');
+    writeFileSync(path.join(temp, 'config/private-auth'), 'NEVER ARCHIVE THIS');
+    let summary;
+    const spawn = (cmd, args) => {
+      assert.equal(args.filter(a => a === '--keep-temp').length, 1);
+      writeFileSync(args[args.indexOf('--json') + 1], JSON.stringify({ cases: [{ name: 'oncall--eval-1', arms: { with: [{ tracePath: trace, graders: [] }] }, aggregates: { score: 1 } }] }));
+      return { status: 0, stdout: '' };
+    };
+    main(['--root', path.join(root, 'repo'), '--skill', 'oncall', '--json', ...(keep ? ['--', '--keep-temp'] : [])], { spawn, log: s => { summary = JSON.parse(s); }, warn: () => {} });
+    const record = readRun(summary.history.store, summary.history.id);
+    assert.ok(!record.artifacts.some(a => a.source.includes('private-auth')));
+    const saved = record.artifacts.find(a => a.source === trace);
+    assert.equal(readFileSync(path.join(summary.history.store, 'runs', record.id, saved.path), 'utf8'), 'native trace bytes\n');
+    assert.equal(existsSync(temp), keep);
+  };
+  run(false); run(true);
 });
 
 test('runner startup errors retain a failed attempt without masking the original failure', t => {
