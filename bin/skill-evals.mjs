@@ -23,8 +23,12 @@
 // `--ablation with-without`, `--max-cost-usd 5`, `--case 'oncall--*'`).
 // Exit status is the runner's (0 every case at threshold, 1 a case below
 // threshold or a load failure, 2 partial), or 1 for a usage error.
+// The wrapper is passed with --trust-plugin because it holds only copies of
+// skills the caller chose to score; the runner's sandbox still applies, and a
+// case's allowed_tools cannot grant Bash, Write, Edit, WebFetch or MCP tools
+// without the operator's own `-- --allow-tools` grant.
 import { spawnSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -87,9 +91,28 @@ export function loadEntries(file) {
       expected: typeof entry.expected_output === 'string' ? entry.expected_output.trim() : '',
       checks: checks.map(String).map((s) => s.trim()).filter(Boolean),
       files: Array.isArray(entry.files) ? entry.files.map(String) : [],
-      options: entry.plugin_eval && typeof entry.plugin_eval === 'object' ? entry.plugin_eval : {},
+      options: runnerOptions(entry.plugin_eval, `${file}: evals[${index}].plugin_eval`),
     };
   });
+}
+
+// The runner validates these too, but a clear error here names the entry.
+const LIMITS = { runs: [1, 50], max_turns: [1, 200], timeout_seconds: [1, 3600] };
+function runnerOptions(raw, where) {
+  if (raw === undefined) return {};
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error(`${where} must be an object`);
+  const options = {};
+  for (const [key, [min, max]] of Object.entries(LIMITS)) {
+    if (raw[key] === undefined) continue;
+    if (!Number.isInteger(raw[key]) || raw[key] < min || raw[key] > max) throw new Error(`${where}.${key} must be an integer from ${min} to ${max}`);
+    options[key] = raw[key];
+  }
+  if (raw.allowed_tools !== undefined) {
+    if (!Array.isArray(raw.allowed_tools) || !raw.allowed_tools.every((t) => typeof t === 'string' && /^[A-Za-z][\w]*(?:\([^()]*\))?$/.test(t))) throw new Error(`${where}.allowed_tools must be a list of tool names`);
+    // Gated tools (Bash, Write, Edit, WebFetch, mcp__*) still need the operator's `-- --allow-tools` grant; a case cannot widen it.
+    options.allowed_tools = raw.allowed_tools;
+  }
+  return options;
 }
 
 const slug = (value) => String(value).toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^[^a-z0-9]+|[^a-z0-9._-]+$/g, '') || 'eval';
@@ -117,11 +140,23 @@ export function buildCase(skill, entry, options) {
     prompt: entry.prompt,
     max_turns: options.triggerOnly ? 3 : entry.options.max_turns ?? 8,
     timeout_seconds: entry.options.timeout_seconds ?? 600,
-    allowed_tools: Array.isArray(entry.options.allowed_tools) ? entry.options.allowed_tools : DEFAULT_TOOLS,
+    allowed_tools: entry.options.allowed_tools ?? DEFAULT_TOOLS,
   };
   const spec = { schema_version: '1.1', name, runs: options.runs ?? entry.options.runs ?? 1, expected_outcome: entry.expected || undefined, execution, graders };
   if (entry.files.length) spec.context = { add_dirs: ['resources'] };
   return spec;
+}
+
+// A fixture must live beside its evals.json; a path that escapes it (absolute,
+// `..`, or a symlink out) would copy arbitrary files into the case workspace.
+export function fixturePath(evalsFile, file) {
+  const base = realpathSync(path.dirname(evalsFile));
+  if (path.isAbsolute(file) || file.split(/[\\/]/).includes('..')) throw new Error(`${evalsFile}: fixture ${file} must be a relative path inside the evals directory`);
+  const source = path.join(base, file);
+  if (!existsSync(source)) throw new Error(`${evalsFile}: fixture ${file} does not exist`);
+  const real = realpathSync(source);
+  if (real !== base && !real.startsWith(base + path.sep)) throw new Error(`${evalsFile}: fixture ${file} resolves outside the evals directory`);
+  return source;
 }
 
 export function writeWrapper(outDir, skills, options) {
@@ -137,9 +172,7 @@ export function writeWrapper(outDir, skills, options) {
       const caseDir = path.join(plugin, 'evals', spec.name);
       mkdirSync(caseDir, { recursive: true });
       for (const file of entry.files) {
-        const source = path.resolve(path.dirname(skill.evals), file);
-        if (!existsSync(source)) throw new Error(`${skill.evals}: fixture ${file} does not exist`);
-        cpSync(source, path.join(caseDir, 'resources', path.basename(file)), { recursive: true });
+        cpSync(fixturePath(skill.evals, file), path.join(caseDir, 'resources', path.basename(file)), { recursive: true, dereference: false });
       }
       // YAML is a superset of JSON, so the case file needs no YAML writer.
       writeFileSync(path.join(caseDir, 'case.yaml'), JSON.stringify(spec, null, 2) + '\n');
@@ -228,7 +261,7 @@ export function main(argv, { log = console.log, spawn = spawnSync } = {}) {
     return 0;
   }
   if (!withEvals.length) throw new Error(`none of the ${skills.length} skills has an evals.json; use --list to see them`);
-  const outDir = options.out ?? path.join(tmpdir(), `repo-skill-evals-${new Date().toISOString().replace(/[:.]/g, '-')}`);
+  const outDir = options.out ?? mkdtempSync(path.join(tmpdir(), 'repo-skill-evals-'));
   mkdirSync(outDir, { recursive: true });
   const { plugin, manifest } = writeWrapper(outDir, withEvals, options);
   const resultsFile = path.join(outDir, 'results.json');

@@ -5,12 +5,12 @@
 // and the skill-evals skill, which tells agents to run this command.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { buildCase, discoverSkills, findEvals, loadEntries, main, parseArgs, renderTable, summarize } from './skill-evals.mjs';
+import { buildCase, discoverSkills, findEvals, fixturePath, loadEntries, main, parseArgs, renderTable, summarize } from './skill-evals.mjs';
 
 const script = fileURLToPath(new URL('./skill-evals.mjs', import.meta.url));
 
@@ -74,6 +74,24 @@ test('builds a case per eval entry with a skill-fired grader and a rubric from a
   assert.deepEqual(landed.execution.allowed_tools, ['Skill']);
   assert.equal(landed.execution.max_turns, 2);
   assert.match(landed.graders[1].criteria, /Waits for CI/);
+});
+
+test('fixtures must stay inside the evals directory and runner overrides stay in range', (t) => {
+  const { root, write } = fixture(t);
+  const evals = path.join(root, 'repo/.agents/skills/oncall/evals/evals.json');
+  assert.equal(fixturePath(evals, 'files/probe.log'), path.join(root, 'repo/.agents/skills/oncall/evals/files/probe.log'));
+  assert.throws(() => fixturePath(evals, '../SKILL.md'), /inside the evals directory/);
+  assert.throws(() => fixturePath(evals, '/etc/hostname'), /inside the evals directory/);
+  assert.throws(() => fixturePath(evals, 'files/missing'), /does not exist/);
+  mkdirSync(path.join(root, 'repo/.agents/skills/oncall/evals/files'), { recursive: true });
+  symlinkSync(path.join(root, 'repo/skills/land-pr/SKILL.md'), path.join(root, 'repo/.agents/skills/oncall/evals/files/escape'));
+  assert.throws(() => fixturePath(evals, 'files/escape'), /outside the evals directory/);
+  write('bad/evals.json', JSON.stringify({ evals: [{ prompt: 'x', plugin_eval: { max_turns: 999 } }] }));
+  assert.throws(() => loadEntries(path.join(root, 'bad/evals.json')), /max_turns must be an integer from 1 to 200/);
+  write('bad/evals.json', JSON.stringify({ evals: [{ prompt: 'x', plugin_eval: { allowed_tools: ['Bash; rm -rf /'] } }] }));
+  assert.throws(() => loadEntries(path.join(root, 'bad/evals.json')), /allowed_tools must be a list of tool names/);
+  write('bad/evals.json', JSON.stringify({ evals: [{ prompt: 'x', plugin_eval: { allowed_tools: ['Bash(git status)', 'mcp__x__y'] } }] }));
+  assert.deepEqual(loadEntries(path.join(root, 'bad/evals.json'))[0].options.allowed_tools, ['Bash(git status)', 'mcp__x__y']);
 });
 
 test('real CLI lists coverage and writes a runnable wrapper plugin on --dry-run', (t) => {
