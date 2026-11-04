@@ -1,0 +1,29 @@
+{
+  "skill_name": "harness-maintenance",
+  "evals": [
+    {
+      "name": "agents-keep-missing-the-rule",
+      "prompt": "Three different agent sessions this week all tried to run the integration suite from the primary checkout even though the repo docs say not to. I want the repo's agent guidance fixed so this stops. How would you approach it, and what would you need to show before claiming it's fixed?",
+      "expected_output": "Starts from the concrete missed decision, corroborates it against source and existing guidance, finds the earliest missing handoff and its single semantic owner (prefer a deterministic check or the owning skill over a new root file), places context where it changes the decision, validates links/frontmatter, and only claims improved behavior after a fresh comparable trajectory.",
+      "assertions": [
+        "Begins by recording the observed failure, promised outcome, target revision and evidence, and corroborates agent explanations against source rather than trusting them",
+        "Gives the requirement one owner (a deterministic check or the owning skill/runbook) and keeps the root agent guide a task router instead of adding a new root learning file or extra skill",
+        "States that structural validation (links, frontmatter) does not prove improved behavior and that an effectiveness claim needs a fresh comparable trajectory under comparable model, tools and authority"
+      ],
+      "id": 1,
+      "files": []
+    },
+    {
+      "name": "refresh-stale-skill-docs",
+      "prompt": "The skills and READMEs in one of my repos have drifted from how the code actually works and agents keep retrieving stale procedures. Plan a gardening pass: what do you fix, where does each fact live, and what are you not allowed to do as part of it?",
+      "expected_output": "Repairs stale claims at their semantic owner and updates inbound routes, keeps operator procedures in runbooks and skill constraints in the skill entry point with conditional detail in references, regenerates inventories from their owner, runs target-native and repo-docs checks, and stays within existing grants (no deployments, credentials or new automation).",
+      "assertions": [
+        "Repairs each stale claim at its owner and updates inbound routes, keeping the root guide a router and conditional procedures in skill references",
+        "Runs target-native checks plus source-consistency/frontmatter/link validation (e.g. repo-docs) while noting those do not prove semantic freshness or worker behavior",
+        "States a proof gap does not authorize deployment, new credentials, private-data export or policy bypass, and recurring work is scheduled only when requested with an owner and retirement condition"
+      ],
+      "id": 2,
+      "files": []
+    }
+  ]
+}

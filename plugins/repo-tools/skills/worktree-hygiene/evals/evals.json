@@ -1,0 +1,29 @@
+{
+  "skill_name": "worktree-hygiene",
+  "evals": [
+    {
+      "name": "commit-in-shared-checkout",
+      "prompt": "I have a few other Claude sessions open against the same repo checkout right now. I want to commit my change and push it. What do you do before running any git command there, and what are the exact steps? Don't run anything.",
+      "expected_output": "Never mutates the shared primary checkout; scans for live processes with repo-scan-live-processes, creates an isolated worktree from origin/main (EnterWorktree or git worktree add), verifies it is unoccupied with git status/log and a rescan, runs tools/setup-worktree.sh if present, then commits and pushes there.",
+      "assertions": [
+        "States only read-only inspection is safe in the shared primary checkout and all git-mutating work goes in an isolated worktree created from origin/main (even if the checkout looks clean)",
+        "Runs `repo-scan-live-processes <path>` (a /proc scan, not tmux panes) and re-checks git status/log after entering the worktree because names can collide",
+        "Re-runs the project's setup step (tools/setup-worktree.sh or documented bootstrap) in the fresh worktree before trusting builds, tests or hooks"
+      ],
+      "id": 1,
+      "files": []
+    },
+    {
+      "name": "pr-merged-remove-worktree",
+      "prompt": "The PR from my task worktree just merged (squash). Now the branch won't delete with git branch -d and I want the worktree gone and the main checkout caught up. What's the safe sequence and what must I not do?",
+      "expected_output": "From outside the worktree, run repo-prune-merged-worktrees --repo <primary> --base origin/main (dry run then --delete) which proves squash-merge landing and delegates to repo-safe-remove-worktree; delete the branch via repo-audit-branches --delete / --delete-remote on landed evidence; then fast-forward the verified clean primary with git pull --ff-only; never use git worktree remove --force or git branch -D.",
+      "assertions": [
+        "Uses `repo-prune-merged-worktrees --repo <primary> --base origin/main [--delete] <worktree>` from outside the worktree and keeps its verdict/removal output as the cleanup receipt",
+        "Explains squash-merged branches fail `git branch -d` and are removed by `repo-audit-branches --delete` (and `--delete-remote --branch <head>`) on landed:merged-pr-head evidence, never with git branch -D or git worktree remove --force",
+        "Finishes by fast-forwarding the verified primary checkout on its base branch with `git pull --ff-only`, leaving untracked files in place and never using a broad git clean"
+      ],
+      "id": 2,
+      "files": []
+    }
+  ]
+}

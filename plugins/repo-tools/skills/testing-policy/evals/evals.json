@@ -1,0 +1,29 @@
+{
+  "skill_name": "testing-policy",
+  "evals": [
+    {
+      "name": "is-this-test-worth-keeping",
+      "prompt": "There's a slow integration test in CI that re-renders every Compose file and I'm not sure it catches anything the unit tests don't. Should I delete it, keep it, or make it non-required? How would you decide and what do you need to name in the proposal?",
+      "expected_output": "Reads the testing-policy reference, decides by whether the check protects an observable production contract with a named consumer, and for a deletion names the policy category that makes it redundant or unearned; notes the policy does not itself authorize changing required checks.",
+      "assertions": [
+        "Reads references/testing-policy.md and applies the observable-contract standard with a required consumer for every check",
+        "Names the protected production contract and the check's consumer, or for a deletion the policy category that makes it redundant or unearned",
+        "States that the policy is not authorization to change required checks, repository variables or deployment behavior without specific authority"
+      ],
+      "id": 1,
+      "files": []
+    },
+    {
+      "name": "add-arm-flag-path-filter",
+      "prompt": "I want to add an enable flag so the deploy job only runs when a repo variable is set, and a path filter so docs-only changes skip the build. Anything I should think through before wiring that up?",
+      "expected_output": "Treats this as a CI decision governed by the testing policy: read the reference's rules for intentional control flags and operational hygiene, name the contract each job protects and its consumer, and confirm authority before changing required jobs or repository variables.",
+      "assertions": [
+        "Recognises enable/arm flags and path filters as covered by the testing policy and reads references/testing-policy.md, including its exception for intentional control flags",
+        "Names the production contract and consumer for the deploy job and build check being gated",
+        "Warns that changing required checks or repository variables needs specific authority beyond this policy"
+      ],
+      "id": 2,
+      "files": []
+    }
+  ]
+}

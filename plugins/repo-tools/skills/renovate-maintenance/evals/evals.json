@@ -1,0 +1,29 @@
+{
+  "skill_name": "renovate-maintenance",
+  "evals": [
+    {
+      "name": "clear-dependency-bot-queue",
+      "prompt": "There are about a dozen bot-opened dependency update PRs piled up in my repo. Work through them and get the safe ones merged. Before you start, tell me how you'd scope the set, in what order you'd merge, and how you'd verify each one. Don't run anything.",
+      "expected_output": "Scopes with author:app/renovate and head:renovate/ (Dependabot separate unless included), snapshots each PR's head/base SHA, diff, checks and threads, verifies each exact head in an isolated worktree with the required gate plus focused checks, merges sequentially re-querying after each merge, verifies the combined base branch, and repeats the search once after the last merge.",
+      "assertions": [
+        "Scopes the queue with both Renovate authorship (author:app/renovate) and branch naming (head:renovate/) and excludes Dependabot or hand-authored PRs unless asked",
+        "Merges sequentially, re-querying live state after every merge and never reusing green evidence from a superseded head",
+        "Verifies each exact PR head in an isolated worktree with the repository's required gate plus focused checks, and classifies risk from the actual diff rather than the title"
+      ],
+      "id": 1,
+      "files": []
+    },
+    {
+      "name": "dashboard-warning-and-broken-minor",
+      "prompt": "The dependency dashboard issue shows a warning about a file it couldn't parse, and a patch bump that got automerged broke the image build on arm64. Should I turn off automerge for that package and close the dashboard once it's quiet? What would you do instead?",
+      "expected_output": "Keeps minor/patch/digest updates on automerge and instead fixes the code and adds/repairs the CI check that should have caught it (e.g. build every shipped architecture in PR CI); traces the dashboard warning to the exact extracted file and removes dead config or narrowly excludes an intentional source; never closes the dashboard just because the queue is empty.",
+      "assertions": [
+        "Refuses to narrow automerge or pin the dependency; fixes the code and adds or repairs the check (e.g. build the image for every shipped architecture in PR CI)",
+        "Traces the dashboard warning to the exact extracted file and dependency, removing dead configuration or narrowly excluding an intentional source rather than a broad ignore rule",
+        "Treats the Dependency Dashboard as a persistent control surface not to be closed when the queue is empty, and keeps deployment separate from merging"
+      ],
+      "id": 2,
+      "files": []
+    }
+  ]
+}
