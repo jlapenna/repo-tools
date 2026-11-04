@@ -154,9 +154,9 @@ export function fixturePath(evalsFile, file) {
   if (path.isAbsolute(file) || file.split(/[\\/]/).includes('..')) throw new Error(`${evalsFile}: fixture ${file} must be a relative path inside the evals directory`);
   const source = path.join(base, file);
   if (!existsSync(source)) throw new Error(`${evalsFile}: fixture ${file} does not exist`);
-  const real = realpathSync(source);
-  if (real !== base && !real.startsWith(base + path.sep)) throw new Error(`${evalsFile}: fixture ${file} resolves outside the evals directory`);
-  return source;
+  const inside = (p) => { const real = realpathSync(p); return real === base || real.startsWith(base + path.sep); };
+  if (!inside(source)) throw new Error(`${evalsFile}: fixture ${file} resolves outside the evals directory`);
+  return { source: realpathSync(source), inside };
 }
 
 export function writeWrapper(outDir, skills, options) {
@@ -172,7 +172,9 @@ export function writeWrapper(outDir, skills, options) {
       const caseDir = path.join(plugin, 'evals', spec.name);
       mkdirSync(caseDir, { recursive: true });
       for (const file of entry.files) {
-        cpSync(fixturePath(skill.evals, file), path.join(caseDir, 'resources', path.basename(file)), { recursive: true, dereference: false });
+        const { source, inside } = fixturePath(skill.evals, file);
+        // Follow links but copy nothing whose target leaves the evals directory, nested entries included.
+        cpSync(source, path.join(caseDir, 'resources', path.basename(file)), { recursive: true, dereference: true, filter: (src) => { if (!inside(src)) throw new Error(`${skill.evals}: fixture ${file} links outside the evals directory (${path.relative(source, src) || '.'})`); return true; } });
       }
       // YAML is a superset of JSON, so the case file needs no YAML writer.
       writeFileSync(path.join(caseDir, 'case.yaml'), JSON.stringify(spec, null, 2) + '\n');
@@ -272,8 +274,10 @@ export function main(argv, { log = console.log, spawn = spawnSync } = {}) {
   }
   // The nested runner is non-interactive; the parent session's marker would only make it refuse to start.
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => key !== 'CLAUDECODE'));
-  const run = spawn(command[0], command[1], { cwd: plugin, stdio: ['ignore', 'inherit', 'inherit'], env });
+  // The runner's own progress lines stay out of --json output; they are kept in runner.log instead.
+  const run = spawn(command[0], command[1], { cwd: plugin, stdio: ['ignore', options.json ? 'pipe' : 'inherit', 'inherit'], env, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
   if (run.error) throw new Error(`could not run claude: ${run.error.message}`);
+  if (options.json && run.stdout) writeFileSync(path.join(outDir, 'runner.log'), run.stdout);
   if (!existsSync(resultsFile)) throw new Error(`claude plugin eval exited ${run.status} without writing ${resultsFile}`);
   const results = JSON.parse(readFileSync(resultsFile, 'utf8'));
   const rows = summarize(results, manifest);
