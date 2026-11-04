@@ -33,7 +33,7 @@ web routes, and heading anchors are not checked. Nx inventories include only
 explicit targets, not inferred targets. These are source contracts, not runtime
 health checks.
 
-- `repo-skill-evals [--root DIR]... [--evals-root DIR]... [--skill NAME]... [--list | --dry-run] [--out DIR] [--runs N] [--trigger-only] [--json] [-- <claude plugin eval options>]`
+- `repo-skill-evals [--root DIR]... [--evals-root DIR]... [--skill NAME]... [--list | --dry-run] [--out DIR] [--runs N] [--trigger-only] [--json] [--report DIR] [--baseline FILE] [--allow-gated-tools] [-- <claude plugin eval options>]`
   — score a repository's skills with the stock Claude Code runner. It finds
   every `*/SKILL.md` below the roots, reads each skill's committed
   skill-creator `evals/evals.json` (or `<evals-root>/<skill>/evals.json`),
@@ -44,8 +44,15 @@ health checks.
   `--list` reports coverage without running anything; `--trigger-only`
   keeps just the skill-fired grader at three turns. Runs and judges are
   real model calls on the caller's account; pass `-- --max-cost-usd N` to
-  bound them. Exit status is the runner's. The `skill-evals` skill owns
-  when and how to use it.
+  bound them. `--report DIR` writes `DIR/report.md` (a Markdown job report
+  with the table, uncovered skills, errored runs and failed-case evidence)
+  and `DIR/result.json` (`{ report, complete, data }`) for automation;
+  `--baseline FILE` compares with a previous `result.json` and lists
+  regressions first. A case whose `allowed_tools` grants Bash, PowerShell,
+  Write, Edit, WebFetch or an `mcp__*` tool is refused because LCARS
+  worker pods have no sandbox backend; `--allow-gated-tools` opts out for
+  workstation runs. Exit status is the runner's. The `skill-evals` skill
+  owns when and how to use it.
 - `repo-doctor [--json]` — read-only check that the installed runtime is
   usable before an agent relies on it. It reports the repo-tools package
   root (and commit, for a checkout), the enclosing repository if any, the

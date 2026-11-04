@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { buildCase, discoverSkills, findEvals, fixturePath, loadEntries, main, parseArgs, renderTable, summarize, writeWrapper } from './skill-evals.mjs';
+import { buildCase, compareBaseline, discoverSkills, findEvals, fixturePath, gatedTool, loadBaseline, loadEntries, main, parseArgs, renderTable, summarize, writeWrapper } from './skill-evals.mjs';
 
 const script = fileURLToPath(new URL('./skill-evals.mjs', import.meta.url));
 
@@ -182,4 +182,159 @@ test('runs the stock runner from the wrapper and propagates its exit status', (t
   assert.deepEqual(summary.skills[0].failed, ['oncall--eval-1/skill-fired']);
   assert.equal(readFileSync(path.join(root, 'out/runner.log'), 'utf8'), 'Wrote results.json\n');
   assert.throws(() => parseArgs(['--runs', '0']), /--runs/);
+});
+
+test('refuses a committed case that grants a gated tool unless --allow-gated-tools', (t) => {
+  const { root, write } = fixture(t);
+  const skill = { name: 'oncall', dir: path.join(root, 'repo/.agents/skills/oncall') };
+  for (const tool of ['Bash', 'Bash(git status)', 'PowerShell', 'Write', 'Edit', 'WebFetch', 'mcp__home__ha_get_state']) {
+    write('gated/evals.json', JSON.stringify({ evals: [{ name: 'shell', prompt: 'Run it.', assertions: ['Runs'], plugin_eval: { allowed_tools: ['Skill', tool] } }] }));
+    const [entry] = loadEntries(path.join(root, 'gated/evals.json'));
+    assert.throws(() => buildCase(skill, entry, {}), (error) => {
+      assert.match(error.message, /^oncall: case oncall--shell grants the tool /);
+      assert.ok(error.message.includes(tool), `names ${tool}`);
+      assert.match(error.message, /no sandbox in LCARS worker pods/);
+      assert.match(error.message, /must not be committed/);
+      return true;
+    }, tool);
+    assert.deepEqual(buildCase(skill, entry, { allowGatedTools: true }).execution.allowed_tools, ['Skill', tool]);
+  }
+  assert.equal(gatedTool(['Skill', 'Read', 'Glob', 'Grep', 'WebSearch']), undefined, 'the default tools and other ungated tools pass');
+  const safe = loadEntries(path.join(root, 'repo/.agents/skills/oncall/evals/evals.json'))[0];
+  assert.deepEqual(buildCase(skill, safe, {}).execution.allowed_tools, ['Skill', 'Read', 'Glob', 'Grep'], 'the default allowed tools are unchanged');
+  assert.equal(parseArgs(['--allow-gated-tools']).allowGatedTools, true);
+  assert.equal(parseArgs([]).allowGatedTools, false);
+  const run = (...args) => spawnSync(process.execPath, [script, ...args], { encoding: 'utf8', cwd: path.join(root, 'repo') });
+  write('repo/.agents/skills/oncall/evals/evals.json', JSON.stringify({ evals: [{ name: 'shell', prompt: 'Run it.', assertions: ['Runs'], plugin_eval: { allowed_tools: ['Bash'] } }] }));
+  const refused = run('--dry-run', '--skill', 'oncall', '--out', path.join(root, 'out-refused'));
+  assert.equal(refused.status, 1);
+  assert.match(refused.stderr, /oncall--shell grants the tool Bash/);
+  assert.equal(run('--dry-run', '--skill', 'oncall', '--out', path.join(root, 'out-allowed'), '--allow-gated-tools').status, 0);
+});
+
+test('compares per-skill rows with a baseline, regressions first', (t) => {
+  const { root, write } = fixture(t);
+  const row = (skill, score, fired, runs, extra = {}) => ({ skill, score, fired, runs, cases: 1, manualOnly: false, failed: [], errors: 0, ...extra });
+  const rows = [row('a', 0.5, 1, 2), row('b', 1, 2, 2), row('c', 1, 2, 2), row('d', null, 0, 0, { cases: 0 }), row('m', 0.5, 0, 2, { manualOnly: true }), row('new', 1, 1, 1)];
+  const baseline = { skills: [row('a', 1, 2, 2), row('b', 0.5, 2, 2), row('c', 1, 2, 2), row('d', null, 0, 0, { cases: 0 }), row('m', 0.5, 0, 1, { manualOnly: true }), row('gone', 1, 1, 1)] };
+  const comparison = compareBaseline(rows, baseline);
+  assert.deepEqual(comparison.regressions, [{ skill: 'a', score: 0.5, previousScore: 1, fired: 1, runs: 2, previousFired: 2, previousRuns: 2 }]);
+  assert.deepEqual(comparison.improvements.map((c) => c.skill), ['b']);
+  assert.equal(comparison.unchanged, 3, 'equal scores, no-eval skills and manual-only skills (never fired) count as unchanged');
+  assert.deepEqual(comparison.new, ['new']);
+  assert.deepEqual(comparison.removed, ['gone']);
+  assert.deepEqual(compareBaseline([row('x', 1, 1, 1)], { skills: [row('x', 0.5, 1, 1), row('x-fired', 1, 1, 1)] }).regressions, []);
+  assert.deepEqual(compareBaseline([row('f', 1, 1, 2)], { skills: [row('f', 1, 2, 2)] }).regressions.map((c) => c.skill), ['f'], 'a fired-rate drop alone is a regression');
+  write('baseline/result.json', JSON.stringify({ report: '# x', complete: true, data: { skills: [row('a', 1, 2, 2)] } }));
+  write('baseline/data.json', JSON.stringify({ skills: [row('a', 1, 2, 2)] }));
+  assert.equal(loadBaseline(path.join(root, 'baseline/result.json')).skills[0].skill, 'a', 'accepts a whole result.json');
+  assert.equal(loadBaseline(path.join(root, 'baseline/data.json')).skills[0].skill, 'a', 'accepts the data object alone');
+  assert.throws(() => loadBaseline(path.join(root, 'baseline/missing.json')), /--baseline .*missing\.json: ENOENT/);
+  write('baseline/bad.json', '{not json');
+  assert.throws(() => loadBaseline(path.join(root, 'baseline/bad.json')), /--baseline .*bad\.json: /);
+  write('baseline/shape.json', JSON.stringify({ skills: 'nope' }));
+  assert.throws(() => loadBaseline(path.join(root, 'baseline/shape.json')), /"skills" array/);
+});
+
+test('writes a Markdown job report and result.json with the baseline comparison', (t) => {
+  const { root, write } = fixture(t);
+  write('repo/.agents/skills/oncall/evals/evals.json', JSON.stringify({ evals: [
+    { name: 'probe', prompt: `Headscale probe is failing, ${'x'.repeat(400)}`, assertions: ['Reads the probe log'] },
+    { name: 'memory', prompt: 'SparkMemoryCriticallyLow fired.', assertions: ['Stops the container'] },
+  ] }));
+  const spawn = (cmd, args) => {
+    writeFileSync(args[args.indexOf('--json') + 1], JSON.stringify({ claudeVersion: '2.1.318', costUsd: 0.5, durationSeconds: 9, partial: true, partialReason: 'cost ceiling', aggregates: { casesTotal: 4, casesPassed: 1 }, cases: [
+      { name: 'oncall--probe', promptMarkdown: `Headscale probe is failing, ${'x'.repeat(400)}`, aggregates: { score: 0.5 }, arms: { with: [
+        { graders: [{ name: 'skill-fired', passed: true }, { name: 'criteria', passed: false, explanation: 'judge votes: FAIL', evidence: `${'e'.repeat(700)}` }] },
+        { error: 'boom', graders: [] },
+      ] } },
+      { name: 'oncall--memory', aggregates: { score: 1 }, arms: { with: [{ graders: [{ name: 'skill-fired', passed: true }, { name: 'criteria', passed: true }] }] } },
+      { name: 'handoff--eval-1', aggregates: { score: 0.5 }, arms: { with: [{ graders: [{ name: 'criteria', passed: false, explanation: 'judge votes: FAIL PASS' }] }] } },
+      { name: 'handoff--eval-2', aggregates: { score: 1 }, arms: { with: [{ graders: [{ name: 'criteria', passed: true }] }] } },
+    ] }));
+    return { status: 2, stdout: '' };
+  };
+  const probes = [];
+  const exec = (cmd, args, opts) => {
+    probes.push({ cmd, cwd: opts.cwd });
+    if (cmd === 'git') return { status: 0, stdout: 'abc1234\n' };
+    return { error: new Error('ENOENT') };
+  };
+  write('baseline.json', JSON.stringify({ report: '', complete: true, data: { skills: [
+    { skill: 'oncall', score: 1, fired: 2, runs: 2, cases: 2 }, { skill: 'handoff', score: 0.75, fired: 0, runs: 2, cases: 2, manualOnly: true }, { skill: 'retired', score: 1, fired: 1, runs: 1, cases: 1 },
+  ] } }));
+  const logs = [];
+  const status = main(['--root', path.join(root, 'repo'), '--out', path.join(root, 'out'), '--report', path.join(root, 'job'), '--baseline', path.join(root, 'baseline.json'), '--json'], { log: (m) => logs.push(m), spawn, exec });
+  assert.equal(status, 2);
+  assert.deepEqual(probes.map((p) => p.cmd), ['git', 'claude']);
+  assert.equal(probes[0].cwd, path.join(root, 'repo'), 'the revision comes from the first root');
+  const result = JSON.parse(readFileSync(path.join(root, 'job/result.json'), 'utf8'));
+  const report = readFileSync(path.join(root, 'job/report.md'), 'utf8');
+  assert.equal(result.report, report);
+  assert.equal(result.complete, false, 'a partial run is not complete');
+  assert.equal(result.data.exit, 2);
+  assert.equal(result.data.partial, true);
+  assert.equal(result.data.partialReason, 'cost ceiling');
+  assert.equal(result.data.costUsd, 0.5);
+  assert.equal(result.data.durationSeconds, 9);
+  assert.equal(result.data.casesTotal, 4);
+  assert.equal(result.data.casesPassed, 1);
+  assert.deepEqual(result.data.skills.map((s) => s.skill), ['handoff', 'land-pr', 'oncall', 'plain']);
+  assert.deepEqual(result.data.baseline.regressions.map((c) => c.skill), ['oncall']);
+  assert.equal(result.data.baseline.unchanged, 1, 'a manual-only skill with the same score is unchanged');
+  assert.deepEqual(result.data.baseline.new, ['land-pr', 'plain']);
+  assert.deepEqual(result.data.baseline.removed, ['retired']);
+  assert.match(report, /^# Skill evals report\n/);
+  assert.match(report, new RegExp(`- Roots: \`${path.join(root, 'repo')}\``));
+  assert.match(report, /- Revision: `abc1234`/);
+  assert.match(report, /- Runner: 2\.1\.318 \(Claude Code\)/, 'falls back to the runner version recorded in results.json');
+  assert.match(report, /- Date: \d{4}-\d{2}-\d{2}T/);
+  assert.match(report, /- Exit: 2 \(partial: cost ceiling\)/);
+  assert.match(report, /- Cases passed: 1\/4/);
+  assert.match(report, /list-price cost estimate \(not billed spend\): \$0\.50/);
+  assert.doesNotMatch(report, /spent/i);
+  assert.match(report, /\| Skill \| Cases \| Score \| Fired \| Failed graders \| Run errors \|/);
+  assert.match(report, /\| oncall \| 2 \| 0\.75 \| 2\/3 \| oncall--probe\/criteria \| 1 \|/);
+  assert.match(report, /\| plain \| 0 \| no evals \| - \|  \| 0 \|/);
+  assert.match(report, /\| handoff \| 2 \| 0\.75 \| manual \| handoff--eval-1\/criteria \| 0 \|/);
+  assert.match(report, /## Skills without evals\n\n- land-pr\n- plain\n/);
+  assert.match(report, /## Runs that errored\n\n- oncall--probe \(run 2\): boom\n/);
+  assert.match(report, /## Changes since baseline\n\n### Regressions \(1\)\n\n- oncall: score 1 -> 0\.75, fired 2\/2 -> 2\/3\n\n### Improvements \(0\)\n\n- none\n\n- Unchanged: 1\n/);
+  assert.ok(report.indexOf('### Regressions') < report.indexOf('### Improvements'), 'regressions come first');
+  assert.match(report, /- New skills: land-pr, plain\n- Removed skills: retired\n/);
+  assert.match(report, /## Failures\n\n### oncall\n\nfired 2\/3\n\n#### oncall--probe\n\nPrompt:\n\n```text\nHeadscale probe is failing, x+…\n```\n/);
+  assert.match(report, /- `criteria` failed in run 1: judge votes: FAIL\n\n```text\ne{600}…\n```/);
+  assert.doesNotMatch(report, /x{301}/, 'prompts are clipped to 300 characters');
+  assert.doesNotMatch(report, /e{601}/, 'evidence is clipped to 600 characters');
+  assert.doesNotMatch(report, /#### oncall--memory/, 'passing cases are not listed');
+  assert.doesNotMatch(report, /### handoff\n/, 'a manual-only skill at 0.75 with no fired expectation is not a failure');
+  const summary = JSON.parse(logs[0]);
+  assert.equal(summary.report, path.join(root, 'job'));
+  assert.deepEqual(summary.baseline.removed, ['retired']);
+});
+
+test('--report also works with the table output and marks a clean run complete', (t) => {
+  const { root } = fixture(t);
+  const spawn = (cmd, args) => {
+    writeFileSync(args[args.indexOf('--json') + 1], JSON.stringify({ costUsd: 0.1, durationSeconds: 3, aggregates: { casesTotal: 2, casesPassed: 2 }, cases: [
+      { name: 'oncall--eval-1', aggregates: { score: 1 }, arms: { with: [{ graders: [{ name: 'skill-fired', passed: true }, { name: 'criteria', passed: true }] }] } },
+      { name: 'oncall--memory-alert', aggregates: { score: 1 }, arms: { with: [{ graders: [{ name: 'skill-fired', passed: true }, { name: 'criteria', passed: true }] }] } },
+    ] }));
+    return { status: 0, stdout: '' };
+  };
+  const exec = (cmd) => (cmd === 'claude' ? { status: 0, stdout: '2.1.318 (Claude Code)\n' } : { status: 128, stdout: '' });
+  const logs = [];
+  const status = main(['--root', path.join(root, 'repo'), '--skill', 'oncall', '--out', path.join(root, 'out'), '--report', path.join(root, 'job')], { log: (m) => logs.push(m), spawn, exec });
+  assert.equal(status, 0);
+  assert.match(logs[0], /^oncall\s+2\s+1\s+2\/2/m);
+  assert.match(logs[0], /runner cost estimate \$0\.10 \(list price, not billed spend\)/);
+  assert.match(logs[0], new RegExp(`report in ${path.join(root, 'job')}`));
+  const result = JSON.parse(readFileSync(path.join(root, 'job/result.json'), 'utf8'));
+  assert.equal(result.complete, true);
+  assert.equal(result.data.baseline, null);
+  assert.match(result.report, /- Runner: 2\.1\.318 \(Claude Code\)/);
+  assert.doesNotMatch(result.report, /- Revision:/, 'no revision line when the root is not a repository');
+  assert.match(result.report, /## Runs that errored\n\n- none\n$/, 'the report ends after the last section with one newline');
+  assert.doesNotMatch(result.report, /## Failures/);
+  assert.throws(() => main(['--root', path.join(root, 'repo'), '--baseline', path.join(root, 'nope.json')], { spawn: () => assert.fail('a bad baseline must fail before the runner starts'), exec }), /--baseline .*nope\.json/);
 });

@@ -35,6 +35,14 @@ repository that keeps evals outside its skill directories, at
 | `files` | no | Fixture paths relative to the `evals.json` directory, copied into the case's `resources/` and granted read-only. |
 | `plugin_eval` | no | Per-entry runner overrides: `runs`, `max_turns` (default 8), `timeout_seconds` (default 600), `allowed_tools` (default `Skill, Read, Glob, Grep`). |
 
+`allowed_tools` must not grant `Bash`, `PowerShell`, `Write`, `Edit`,
+`WebFetch` or any `mcp__*` tool (including scoped forms such as
+`Bash(git status)`). The runner only grants those with an operator
+`--allow-tools` flag and a sandbox backend, and LCARS worker pods have no
+sandbox, so `repo-skill-evals` refuses such a case by name before running
+anything. Such entries must not be committed; `--allow-gated-tools` exists
+only for workstation runs.
+
 Write assertions a judge can verify from the final message or the trace:
 a named file, command, decision, ordering or refusal. Avoid assertions about
 tone or about work that happens outside the sandbox. Two or three per entry

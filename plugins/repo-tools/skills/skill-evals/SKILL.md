@@ -32,7 +32,7 @@ reports frontmatter that does not parse: `claude plugin validate <dir>`.
 
 ```bash
 repo-skill-evals [--skill <name>]... [--runs N] [--trigger-only] [--out <dir>] \
-  [-- <claude plugin eval options>]
+  [--report <dir>] [--baseline <file>] [-- <claude plugin eval options>]
 ```
 
 The command copies the selected skills into a temporary wrapper plugin,
@@ -60,6 +60,25 @@ Cost and scope rules:
 - On Linux the runner needs `bubblewrap` and `socat`; it refuses to run
   without a sandbox backend. Nothing in a case may write outside its
   workspace.
+- A case whose `plugin_eval.allowed_tools` grants `Bash`, `PowerShell`,
+  `Write`, `Edit`, `WebFetch` or any `mcp__*` tool is refused before the
+  runner starts: LCARS worker pods have no sandbox backend, so the runner
+  would reject the case there. Do not commit such cases; rewrite the prompt
+  to ask for commands or a decision. `--allow-gated-tools` opts out for a
+  workstation run only.
+
+Job reports: `--report <dir>` writes `<dir>/report.md` (header with roots,
+revision, runner version and date; the per-skill table; skills without
+evals; errored runs; and, for every skill that fired below its run count or
+scored under 0.67, each failed case's prompt and grader evidence) and
+`<dir>/result.json` as `{ report, complete, data }`, where `complete` is
+true only for runner exit 0 with no partial run and `data` carries the
+summary rows, exit, partial state, the runner's list-price cost estimate
+(not billed spend), duration, case counts and the baseline comparison.
+`--baseline <file>` takes a previous `result.json` (or its `data` object)
+and adds a "Changes since baseline" section, regressions first; a missing
+or unparsable baseline is an error before anything runs. Automation such
+as an LCARS recipe reads `result.json` directly.
 
 ## 3. Read the result and act
 
