@@ -32,6 +32,8 @@ jobs:
         # A rebased release commit can become a downgrade of main's version.
         if: github.event_name == 'pull_request'
         run: node scripts/release.mjs --check-base HEAD^1
+      - name: Install native archive transport for integration tests
+        run: sudo apt-get update -qq && sudo apt-get install -y rclone
       - run: pnpm test
       - run: pnpm run test:cleanup
       - run: pnpm run test:docs

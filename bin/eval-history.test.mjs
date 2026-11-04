@@ -11,7 +11,7 @@ test('public CLI records and discovers a finished ordinary evaluation', t => {
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const inputs = path.join(root, 'inputs.json');
   writeFileSync(inputs, JSON.stringify({ suite: 'ordinary-regression', model: 'fixed' }));
-  const cli = (...args) => spawnSync(process.execPath, [new URL('./eval-history.mjs', import.meta.url).pathname, ...args], { encoding: 'utf8', env: { ...process.env, EVAL_HISTORY_DIR: path.join(root, 'history') } });
+  const cli = (...args) => spawnSync(process.execPath, [new URL('./eval-history.mjs', import.meta.url).pathname, ...args], { encoding: 'utf8', env: { ...process.env, EVAL_HISTORY_DIR: path.join(root, 'history'), EVAL_HISTORY_CONFIG: path.join(root, 'no-config'), EVAL_HISTORY_REMOTE: '' } });
   const recorded = cli('record', '--kind', 'model', '--subject', 'tools', '--inputs', inputs, '--status', 'failed', '--summary', 'Candidate regressed');
   assert.equal(recorded.status, 0, recorded.stderr);
   const record = JSON.parse(recorded.stdout);
