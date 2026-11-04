@@ -25,7 +25,7 @@ the job disappears. A pod-local filesystem is not durable retention. Local
 stores are per account/host unless configured to a shared filesystem. Consult
 the consumer's shared registry or memory as well; a local miss does not establish
 that another host has not already done the work. Include the owning host/path
-and bounded report link in cross-host summaries. No new service is required.
+and bounded report link in cross-host summaries. An optional object-store archive provides shared discovery and retrieval without a shared filesystem.
 
 ```bash
 repo-eval-history find --subject x1c-readiness --days 90
@@ -88,3 +88,42 @@ output, adding `history` with the run ID, store and matching prior IDs. This
 notice does not suppress intentional repetitions or scheduled regression checks.
 Use the record to decide whether a repeat is necessary, rather than treating a
 matching fingerprint as permission to skip a required check.
+
+## Shared S3 or GCS archive
+
+Install rclone and configure a private named remote using its native S3 or GCS
+backend. Credentials belong in the protected rclone profile or provider credential
+helper, never in run records. Set `~/.config/eval-history/config.json` (respecting
+`XDG_CONFIG_HOME`) to:
+
+```json
+{"remote":"archive:private-bucket","rcloneConfig":"/absolute/private/rclone.conf"}
+```
+
+`EVAL_HISTORY_CONFIG` selects another settings file. `EVAL_HISTORY_REMOTE` and
+`EVAL_HISTORY_RCLONE_CONFIG` override its fields. An empty remote disables the
+backend. No backend is enabled by default.
+
+Configured `record`, `finish`, and actual `repo-skill-evals` runs upload terminal
+records automatically, including failures and discarded attempts. `find` merges
+local and shared records; `find --local` permits offline inspection. `--local`
+on `record` or `finish` deliberately retains only the local record.
+
+```bash
+repo-eval-history upload --all        # backfill or retry, without inference
+repo-eval-history remote-find --days 0
+repo-eval-history fetch --id <run-id>  # restore into the local store
+repo-eval-history fetch --all         # verified portable backup/export
+```
+
+Objects use `runs/<UUID>/artifacts/<name>` and a final `record.json` discovery
+marker. Uploads use immutable checksum comparisons; no sync, deletion or pruning
+occurs. Retrieval checks artifact sizes and SHA-256 before publishing a private
+local run directory. Existing local records are never overwritten. Terminal
+records remain unchanged; a separate local `archive.json` records upload success.
+
+An archive error returns failure while preserving the local evidence and native
+results. Retry `upload --id <run-id>` after repairing access; do not repeat the
+evaluation to retry storage. Discovery errors remain visible; use `--local` for
+explicit offline work. Replication of an object store is not a backup: the
+consumer must also preserve a verified portable export through its backup owner.

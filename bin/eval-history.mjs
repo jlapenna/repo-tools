@@ -5,6 +5,7 @@ import { mkdirSync, readFileSync, writeFileSync, renameSync, readdirSync, statSy
 import { homedir, hostname } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { archiveConfig, archiveRun, archiveCommand, remoteFind } from './eval-history-remote.mjs';
 
 export const historyRoot = () => path.resolve(process.env.EVAL_HISTORY_DIR || path.join(process.env.XDG_STATE_HOME || path.join(homedir(), '.local/state'), 'eval-history'));
 const canonical = value => Array.isArray(value) ? value.map(canonical) : value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).sort().map(k => [k, canonical(value[k])])) : value;
@@ -49,29 +50,32 @@ export function finishRun(root, id, { status, summary, result = {}, artifacts = 
 }
 export function findRuns({ root = historyRoot(), kind, subject, inputs, fingerprint, days = 90, now = new Date(), limit = 20 } = {}) {
   if (!Number.isFinite(days) || days < 0 || !Number.isInteger(limit) || limit < 1) throw Error('days must be nonnegative and limit positive');
-  const wanted = fingerprint ?? (inputs ? inputFingerprint(inputs) : undefined);
   let dirs;
   try { dirs = readdirSync(path.join(root, 'runs')); } catch (e) { if (e.code === 'ENOENT') return []; throw e; }
   const rows = [];
   for (const id of dirs) {
     if (!/^[0-9a-f-]{36}$/.test(id)) continue;
-    const r = readRun(root, id);
-    if ((kind && r.kind !== kind) || (subject && r.subject !== subject) || (wanted && r.fingerprint !== wanted)) continue;
-    if (days && new Date(r.createdAt).getTime() < now.getTime() - days * 86400000) continue;
-    rows.push(r);
+    rows.push(readRun(root, id));
   }
-  return rows.sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, limit);
+  return selectRuns(rows, { kind, subject, inputs, fingerprint, days, now, limit });
+}
+
+export function selectRuns(rows, { kind, subject, inputs, fingerprint, days = 90, now = new Date(), limit = 20 } = {}) {
+  if (!Number.isFinite(days) || days < 0 || !Number.isInteger(limit) || limit < 1) throw Error('days must be nonnegative and limit positive');
+  const wanted = fingerprint ?? (inputs ? inputFingerprint(inputs) : undefined);
+  return rows.filter(r => !((kind && r.kind !== kind) || (subject && r.subject !== subject) || (wanted && r.fingerprint !== wanted)) && (!days || new Date(r.createdAt).getTime() >= now.getTime() - days * 86400000)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, limit);
 }
 
 export function main(argv) {
   const args = [...argv], command = args.shift();
   if (!command || command === '--help') {
-    console.log('repo-eval-history begin --kind KIND --subject SUBJECT --inputs FILE [--summary TEXT]\nrepo-eval-history finish --id ID --status STATUS [--summary TEXT] [--result FILE] [--artifact FILE]...\nrepo-eval-history record --kind KIND --subject SUBJECT --inputs FILE --status STATUS [--result FILE] [--artifact FILE]...\nrepo-eval-history find [--kind KIND] [--subject SUBJECT] [--inputs FILE] [--days 90] [--limit 20]\nrepo-eval-history show --id ID\nAll commands emit JSON. --store DIR overrides EVAL_HISTORY_DIR or the private XDG state store. No automatic deletion.');
+    console.log('repo-eval-history begin --kind KIND --subject SUBJECT --inputs FILE [--summary TEXT]\nrepo-eval-history finish --id ID --status STATUS [--summary TEXT] [--result FILE] [--artifact FILE]...\nrepo-eval-history record --kind KIND --subject SUBJECT --inputs FILE --status STATUS [--result FILE] [--artifact FILE]...\nrepo-eval-history find [--local] [--kind KIND] [--subject SUBJECT] [--inputs FILE] [--days 90] [--limit 20]\nrepo-eval-history show --id ID\nrepo-eval-history upload|fetch --id ID|--all\nrepo-eval-history remote-find [--subject SUBJECT] [--days 90]\nAll commands emit JSON. --store DIR overrides EVAL_HISTORY_DIR or the private XDG state store. Configured archives upload terminal records automatically. No automatic deletion.');
     return 0;
   }
   const o = { artifacts: [] };
   while (args.length) {
     const flag = args.shift();
+    if (flag === '--all' || flag === '--local') { o[flag.slice(2)] = true; continue; }
     if (!['--store', '--kind', '--subject', '--inputs', '--summary', '--id', '--status', '--result', '--artifact', '--days', '--limit'].includes(flag) || !args.length) throw Error(`Unknown or incomplete option: ${flag}`);
     const v = args.shift();
     if (flag === '--artifact') o.artifacts.push(path.resolve(v));
@@ -81,14 +85,24 @@ export function main(argv) {
   const inputs = o.inputs ? JSON.parse(readFileSync(o.inputs, 'utf8')) : undefined;
   const result = o.result ? JSON.parse(readFileSync(o.result, 'utf8')) : {};
   let value;
+  const selection = { kind: o.kind, subject: o.subject, inputs, days: o.days === undefined ? 90 : Number(o.days), limit: o.limit === undefined ? 20 : Number(o.limit) };
   if (command === 'begin' || command === 'record') {
     if (command === 'record' && (!statuses.has(o.status) || o.status === 'running')) throw Error('record needs a terminal --status');
     value = beginRun({ root, kind: o.kind, subject: o.subject, inputs, summary: o.summary });
     if (command === 'record') value = finishRun(root, value.id, { status: o.status, result, artifacts: o.artifacts });
   } else if (command === 'finish') value = finishRun(root, o.id, { status: o.status, summary: o.summary, result, artifacts: o.artifacts });
-  else if (command === 'find') value = findRuns({ root, kind: o.kind, subject: o.subject, inputs, days: o.days === undefined ? 90 : Number(o.days), limit: o.limit === undefined ? 20 : Number(o.limit) });
+  else if (command === 'find') {
+    const local = findRuns({ root, ...selection });
+    const remote = !o.local && archiveConfig() ? remoteFind(selection) : [];
+    value = selectRuns([...new Map([...remote, ...local].map(r => [r.id, r])).values()], selection);
+  }
   else if (command === 'show') value = readRun(root, o.id);
+  else if (['upload', 'fetch', 'remote-find'].includes(command)) value = archiveCommand(command, { ...o, ...selection }, root);
   else throw Error(`Unknown command: ${command}`);
+  if (!o.local && ['finish', 'record'].includes(command)) {
+    const archive = archiveRun(root, value.id);
+    if (archive) value = { ...value, archive };
+  }
   console.log(JSON.stringify(value, null, 2));
   return 0;
 }

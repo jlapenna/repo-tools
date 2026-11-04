@@ -49,6 +49,7 @@ import { fileURLToPath } from 'node:url';
 import { parse } from 'yaml';
 import { createHash } from 'node:crypto';
 import { beginRun, finishRun, findRuns, historyRoot } from './eval-history.mjs';
+import { archiveRun, archiveConfig, remoteFind } from './eval-history-remote.mjs';
 
 const SKIP_DIRS = new Set(['node_modules', '.git', 'results', '.venv', 'dist', 'build']);
 const MAX_DEPTH = 8;
@@ -670,7 +671,9 @@ export function main(argv, { log = console.log, warn = console.error, spawn = sp
   const inputs = { files: Object.fromEntries(inputFiles.map(file => [path.relative(plugin, file), createHash('sha256').update(readFileSync(file)).digest('hex')])),
     arguments: options.passthrough, modelAlias: process.env.ANTHROPIC_MODEL ?? 'client default' };
   const subject = manifest.skills.map(s => s.name).sort().join(',');
-  const previous = findRuns({ root: store, kind: 'skill', subject, inputs });
+  const localPrevious = findRuns({ root: store, kind: 'skill', subject, inputs });
+  const sharedPrevious = archiveConfig() ? remoteFind({ kind: 'skill', subject, inputs }) : [];
+  const previous = [...new Map([...sharedPrevious, ...localPrevious].map(r => [r.id, r])).values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   if (previous.length) warn(`Evaluation history: ${previous.length} recent matching attempt(s); latest ${previous[0].id} is ${previous[0].status}. Inspect prior evidence before repeating a hill climb.`);
   const history = beginRun({ root: store, kind: 'skill', subject, inputs, summary: 'Stock skill evaluation started' });
   let results, run, outcome;
@@ -700,6 +703,8 @@ export function main(argv, { log = console.log, warn = console.error, spawn = sp
         writable(dir); rmSync(dir, { recursive: true });
       } catch (error) { warn(`Trace archived; retained runner temporary directory ${dir}: ${error.message}`); }
     }
+    try { archiveRun(store, history.id); }
+    catch (error) { throw Error(`${error.message}. Retry only the archive with repo-eval-history upload --id ${history.id}; do not repeat inference`); }
   }
 }
 

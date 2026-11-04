@@ -18,6 +18,9 @@ const script = fileURLToPath(new URL('./skill-evals.mjs', import.meta.url));
 function fixture(t) {
   const root = mkdtempSync(path.join(tmpdir(), 'skill-evals-'));
   const originalHistory = process.env.EVAL_HISTORY_DIR;
+  const originalConfig = process.env.EVAL_HISTORY_CONFIG, originalRemote = process.env.EVAL_HISTORY_REMOTE;
+  process.env.EVAL_HISTORY_CONFIG = path.join(root, 'no-config'); process.env.EVAL_HISTORY_REMOTE = '';
+  t.after(() => { for (const [key, value] of Object.entries({ EVAL_HISTORY_CONFIG: originalConfig, EVAL_HISTORY_REMOTE: originalRemote })) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } });
   process.env.EVAL_HISTORY_DIR = path.join(root, 'history');
   t.after(() => { if (originalHistory === undefined) delete process.env.EVAL_HISTORY_DIR; else process.env.EVAL_HISTORY_DIR = originalHistory; });
   t.after(() => rmSync(root, { recursive: true, force: true }));
@@ -604,3 +607,26 @@ test('result.json data for 200 cases stays under the 48 KiB baseline bound', (t)
   assert.ok(bytes < 48 * 1024, `data is ${bytes} bytes`);
 });
 const createKey = (i) => i.toString(16).padStart(32, '0');
+
+test('failed skill runs auto-upload and consult matching evidence from another host store', { skip: spawnSync('rclone', ['version']).status !== 0 }, t => {
+  const { root } = fixture(t);
+  const remote = path.join(root, 'remote'); mkdirSync(remote);
+  process.env.EVAL_HISTORY_REMOTE = `:local:${remote}`;
+  const originalRclone = process.env.EVAL_HISTORY_RCLONE_CONFIG;
+  const config = path.join(root, 'rclone.conf'); writeFileSync(config, '');
+  process.env.EVAL_HISTORY_RCLONE_CONFIG = config;
+  t.after(() => { if (originalRclone === undefined) delete process.env.EVAL_HISTORY_RCLONE_CONFIG; else process.env.EVAL_HISTORY_RCLONE_CONFIG = originalRclone; });
+  const outputs = [], warnings = [];
+  const spawn = (cmd, args) => {
+    writeFileSync(args[args.indexOf('--json') + 1], JSON.stringify({ cases: [] }));
+    return { status: 1, stdout: '' };
+  };
+  const run = () => main(['--root', path.join(root, 'repo'), '--skill', 'oncall', '--json'], { spawn, log: s => outputs.push(JSON.parse(s)), warn: s => warnings.push(s) });
+  assert.equal(run(), 1);
+  const first = outputs[0].history.id;
+  assert.equal(JSON.parse(readFileSync(path.join(remote, 'runs', first, 'record.json'))).status, 'failed');
+  process.env.EVAL_HISTORY_DIR = path.join(root, 'second-host-history');
+  assert.equal(run(), 1);
+  assert.deepEqual(outputs[1].history.previous, [first]);
+  assert.match(warnings[0], /recent matching/);
+});
