@@ -26,6 +26,7 @@ Nx-inferred targets are intentionally not listed. Runtime status is not inferred
 | repo-safe-remove-worktree | [bin/safe-remove-worktree.sh](../bin/safe-remove-worktree.sh) |
 | repo-scan-live-processes | [bin/scan-live-processes.sh](../bin/scan-live-processes.sh) |
 | repo-set-tmux-task-title | [bin/set-tmux-task-title.mjs](../bin/set-tmux-task-title.mjs) |
+| repo-skill-evals | [bin/skill-evals.mjs](../bin/skill-evals.mjs) |
 | repo-sweep-worktrees | [bin/sweep-worktrees.sh](../bin/sweep-worktrees.sh) |
 | repo-watch-prs | [bin/watch-prs.sh](../bin/watch-prs.sh) |
 
@@ -39,5 +40,6 @@ Nx-inferred targets are intentionally not listed. Runtime status is not inferred
 | harness-maintenance | [plugins/repo-tools/skills/harness-maintenance/SKILL.md](../plugins/repo-tools/skills/harness-maintenance/SKILL.md) |
 | land-pr | [plugins/repo-tools/skills/land-pr/SKILL.md](../plugins/repo-tools/skills/land-pr/SKILL.md) |
 | renovate-maintenance | [plugins/repo-tools/skills/renovate-maintenance/SKILL.md](../plugins/repo-tools/skills/renovate-maintenance/SKILL.md) |
+| skill-evals | [plugins/repo-tools/skills/skill-evals/SKILL.md](../plugins/repo-tools/skills/skill-evals/SKILL.md) |
 | testing-policy | [plugins/repo-tools/skills/testing-policy/SKILL.md](../plugins/repo-tools/skills/testing-policy/SKILL.md) |
 | worktree-hygiene | [plugins/repo-tools/skills/worktree-hygiene/SKILL.md](../plugins/repo-tools/skills/worktree-hygiene/SKILL.md) |
