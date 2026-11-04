@@ -88,11 +88,13 @@ export function loadEntries(file) {
   return data.evals.map((entry, index) => {
     if (typeof entry?.prompt !== 'string' || !entry.prompt.trim()) throw new Error(`${file}: evals[${index}] has no prompt`);
     const checks = [entry.assertions, entry.expectations].find(Array.isArray) ?? [];
+    // skill-creator also wrote object assertions ({ name, text }); grade their text, not "[object Object]".
+    const checkText = (c) => (c && typeof c === 'object' ? c.text ?? c.name ?? c.value ?? '' : c);
     return {
       slug: slug(entry.name ?? `eval-${entry.id ?? index + 1}`),
       prompt: entry.prompt.trim(),
       expected: typeof entry.expected_output === 'string' ? entry.expected_output.trim() : '',
-      checks: checks.map(String).map((s) => s.trim()).filter(Boolean),
+      checks: checks.map(checkText).map(String).map((s) => s.trim()).filter(Boolean),
       files: Array.isArray(entry.files) ? entry.files.map(String) : [],
       options: runnerOptions(entry.plugin_eval, `${file}: evals[${index}].plugin_eval`),
     };
@@ -138,8 +140,9 @@ export function buildCase(skill, entry, options) {
   const rubric = criteria(entry);
   if (rubric && !options.triggerOnly) graders.push({ name: 'criteria', type: 'llm', criteria: rubric });
   if (!graders.length) throw new Error(`${skill.name}: ${entry.slug} has nothing to grade (manual-only skill without assertions or expected_output)`);
+  // Claude never loads a manual-only skill on its own, so its behavior cases invoke it the way a user does.
   const execution = {
-    prompt: entry.prompt,
+    prompt: skill.manualOnly ? `/${skill.name} ${entry.prompt}` : entry.prompt,
     max_turns: options.triggerOnly ? 3 : entry.options.max_turns ?? 8,
     timeout_seconds: entry.options.timeout_seconds ?? 600,
     allowed_tools: entry.options.allowed_tools ?? DEFAULT_TOOLS,
@@ -251,7 +254,7 @@ export function plan(options) {
   for (const skill of skills) {
     skill.evals = findEvals(skill, options.evalsRoots) ?? null;
     skill.entries = skill.evals ? loadEntries(skill.evals) : [];
-    // --trigger-only has nothing to measure for a skill the model may not invoke.
+    // --trigger-only has nothing to measure for a skill the model may not invoke; a behavior case invokes it explicitly.
     if (options.triggerOnly && skill.manualOnly) skill.entries = [];
   }
   return skills;
