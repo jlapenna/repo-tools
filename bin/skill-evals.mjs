@@ -17,6 +17,7 @@
 // Usage: repo-skill-evals [--root DIR]... [--evals-root DIR]... [--skill NAME]...
 //                         [--list | --dry-run] [--out DIR] [--runs N]
 //                         [--trigger-only] [--json] [--report DIR] [--baseline FILE]
+//                         [--max-age DAYS] [--no-carry] [--cache [DIR]]
 //                         [--allow-gated-tools] [-- <claude plugin eval options>]
 // --list prints eval coverage and exits without running anything. --dry-run
 // writes the wrapper plugin and prints the command instead of running it.
@@ -24,6 +25,12 @@
 // `<dir>/result.json` ({ report, complete, data }) for automation such as an
 // LCARS recipe. --baseline compares the per-skill rows with a previous
 // result.json (or its `data` object) and lists regressions first.
+// Every case has an experiment key: a hash of the skill directory, the
+// generated case spec, its fixtures, the claude CLI version, the model and
+// this package's version. A case whose key matches a baseline (or --cache)
+// result younger than --max-age days (default 28) is carried forward instead
+// of re-run, so an identical experiment never runs twice; --no-carry re-runs
+// everything. --cache keeps one JSON record per key on the workstation.
 // Everything after `--` is passed to `claude plugin eval` (for example
 // `--ablation with-without`, `--max-cost-usd 5`, `--case 'oncall--*'`).
 // Exit status is the runner's (0 every case at threshold, 1 a case below
@@ -35,8 +42,8 @@
 // no sandbox backend at all, so a committed case that grants one of those
 // tools is refused outright unless --allow-gated-tools (workstation runs).
 import { spawnSync } from 'node:child_process';
-import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse } from 'yaml';
@@ -50,6 +57,8 @@ const DEFAULT_TOOLS = ['Skill', 'Read', 'Glob', 'Grep'];
 const GATED_TOOLS = new Set(['Bash', 'PowerShell', 'Write', 'Edit', 'WebFetch']);
 const LOW_SCORE = 0.67;
 const CASE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+const DAY_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_MAX_AGE_DAYS = 28;
 
 export function skillMetadata(text, file) {
   const match = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(text);
@@ -209,18 +218,154 @@ export function writeWrapper(outDir, skills, options) {
   return { plugin, manifest };
 }
 
+// Content addressing: an experiment is identified by everything that can change its outcome.
+const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
+const compareText = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+
+// Canonical JSON: object keys sorted at every level, undefined members dropped, array order kept.
+export function canonicalJson(value) {
+  if (Array.isArray(value)) return `[${value.map((v) => (v === undefined ? 'null' : canonicalJson(v))).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value).filter((k) => value[k] !== undefined).sort(compareText).map((k) => `${JSON.stringify(k)}:${canonicalJson(value[k])}`).join(',')}}`;
+  }
+  return JSON.stringify(value ?? null);
+}
+
+// Every regular file below dir as { path, sha256 }, sorted by POSIX relative path; links are followed.
+export function hashTree(dir, { skip = () => false, prefix = '' } = {}) {
+  const files = [];
+  const walk = (abs, rel) => {
+    const stat = statSync(abs, { throwIfNoEntry: false });
+    if (!stat) return; // a dangling link has no content
+    if (stat.isDirectory()) {
+      for (const name of readdirSync(abs)) {
+        const child = rel ? `${rel}/${name}` : name;
+        if (!skip(child, name)) walk(path.join(abs, name), child);
+      }
+    } else if (stat.isFile()) files.push({ path: `${prefix}${rel}`, sha256: sha256(readFileSync(abs)) });
+  };
+  walk(dir, '');
+  return files.sort((a, b) => compareText(a.path, b.path));
+}
+
+// The skill as the runner sees it, minus old eval output and installed dependencies.
+export const skillFiles = (dir) => hashTree(dir, { skip: (rel, name) => name === 'node_modules' || rel === 'evals/results' });
+
+export function fixtureFiles(evalsFile, files) {
+  return files.flatMap((file) => {
+    const { source } = fixturePath(evalsFile, file);
+    return statSync(source).isDirectory() ? hashTree(source, { prefix: `${file}/` }) : [{ path: file, sha256: sha256(readFileSync(source)) }];
+  });
+}
+
+export function experimentKey({ skill, spec, fixtures, claudeVersion, model, toolsVersion }) {
+  return sha256(canonicalJson({ skill, spec, fixtures, claudeVersion: claudeVersion ?? null, model, toolsVersion })).slice(0, 32);
+}
+
+export function modelOf(passthrough) {
+  for (let i = 0; i < passthrough.length; i += 1) {
+    if (passthrough[i] === '--model' && i + 1 < passthrough.length) return passthrough[i + 1];
+    if (passthrough[i].startsWith('--model=')) return passthrough[i].slice('--model='.length);
+  }
+  return 'default';
+}
+
+// The plugin manifest carries the release version; the npm manifest is the fallback for a package install.
+export function toolsVersion(root = path.dirname(path.dirname(fileURLToPath(import.meta.url)))) {
+  for (const file of ['plugins/repo-tools/.claude-plugin/plugin.json', 'package.json']) {
+    try { const version = JSON.parse(readFileSync(path.join(root, file), 'utf8')).version; if (typeof version === 'string') return version; } catch { /* try the next manifest */ }
+  }
+  return 'unknown';
+}
+
+// One planned case per eval entry, with the spec the wrapper will write and its experiment key.
+export function planCases(skills, options, context) {
+  const planned = [];
+  for (const skill of skills) {
+    const files = skillFiles(skill.dir);
+    for (const entry of skill.entries) {
+      const spec = buildCase(skill, entry, options);
+      const fixtures = entry.files.length ? fixtureFiles(skill.evals, entry.files) : [];
+      planned.push({ skill: skill.name, slug: entry.slug, name: spec.name, manualOnly: skill.manualOnly ?? false, entry, key: experimentKey({ skill: files, spec, fixtures, ...context }) });
+    }
+  }
+  return planned;
+}
+
+// A hit is the run of a runner case the run did not error on; hitting max_turns is a --trigger-only design.
+const runErrored = (run) => Boolean((run.error && !/maximum number of turns/i.test(run.error)) || run.aborted);
+
+// The compact per-case record kept in result.json data and the cache. It holds no evidence text, `fired`
+// stands in for the skill-fired grader, and `runs` appears only above 1, so ~200 cases stay under 48 KiB.
+// A grader or the skill firing counts as passed only when it passed in every run.
+export function caseRecord(result, planned, runAt) {
+  const runs = result.arms?.with ?? [];
+  if (typeof result.aggregates?.score !== 'number' || !runs.length || runs.some(runErrored)) return null;
+  const graders = new Map();
+  for (const run of runs) for (const g of run.graders ?? []) if (g.name !== 'skill-fired') graders.set(g.name, (graders.get(g.name) ?? true) && g.passed !== false);
+  const fired = planned.manualOnly ? null : runs.every((run) => (run.graders ?? []).some((g) => g.name === 'skill-fired' && g.passed === true));
+  const record = { skill: planned.skill, case: planned.slug, key: planned.key, score: Number(result.aggregates.score.toFixed(2)), fired, graders: [...graders].map(([name, passed]) => ({ name, passed })), runAt, carried: false };
+  if (runs.length > 1) record.runs = runs.length;
+  return record;
+}
+
+const validRecord = (r) => r && typeof r === 'object' && typeof r.key === 'string' && typeof r.skill === 'string' && typeof r.case === 'string' && typeof r.score === 'number' && Array.isArray(r.graders) && !Number.isNaN(Date.parse(r.runAt));
+
+// Pick, per planned key, the newest prior result within maxAgeDays from the baseline's cases and the cache.
+export function carryForward(planned, sources, now, maxAgeDays) {
+  const newest = new Map();
+  for (const record of sources.flat().filter(validRecord)) {
+    const age = now.getTime() - Date.parse(record.runAt);
+    if (age > maxAgeDays * DAY_MS) continue;
+    const seen = newest.get(record.key);
+    if (!seen || Date.parse(record.runAt) > Date.parse(seen.runAt)) newest.set(record.key, record);
+  }
+  const carried = new Map();
+  for (const p of planned) {
+    const record = newest.get(p.key);
+    if (!record) continue;
+    const copy = { skill: p.skill, case: p.slug, key: p.key, score: record.score, fired: p.manualOnly ? null : record.fired === true, graders: record.graders.filter((g) => g?.name !== 'skill-fired').map((g) => ({ name: String(g.name), passed: g.passed !== false })), runAt: record.runAt, carried: true };
+    if (Number.isInteger(record.runs) && record.runs > 1) copy.runs = record.runs;
+    carried.set(p.key, copy);
+  }
+  return carried;
+}
+
+// A carried record rendered as a runner case so per-skill rows and the report treat it like a fresh one.
+export function carriedResult(record) {
+  const graders = [...(record.fired === null ? [] : [{ name: 'skill-fired', passed: record.fired }]), ...record.graders];
+  return { name: `${record.skill}--${record.case}`, carried: true, runAt: record.runAt, aggregates: { score: record.score, passRate: graders.every((g) => g.passed) ? 1 : 0 }, arms: { with: Array.from({ length: record.runs ?? 1 }, () => ({ graders })) } };
+}
+
+export function defaultCacheDir(env = process.env) {
+  return path.join(env.XDG_CACHE_HOME || path.join(homedir(), '.cache'), 'repo-skill-evals');
+}
+
+export function readCache(dir, planned) {
+  const records = [];
+  for (const p of planned) {
+    try { const record = JSON.parse(readFileSync(path.join(dir, `${p.key}.json`), 'utf8')); if (record?.key === p.key) records.push(record); } catch { /* a miss or an unreadable entry just re-runs */ }
+  }
+  return records;
+}
+
+export function writeCache(dir, records) {
+  mkdirSync(dir, { recursive: true });
+  for (const record of records) writeFileSync(path.join(dir, `${record.key}.json`), JSON.stringify({ ...record, carried: false }) + '\n');
+}
+
 export function summarize(results, manifest) {
-  const bySkill = new Map(manifest.skills.map((s) => [s.name, { skill: s.name, evals: s.evals, manualOnly: s.manualOnly ?? false, cases: 0, runs: 0, fired: 0, scores: [], failed: [], errors: 0 }]));
+  const bySkill = new Map(manifest.skills.map((s) => [s.name, { skill: s.name, evals: s.evals, manualOnly: s.manualOnly ?? false, cases: 0, carried: 0, runs: 0, fired: 0, scores: [], failed: [], errors: 0 }]));
   for (const c of results.cases ?? []) {
     const owner = manifest.cases.find((m) => m.name === c.name)?.skill;
     const row = bySkill.get(owner);
     if (!row) continue;
     row.cases += 1;
+    if (c.carried) row.carried += 1;
     if (typeof c.aggregates?.score === 'number') row.scores.push(c.aggregates.score);
     for (const run of c.arms?.with ?? []) {
       row.runs += 1;
-      // Hitting max_turns is the design of a --trigger-only run, not a failure to run.
-      if ((run.error && !/maximum number of turns/i.test(run.error)) || run.aborted) row.errors += 1;
+      if (runErrored(run)) row.errors += 1;
       for (const g of run.graders ?? []) {
         if (g.name === 'skill-fired' && g.passed) row.fired += 1;
         if (g.passed === false && !row.failed.includes(`${c.name}/${g.name}`)) row.failed.push(`${c.name}/${g.name}`);
@@ -254,13 +399,32 @@ export function loadBaseline(file) {
 }
 
 const firedRate = (row) => (row.manualOnly || !row.runs ? null : row.fired / row.runs);
-export function compareBaseline(rows, baseline) {
+// With per-case records on both sides, only fresh cases are compared with their previous values, so a
+// carried case cannot regress; a baseline without `cases` (4.2 and earlier) compares per-skill rows.
+export function compareBaseline(rows, baseline, records = null) {
   const previous = new Map(baseline.skills.filter((s) => s && typeof s.skill === 'string').map((s) => [s.skill, s]));
+  const previousCases = Array.isArray(baseline.cases) && records ? new Map(baseline.cases.filter(validRecord).map((c) => [`${c.skill}--${c.case}`, c])) : null;
   const comparison = { regressions: [], improvements: [], unchanged: 0, new: [], removed: [] };
   for (const row of rows) {
     const prev = previous.get(row.skill);
     if (!prev) { comparison.new.push(row.skill); continue; }
     const change = { skill: row.skill, score: row.score, previousScore: prev.score ?? null, fired: row.fired, runs: row.runs, previousFired: prev.fired ?? 0, previousRuns: prev.runs ?? 0 };
+    if (previousCases) {
+      const down = [];
+      const up = [];
+      for (const record of records.filter((r) => r.skill === row.skill && !r.carried)) {
+        const before = previousCases.get(`${record.skill}--${record.case}`);
+        if (!before) continue;
+        const deltas = [record.score - before.score];
+        if (typeof record.fired === 'boolean' && typeof before.fired === 'boolean') deltas.push(Number(record.fired) - Number(before.fired));
+        if (deltas.some((d) => d < 0)) down.push(record.case);
+        else if (deltas.some((d) => d > 0)) up.push(record.case);
+      }
+      if (down.length) comparison.regressions.push({ ...change, cases: down });
+      else if (up.length) comparison.improvements.push({ ...change, cases: up });
+      else comparison.unchanged += 1;
+      continue;
+    }
     const deltas = [];
     if (typeof row.score === 'number' && typeof prev.score === 'number') deltas.push(row.score - prev.score);
     const rate = firedRate(row);
@@ -279,7 +443,8 @@ const fence = (text) => `\n\`\`\`text\n${String(text).replace(/`{3}/g, '⁣``')}
 const cell = (value) => String(value ?? '').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
 const fmtFired = (r) => (r.manualOnly ? 'manual' : r.runs ? `${r.fired}/${r.runs}` : '-');
 const fmtScore = (r) => (r.cases === 0 ? 'no evals' : r.score ?? '-');
-const changeLine = (c) => `- ${c.skill}: score ${c.previousScore ?? '-'} -> ${c.score ?? '-'}, fired ${c.previousFired}/${c.previousRuns} -> ${c.fired}/${c.runs}`;
+const changeLine = (c) => `- ${c.skill}: score ${c.previousScore ?? '-'} -> ${c.score ?? '-'}, fired ${c.previousFired}/${c.previousRuns} -> ${c.fired}/${c.runs}${c.cases?.length ? ` (cases: ${c.cases.join(', ')})` : ''}`;
+const ageDays = (runAt, now) => Math.max(0, Math.floor((now.getTime() - Date.parse(runAt)) / DAY_MS));
 
 export function renderChanges(comparison) {
   const lines = ['## Changes since baseline', ''];
@@ -293,7 +458,7 @@ export function renderChanges(comparison) {
   return lines.join('\n');
 }
 
-export function renderReport({ roots, revision, runnerVersion, date, exit, results, rows, manifest, comparison }) {
+export function renderReport({ roots, revision, runnerVersion, date, exit, results, rows, manifest, comparison, counts, records = [], now = new Date(date) }) {
   const partial = results.partial ?? false;
   const casesTotal = results.aggregates?.casesTotal ?? (results.cases ?? []).length;
   const casesPassed = results.aggregates?.casesPassed ?? (results.cases ?? []).filter((c) => c.aggregates?.passRate === 1).length;
@@ -303,19 +468,32 @@ export function renderReport({ roots, revision, runnerVersion, date, exit, resul
   if (runnerVersion) lines.push(`- Runner: ${runnerVersion}`);
   lines.push(`- Date: ${date}`);
   lines.push(`- Exit: ${exit}${partial ? ` (partial: ${results.partialReason ?? 'unknown reason'})` : ''}`);
+  if (counts) lines.push(`- Cases: ${counts.run} run / ${counts.carried} carried / ${counts.total} total`);
   lines.push(`- Cases passed: ${casesPassed}/${casesTotal}`);
-  lines.push(`- Runner list-price cost estimate (not billed spend): $${Number(results.costUsd ?? 0).toFixed(2)}`);
-  lines.push(`- Duration: ${results.durationSeconds ?? '?'}s`, '');
-  lines.push('## Results', '', '| Skill | Cases | Score | Fired | Failed graders | Run errors |', '| --- | --- | --- | --- | --- | --- |');
-  for (const r of rows) lines.push(`| ${cell(r.skill)} | ${r.cases} | ${fmtScore(r)} | ${fmtFired(r)} | ${cell(r.failed.join(', '))} | ${r.errors} |`);
+  if (counts?.run === 0) lines.push('- claude plugin eval not invoked: every case was carried forward', '');
+  else {
+    lines.push(`- Runner list-price cost estimate (not billed spend): $${Number(results.costUsd ?? 0).toFixed(2)}`);
+    lines.push(`- Duration: ${results.durationSeconds ?? '?'}s`, '');
+  }
+  lines.push('## Results', '', '| Skill | Cases | Carried | Score | Fired | Failed graders | Run errors |', '| --- | --- | --- | --- | --- | --- | --- |');
+  for (const r of rows) lines.push(`| ${cell(r.skill)} | ${r.cases} | ${r.carried ?? 0} | ${fmtScore(r)} | ${fmtFired(r)} | ${cell(r.failed.join(', '))} | ${r.errors} |`);
   lines.push('');
+  const carried = records.filter((r) => r.carried);
+  if (carried.length) {
+    lines.push('## Carried results', '', 'Same experiment key as an earlier run, so not re-run; evidence is in that run\'s report.', '');
+    for (const r of carried) {
+      const age = ageDays(r.runAt, now);
+      lines.push(`- ${r.skill}--${r.case}: score ${r.score}, fired ${r.fired === null ? 'manual' : r.fired ? 'yes' : 'no'}, ${age} day${age === 1 ? '' : 's'} old (run ${r.runAt}, key ${r.key})`);
+    }
+    lines.push('');
+  }
   const noEvals = rows.filter((r) => r.cases === 0).map((r) => r.skill);
   lines.push('## Skills without evals', '', ...(noEvals.length ? noEvals.map((s) => `- ${s}`) : ['- none']), '');
   const owner = (name) => manifest.cases.find((m) => m.name === name);
   const errored = [];
   for (const c of results.cases ?? []) {
     (c.arms?.with ?? []).forEach((run, i) => {
-      if ((run.error && !/maximum number of turns/i.test(run.error)) || run.aborted) errored.push(`- ${c.name} (run ${i + 1}): ${clip(run.error ?? 'aborted', 300)}`);
+      if (runErrored(run)) errored.push(`- ${c.name} (run ${i + 1}): ${clip(run.error ?? 'aborted', 300)}`);
     });
   }
   lines.push('## Runs that errored', '', ...(errored.length ? errored : ['- none']), '');
@@ -335,7 +513,7 @@ export function renderReport({ roots, revision, runnerVersion, date, exit, resul
           for (const g of run.graders ?? []) if (g.passed === false) failures.push({ run: i + 1, grader: g });
         });
         if (!failures.length) continue;
-        lines.push(`#### ${c.name}`, '', 'Prompt:', fence(clip(c.promptMarkdown ?? owner(c.name)?.prompt ?? '', 300)));
+        lines.push(`#### ${c.name}${c.carried ? ` (carried, ${ageDays(c.runAt, now)} days old)` : ''}`, '', 'Prompt:', fence(clip(c.promptMarkdown ?? owner(c.name)?.prompt ?? '', 300)));
         for (const { run, grader } of failures) {
           lines.push(`- \`${grader.name}\` failed in run ${run}${grader.explanation ? `: ${clip(grader.explanation, 300)}` : ''}`);
           if (grader.evidence) lines.push(fence(clip(grader.evidence, 600)));
@@ -353,16 +531,17 @@ function probe(exec, cmd, args, cwd) {
   return run.error || run.status !== 0 ? null : String(run.stdout).trim() || null;
 }
 
-export function writeReport(dir, { options, rows, results, manifest, run, comparison, exec, now = new Date() }) {
+export function writeReport(dir, { options, rows, results, manifest, run, comparison, exec, claudeVersion, records = [], counts, now = new Date() }) {
   const revision = probe(exec, 'git', ['rev-parse', 'HEAD'], options.roots[0]);
-  const runnerVersion = probe(exec, 'claude', ['--version'], undefined) ?? (results.claudeVersion ? `${results.claudeVersion} (Claude Code)` : null);
+  const runnerVersion = (claudeVersion === undefined ? probe(exec, 'claude', ['--version'], undefined) : claudeVersion) ?? (results.claudeVersion ? `${results.claudeVersion} (Claude Code)` : null);
   const exit = run.status ?? 1;
   const partial = results.partial ?? false;
-  const { markdown, casesTotal, casesPassed } = renderReport({ roots: options.roots.map((r) => path.resolve(r)), revision, runnerVersion, date: now.toISOString(), exit, results, rows, manifest, comparison });
+  const { markdown, casesTotal, casesPassed } = renderReport({ roots: options.roots.map((r) => path.resolve(r)), revision, runnerVersion, date: now.toISOString(), exit, results, rows, manifest, comparison, counts, records, now });
   const result = {
     report: markdown,
     complete: exit === 0 && !partial,
-    data: { skills: rows, exit, partial, partialReason: results.partialReason ?? null, costUsd: results.costUsd ?? null, durationSeconds: results.durationSeconds ?? null, casesTotal, casesPassed, baseline: comparison ?? null },
+    // data is the next run's baseline, bounded to 48 KiB: rows drop the per-case scores, paths and failed graders that data.cases and the report carry.
+    data: { skills: rows.map(({ scores, evals, failed, ...row }) => row), exit, partial, partialReason: results.partialReason ?? null, costUsd: results.costUsd ?? null, durationSeconds: results.durationSeconds ?? null, casesTotal, casesPassed, casesRun: counts?.run ?? null, casesCarried: counts?.carried ?? 0, baseline: comparison ?? null, cases: records },
   };
   mkdirSync(dir, { recursive: true });
   writeFileSync(path.join(dir, 'report.md'), markdown);
@@ -371,7 +550,7 @@ export function writeReport(dir, { options, rows, results, manifest, run, compar
 }
 
 export function parseArgs(argv) {
-  const options = { roots: [], evalsRoots: [], only: [], passthrough: [], list: false, dryRun: false, json: false, triggerOnly: false, allowGatedTools: false };
+  const options = { roots: [], evalsRoots: [], only: [], passthrough: [], list: false, dryRun: false, json: false, triggerOnly: false, allowGatedTools: false, carry: true, maxAgeDays: DEFAULT_MAX_AGE_DAYS, cache: null };
   const args = [...argv];
   while (args.length) {
     const arg = args.shift();
@@ -385,7 +564,12 @@ export function parseArgs(argv) {
     else if (arg === '--runs' && args.length) {
       options.runs = Number(args.shift());
       if (!Number.isInteger(options.runs) || options.runs < 1 || options.runs > 50) throw new Error('--runs takes an integer from 1 to 50');
-    } else if (arg === '--list') options.list = true;
+    } else if (arg === '--max-age' && args.length) {
+      options.maxAgeDays = Number(args.shift());
+      if (!Number.isFinite(options.maxAgeDays) || options.maxAgeDays < 0) throw new Error('--max-age takes a number of days, 0 or more');
+    } else if (arg === '--cache') options.cache = args.length && !args[0].startsWith('-') ? path.resolve(args.shift()) : defaultCacheDir();
+    else if (arg === '--no-carry') options.carry = false;
+    else if (arg === '--list') options.list = true;
     else if (arg === '--dry-run') options.dryRun = true;
     else if (arg === '--json') options.json = true;
     else if (arg === '--trigger-only') options.triggerOnly = true;
@@ -408,7 +592,7 @@ export function plan(options) {
   return skills;
 }
 
-export function main(argv, { log = console.log, warn = console.error, spawn = spawnSync, exec = spawnSync } = {}) {
+export function main(argv, { log = console.log, warn = console.error, spawn = spawnSync, exec = spawnSync, now = () => new Date() } = {}) {
   const options = parseArgs(argv);
   // Read the baseline before anything paid runs: a bad file must not cost a run.
   const baseline = options.baseline ? loadBaseline(options.baseline) : null;
@@ -421,18 +605,64 @@ export function main(argv, { log = console.log, warn = console.error, spawn = sp
     return 0;
   }
   if (!withEvals.length) throw new Error(`none of the ${skills.length} skills has an evals.json; use --list to see them`);
+  const claudeVersion = probe(exec, 'claude', ['--version'], undefined);
+  const planned = planCases(withEvals, options, { claudeVersion, model: modelOf(options.passthrough), toolsVersion: toolsVersion() });
+  const startedAt = now();
+  const sources = [baseline?.cases ?? [], options.cache ? readCache(options.cache, planned) : []];
+  const carried = options.carry ? carryForward(planned, sources, startedAt, options.maxAgeDays) : new Map();
+  const counts = { run: planned.length - carried.size, carried: carried.size, total: planned.length };
+  const fresh = planned.filter((p) => !carried.has(p.key));
+  const toRun = withEvals.map((s) => ({ ...s, entries: s.entries.filter((e) => fresh.some((p) => p.entry === e)) })).filter((s) => s.entries.length);
+  const countLine = `${counts.run} run / ${counts.carried} carried / ${counts.total} total`;
+
+  // Combine fresh results with carried records into rows, the report, result.json, the cache and the summary.
+  const conclude = (results, run, outDir, history) => {
+    // Fresh results first become compact records; errored or unscored cases are left to run again next time.
+    const runAt = startedAt.toISOString().replace(/\.\d{3}Z$/, 'Z');
+    const byName = new Map(planned.map((p) => [p.name, p]));
+    const freshRecords = new Map();
+    for (const c of results.cases ?? []) {
+      const p = byName.get(c.name);
+      const record = p && !carried.has(p.key) ? caseRecord(c, p, runAt) : null;
+      if (record) freshRecords.set(p.key, record);
+    }
+    const records = planned.map((p) => carried.get(p.key) ?? freshRecords.get(p.key)).filter(Boolean);
+    if (options.cache && freshRecords.size) writeCache(options.cache, [...freshRecords.values()]);
+    // Summaries combine fresh and carried cases; the runner's own totals cover only the fresh ones.
+    const carriedCases = [...carried.values()].map(carriedResult);
+    const freshTotal = results.aggregates?.casesTotal ?? (results.cases ?? []).length;
+    const freshPassed = results.aggregates?.casesPassed ?? (results.cases ?? []).filter((c) => c.aggregates?.passRate === 1).length;
+    const combined = { ...results, cases: [...(results.cases ?? []), ...carriedCases], aggregates: { ...results.aggregates, casesTotal: freshTotal + carriedCases.length, casesPassed: freshPassed + carriedCases.filter((c) => c.aggregates.passRate === 1).length } };
+    const manifest = { skills: withEvals.map((s) => ({ name: s.name, evals: s.evals, cases: s.entries.length, manualOnly: s.manualOnly ?? false })), cases: planned.map((p) => ({ name: p.name, skill: p.skill, prompt: p.manualOnly ? `/${p.skill} ${p.entry.prompt}` : p.entry.prompt })) };
+    // Skills without evals stay visible in the run output, as in --list, so coverage gaps are reported with the scores.
+    const rows = [...summarize(combined, manifest), ...skills.filter((s) => !s.entries.length).map((s) => ({ skill: s.name, evals: null, manualOnly: s.manualOnly, cases: 0, carried: 0, runs: 0, fired: 0, scores: [], failed: [], errors: 0, score: null }))].sort((a, b) => a.skill.localeCompare(b.skill, 'en'));
+    const comparison = baseline ? compareBaseline(rows, baseline, records) : null;
+    if (options.report) writeReport(options.report, { options, rows, results: combined, manifest, run, comparison, exec, claudeVersion, records, counts, now: startedAt });
+    const summary = { ok: run.status === 0, exit: run.status, partial: results.partial ?? false, partialReason: results.partialReason ?? null, costUsd: results.costUsd ?? null, durationSeconds: results.durationSeconds ?? null, out: outDir, report: options.report ?? null, cases: counts, baseline: comparison, history, skills: rows };
+    const changes = comparison ? `\n\n${renderChanges(comparison)}` : '';
+    const report = options.report ? `, report in ${options.report}` : '';
+    const ran = outDir ? `, runner cost estimate $${Number(results.costUsd ?? 0).toFixed(2)} (list price, not billed spend), ${results.durationSeconds ?? '?'}s, results in ${outDir}` : ', claude not invoked';
+    log(options.json ? JSON.stringify(summary, null, 2) : `\n${renderTable(rows)}${changes}\n\nexit ${run.status}${results.partial ? ` (partial: ${results.partialReason})` : ''}, cases ${countLine}${ran}${report}`);
+    return summary;
+  };
+
+  if (!toRun.length) {
+    if (options.dryRun) { log(`every case is carried forward (${countLine}); nothing to run`); return 0; }
+    conclude({ cases: [] }, { status: 0 }, null, null);
+    return 0;
+  }
   const store = historyRoot();
   if (!options.out && !options.dryRun) mkdirSync(path.join(store, 'work'), { recursive: true, mode: 0o700 });
   const outDir = options.out ?? mkdtempSync(path.join(options.dryRun ? tmpdir() : path.join(store, 'work'), 'repo-skill-evals-'));
   if (!options.dryRun && (outDir === store || store.startsWith(outDir + path.sep))) throw Error('--out must not contain the evaluation history store');
   mkdirSync(outDir, { recursive: true });
-  const { plugin, manifest } = writeWrapper(outDir, withEvals, options);
+  const { plugin, manifest } = writeWrapper(outDir, toRun, options);
   const resultsFile = path.join(outDir, 'results.json');
   // The stock runner otherwise deletes trace.jsonl before this process can archive it.
   const ownsRunnerTemp = !options.passthrough.includes('--keep-temp');
   const command = ['claude', ['plugin', 'eval', plugin, '--trust-plugin', '--no-publish', '--keep-temp', '--json', resultsFile, '--output-dir', path.join(outDir, 'results'), ...options.passthrough.filter(a => a !== '--keep-temp')]];
   if (options.dryRun) {
-    log(`${manifest.cases.length} cases for ${withEvals.length} skills written under ${plugin}\n${command[0]} ${command[1].map((a) => (/\s/.test(a) ? JSON.stringify(a) : a)).join(' ')}`);
+    log(`${manifest.cases.length} cases for ${toRun.length} skills written under ${plugin} (${countLine})\n${command[0]} ${command[1].map((a) => (/\s/.test(a) ? JSON.stringify(a) : a)).join(' ')}`);
     return 0;
   }
   const filesBelow = (dir) => readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name)).flatMap(e => e.isDirectory() ? filesBelow(path.join(dir, e.name)) : e.isFile() ? [path.join(dir, e.name)] : []);
@@ -453,15 +683,7 @@ export function main(argv, { log = console.log, warn = console.error, spawn = sp
     if (options.json && run.stdout) writeFileSync(path.join(outDir, 'runner.log'), run.stdout);
     if (!existsSync(resultsFile)) throw new Error(`claude plugin eval exited ${run.status} without writing ${resultsFile}`);
     results = JSON.parse(readFileSync(resultsFile, 'utf8'));
-    // Skills without evals stay visible in the run output, as in --list, so coverage gaps are reported with the scores.
-    const rows = [...summarize(results, manifest), ...skills.filter((s) => !s.entries.length).map((s) => ({ skill: s.name, evals: null, manualOnly: s.manualOnly, cases: 0, runs: 0, fired: 0, scores: [], failed: [], errors: 0, score: null }))].sort((a, b) => a.skill.localeCompare(b.skill, 'en'));
-    const comparison = baseline ? compareBaseline(rows, baseline) : null;
-    if (options.report) writeReport(options.report, { options, rows, results, manifest, run, comparison, exec });
-    const summary = { ok: run.status === 0, exit: run.status, partial: results.partial ?? false, partialReason: results.partialReason ?? null, costUsd: results.costUsd ?? null, durationSeconds: results.durationSeconds ?? null, out: outDir, report: options.report ?? null, baseline: comparison, history: { id: history.id, store, previous: previous.map(r => r.id) }, skills: rows };
-    outcome = summary;
-    const changes = comparison ? `\n\n${renderChanges(comparison)}` : '';
-    const report = options.report ? `, report in ${options.report}` : '';
-    log(options.json ? JSON.stringify(summary, null, 2) : `\n${renderTable(rows)}${changes}\n\nexit ${run.status}${results.partial ? ` (partial: ${results.partialReason})` : ''}, runner cost estimate $${Number(results.costUsd ?? 0).toFixed(2)} (list price, not billed spend), ${results.durationSeconds ?? '?'}s, results in ${outDir}${report}`);
+    outcome = conclude(results, run, outDir, { id: history.id, store, previous: previous.map(r => r.id) });
     return run.status ?? 1;
   } finally {
     const traces = (results?.cases ?? []).flatMap(c => Object.values(c.arms ?? {}).flatMap(runs => runs.map(r => r.tracePath).filter(p => typeof p === 'string' && existsSync(p))));

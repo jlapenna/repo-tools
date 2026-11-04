@@ -55,3 +55,8 @@ case sends `/<skill-name> <prompt>` so the judge grades the skill's work.
 
 A `--trigger-only` run keeps only the `skill-fired` grader and caps each run
 at three turns, so an entry with just a `prompt` is a valid trigger test.
+
+Any edit to a file in the skill directory, including its `evals/evals.json`
+and fixtures there, changes the experiment key of every case of that skill,
+so all of them run again; results under `evals/results` do not. With
+central evals (`--evals-root`), editing one entry re-runs only that case.

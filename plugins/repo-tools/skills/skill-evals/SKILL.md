@@ -46,7 +46,8 @@ reports frontmatter that does not parse: `claude plugin validate <dir>`.
 
 ```bash
 repo-skill-evals [--skill <name>]... [--runs N] [--trigger-only] [--out <dir>] \
-  [--report <dir>] [--baseline <file>] [-- <claude plugin eval options>]
+  [--report <dir>] [--baseline <file>] [--max-age <days>] [--no-carry] \
+  [--cache [<dir>]] [-- <claude plugin eval options>]
 ```
 
 The command copies the selected skills into a temporary wrapper plugin,
@@ -93,6 +94,20 @@ summary rows, exit, partial state, the runner's list-price cost estimate
 and adds a "Changes since baseline" section, regressions first; a missing
 or unparsable baseline is an error before anything runs. Automation such
 as an LCARS recipe reads `result.json` directly.
+
+Identical experiments are never re-run. Each case has an experiment key
+hashing the skill directory (minus `evals/results` and `node_modules`), the
+generated case spec, its fixtures, the `claude --version`, the model from
+`-- --model` and the repo-tools version; `data.cases` records each case's
+key, score, fired, graders and `runAt` without evidence. A case whose key
+matches a `--baseline` case run within `--max-age` days (default 28) is
+carried forward instead of sent to the runner; if every case carries,
+claude is not invoked at all. Rows and the report combine fresh and carried
+cases, the report marks carried ones with their age, and only fresh cases
+are compared for regressions. `--no-carry` re-runs everything; `--cache
+[<dir>]` (default `$XDG_CACHE_HOME/repo-skill-evals`, else
+`~/.cache/repo-skill-evals`) gives workstation runs the same carry-forward
+without a baseline file.
 
 ## 3. Read the result and act
 

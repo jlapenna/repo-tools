@@ -5,13 +5,13 @@
 // and the skill-evals skill, which tells agents to run this command.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { findRuns, readRun } from './eval-history.mjs';
-import { buildCase, compareBaseline, discoverSkills, findEvals, fixturePath, gatedTool, loadBaseline, loadEntries, main, parseArgs, renderTable, summarize, writeWrapper } from './skill-evals.mjs';
+import { buildCase, canonicalJson, compareBaseline, defaultCacheDir, discoverSkills, findEvals, fixturePath, gatedTool, loadBaseline, loadEntries, main, modelOf, parseArgs, plan, planCases, renderTable, summarize, writeReport, writeWrapper } from './skill-evals.mjs';
 
 const script = fileURLToPath(new URL('./skill-evals.mjs', import.meta.url));
 
@@ -330,8 +330,8 @@ test('writes a Markdown job report and result.json with the baseline comparison'
   const logs = [];
   const status = main(['--root', path.join(root, 'repo'), '--out', path.join(root, 'out'), '--report', path.join(root, 'job'), '--baseline', path.join(root, 'baseline.json'), '--json'], { log: (m) => logs.push(m), spawn, exec });
   assert.equal(status, 2);
-  assert.deepEqual(probes.map((p) => p.cmd), ['git', 'claude']);
-  assert.equal(probes[0].cwd, path.join(root, 'repo'), 'the revision comes from the first root');
+  assert.deepEqual(probes.map((p) => p.cmd), ['claude', 'git'], 'the runner version is probed once, for the experiment keys');
+  assert.equal(probes[1].cwd, path.join(root, 'repo'), 'the revision comes from the first root');
   const result = JSON.parse(readFileSync(path.join(root, 'job/result.json'), 'utf8'));
   const report = readFileSync(path.join(root, 'job/report.md'), 'utf8');
   assert.equal(result.report, report);
@@ -357,10 +357,11 @@ test('writes a Markdown job report and result.json with the baseline comparison'
   assert.match(report, /- Cases passed: 1\/4/);
   assert.match(report, /list-price cost estimate \(not billed spend\): \$0\.50/);
   assert.doesNotMatch(report, /spent/i);
-  assert.match(report, /\| Skill \| Cases \| Score \| Fired \| Failed graders \| Run errors \|/);
-  assert.match(report, /\| oncall \| 2 \| 0\.75 \| 2\/3 \| oncall--probe\/criteria \| 1 \|/);
-  assert.match(report, /\| plain \| 0 \| no evals \| - \|  \| 0 \|/);
-  assert.match(report, /\| handoff \| 2 \| 0\.75 \| manual \| handoff--eval-1\/criteria \| 0 \|/);
+  assert.match(report, /\| Skill \| Cases \| Carried \| Score \| Fired \| Failed graders \| Run errors \|/);
+  assert.match(report, /\| oncall \| 2 \| 0 \| 0\.75 \| 2\/3 \| oncall--probe\/criteria \| 1 \|/);
+  assert.match(report, /\| plain \| 0 \| 0 \| no evals \| - \|  \| 0 \|/);
+  assert.match(report, /\| handoff \| 2 \| 0 \| 0\.75 \| manual \| handoff--eval-1\/criteria \| 0 \|/);
+  assert.match(report, /- Cases: 4 run \/ 0 carried \/ 4 total/);
   assert.match(report, /## Skills without evals\n\n- land-pr\n- plain\n/);
   assert.match(report, /## Runs that errored\n\n- oncall--probe \(run 2\): boom\n/);
   assert.match(report, /## Changes since baseline\n\n### Regressions \(1\)\n\n- oncall: score 1 -> 0\.75, fired 2\/2 -> 2\/3\n\n### Improvements \(0\)\n\n- none\n\n- Unchanged: 1\n/);
@@ -386,7 +387,8 @@ test('--report also works with the table output and marks a clean run complete',
     ] }));
     return { status: 0, stdout: '' };
   };
-  const exec = (cmd) => (cmd === 'claude' ? { status: 0, stdout: '2.1.318 (Claude Code)\n' } : { status: 128, stdout: '' });
+  const iso = (date) => date.toISOString().replace(/\.\d{3}Z$/, 'Z');
+const exec = (cmd) => (cmd === 'claude' ? { status: 0, stdout: '2.1.318 (Claude Code)\n' } : { status: 128, stdout: '' });
   const logs = [];
   const status = main(['--root', path.join(root, 'repo'), '--skill', 'oncall', '--out', path.join(root, 'out'), '--report', path.join(root, 'job')], { log: (m) => logs.push(m), spawn, exec });
   assert.equal(status, 0);
@@ -402,3 +404,203 @@ test('--report also works with the table output and marks a clean run complete',
   assert.doesNotMatch(result.report, /## Failures/);
   assert.throws(() => main(['--root', path.join(root, 'repo'), '--baseline', path.join(root, 'nope.json')], { spawn: () => assert.fail('a bad baseline must fail before the runner starts'), exec }), /--baseline .*nope\.json/);
 });
+
+test('an experiment key covers the skill, the case spec, fixtures, runner, model and package version', (t) => {
+  const { root, write } = fixture(t);
+  const context = { claudeVersion: '2.1.318 (Claude Code)', model: 'default', toolsVersion: '4.3.0' };
+  const keys = (options = {}, ctx = context) => Object.fromEntries(planCases(plan({ roots: [path.join(root, 'repo')], evalsRoots: [], only: ['oncall'], ...options }), options, ctx).map((p) => [p.slug, p.key]));
+  const before = keys();
+  assert.deepEqual(Object.keys(before), ['eval-1', 'memory-alert']);
+  for (const key of Object.values(before)) assert.match(key, /^[0-9a-f]{32}$/, 'the first 16 bytes of a sha256, as hex');
+  assert.deepEqual(keys(), before, 'the same inputs give the same key');
+  write('repo/.agents/skills/oncall/evals/results/new/report.html', '<html>new');
+  write('repo/.agents/skills/oncall/node_modules/dep/index.js', 'x');
+  assert.deepEqual(keys(), before, 'old eval results and installed dependencies are not part of the experiment');
+  write('repo/.agents/skills/oncall/evals/files/probe.log', 'probe failed twice\n');
+  const fixtureChanged = keys();
+  assert.notEqual(fixtureChanged['eval-1'], before['eval-1'], 'a fixture change re-keys the case that reads it');
+  assert.notEqual(fixtureChanged['memory-alert'], before['memory-alert'], 'the fixture also lives in the skill directory, so every case of the skill re-keys');
+  write('repo/.agents/skills/oncall/references/notes.md', 'more guidance');
+  assert.notEqual(keys()['memory-alert'], fixtureChanged['memory-alert'], 'any skill file is part of the key');
+  const base = keys();
+  assert.notEqual(keys({ runs: 3 })['memory-alert'], base['memory-alert'], 'execution options are part of the case spec');
+  assert.notEqual(keys({ triggerOnly: true })['memory-alert'], base['memory-alert'], 'the graders are part of the case spec');
+  for (const change of [{ claudeVersion: '2.1.319 (Claude Code)' }, { model: 'claude-opus-5-5' }, { toolsVersion: '4.3.1' }]) {
+    assert.notEqual(keys({}, { ...context, ...change })['memory-alert'], base['memory-alert'], JSON.stringify(change));
+  }
+  assert.equal(modelOf(['--ablation', 'none', '--model', 'claude-opus-5-5']), 'claude-opus-5-5');
+  assert.equal(modelOf(['--model=claude-haiku']), 'claude-haiku');
+  assert.equal(modelOf(['--max-cost-usd', '5']), 'default');
+  assert.equal(canonicalJson({ b: [1, { d: 1, c: undefined, a: 2 }], a: 'x' }), '{"a":"x","b":[1,{"a":2,"d":1}]}');
+});
+
+// A fake runner that scores the cases present in the wrapper, so tests see exactly what was sent to claude.
+function fakeRunner(scores = {}) {
+  const calls = [];
+  const spawn = (cmd, args) => {
+    const cases = readdirSync(path.join(args[2], 'evals')).sort();
+    calls.push(cases);
+    writeFileSync(args[args.indexOf('--json') + 1], JSON.stringify({ costUsd: 0.2, durationSeconds: 4, cases: cases.map((name) => {
+      const score = scores[name] ?? 1;
+      return { name, aggregates: { score, passRate: score === 1 ? 1 : 0 }, arms: { with: [{ graders: [{ name: 'skill-fired', passed: score > 0 }, { name: 'criteria', passed: score === 1, evidence: 'long evidence text' }] }] } };
+    }) }));
+    return { status: Object.values(scores).some((s) => s < 1) ? 1 : 0, stdout: '' };
+  };
+  return { spawn, calls };
+}
+const iso = (date) => date.toISOString().replace(/\.\d{3}Z$/, 'Z');
+const exec = (cmd) => (cmd === 'claude' ? { status: 0, stdout: '2.1.318 (Claude Code)\n' } : { status: 128, stdout: '' });
+
+test('carries forward a case whose experiment key matches a recent baseline result and never re-runs it', (t) => {
+  const { root, write } = fixture(t);
+  const day = 24 * 60 * 60 * 1000;
+  const t0 = new Date('2026-11-01T12:00:00Z');
+  const args = (job, ...extra) => ['--root', path.join(root, 'repo'), '--skill', 'oncall', '--out', path.join(root, `out-${job}`), '--report', path.join(root, job), '--json', ...extra];
+  const read = (job) => JSON.parse(readFileSync(path.join(root, job, 'result.json'), 'utf8'));
+  const first = fakeRunner({ 'oncall--memory-alert': 0.5 });
+  assert.equal(main(args('week1'), { log: () => {}, spawn: first.spawn, exec, now: () => t0 }), 1);
+  const week1 = read('week1');
+  assert.deepEqual(week1.data.cases.map((c) => [c.case, c.score, c.fired, c.carried, c.runAt]), [['eval-1', 1, true, false, iso(t0)], ['memory-alert', 0.5, true, false, iso(t0)]]);
+  assert.deepEqual(week1.data.cases[1].graders, [{ name: 'criteria', passed: false }], '`fired` stands in for the skill-fired grader');
+  assert.doesNotMatch(JSON.stringify(week1.data.cases), /evidence/, 'evidence stays in report.md');
+  writeFileSync(path.join(root, 'baseline1.json'), JSON.stringify(week1.data));
+
+  // Nothing changed: claude is not invoked, every case is carried with its original runAt.
+  const logs = [];
+  const idle = fakeRunner();
+  const t1 = new Date(t0.getTime() + 3 * day);
+  assert.equal(main(args('week2', '--baseline', path.join(root, 'baseline1.json')), { log: (m) => logs.push(m), spawn: idle.spawn, exec, now: () => t1 }), 0);
+  assert.equal(idle.calls.length, 0, 'an identical experiment is never re-run');
+  const week2 = read('week2');
+  assert.equal(week2.complete, true);
+  assert.deepEqual(week2.data.cases.map((c) => [c.case, c.score, c.carried, c.runAt]), [['eval-1', 1, true, iso(t0)], ['memory-alert', 0.5, true, iso(t0)]]);
+  assert.equal(week2.data.casesRun, 0);
+  assert.equal(week2.data.casesCarried, 2);
+  assert.equal(week2.data.casesTotal, 2);
+  assert.equal(week2.data.casesPassed, 1);
+  assert.deepEqual(week2.data.skills.find((s) => s.skill === 'oncall'), { skill: 'oncall', manualOnly: false, cases: 2, carried: 2, runs: 2, fired: 2, errors: 0, score: 0.75 }, 'rows in data leave per-case detail to data.cases');
+  assert.equal(week2.data.baseline.unchanged, 1, 'carried cases cannot regress');
+  assert.match(week2.report, /- Cases: 0 run \/ 2 carried \/ 2 total/);
+  assert.match(week2.report, /- claude plugin eval not invoked: every case was carried forward\n/);
+  assert.doesNotMatch(week2.report, /cost estimate|Duration/);
+  assert.match(week2.report, /\| oncall \| 2 \| 2 \| 0\.75 \| 2\/2 \| oncall--memory-alert\/criteria \| 0 \|/);
+  assert.match(week2.report, /## Carried results\n\n.*\n\n- oncall--eval-1: score 1, fired yes, 3 days old \(run 2026-11-01T12:00:00Z, key [0-9a-f]{32}\)\n- oncall--memory-alert: score 0\.5/);
+  assert.equal(JSON.parse(logs[0]).cases.carried, 2);
+  assert.equal(JSON.parse(logs[0]).out, null);
+
+  // Rewriting evals.json byte for byte changes nothing; a different model is a different experiment.
+  write('repo/.agents/skills/oncall/evals/evals.json', JSON.stringify({ skill_name: 'oncall', evals: [
+    { id: 1, prompt: 'Headscale probe is failing, what now?', expected_output: 'Checks logs first.', files: ['files/probe.log'], assertions: ['Reads the probe log', 'Names the failing unit'] },
+    { id: 2, name: 'Memory alert', prompt: 'SparkMemoryCriticallyLow fired.', expected_output: 'Stops the model container.', files: [] },
+  ] }));
+  const same = fakeRunner();
+  assert.equal(main(args('week3', '--baseline', path.join(root, 'baseline1.json')), { log: () => {}, spawn: same.spawn, exec, now: () => t1 }), 0);
+  assert.equal(same.calls.length, 0);
+  const changed = fakeRunner({ 'oncall--eval-1': 0 });
+  assert.equal(main(args('week4', '--baseline', path.join(root, 'baseline1.json'), '--', '--model', 'claude-opus-5-5'), { log: () => {}, spawn: changed.spawn, exec, now: () => t1 }), 1);
+  assert.deepEqual(changed.calls, [['oncall--eval-1', 'oncall--memory-alert']], 'a different model is a different experiment');
+  const week4 = read('week4');
+  assert.deepEqual(week4.data.baseline.regressions.map((c) => [c.skill, c.cases]), [['oncall', ['eval-1']]]);
+  assert.match(week4.report, /- oncall: score 0\.75 -> 0\.5, fired 2\/2 -> 1\/2 \(cases: eval-1\)/);
+  writeFileSync(path.join(root, 'baseline4.json'), JSON.stringify(week4));
+  const fixtureOnly = fakeRunner();
+  write('repo/.agents/skills/oncall/evals/files/probe.log', 'probe failed again\n');
+  main(args('week5', '--baseline', path.join(root, 'baseline4.json'), '--', '--model', 'claude-opus-5-5'), { log: () => {}, spawn: fixtureOnly.spawn, exec, now: () => t1 });
+  assert.deepEqual(fixtureOnly.calls, [['oncall--eval-1', 'oncall--memory-alert']], 'a skill-directory change re-runs every case of that skill');
+  const week5 = read('week5');
+  assert.deepEqual(week5.data.baseline.improvements.map((c) => [c.skill, c.cases]), [['oncall', ['eval-1']]]);
+
+});
+
+test('only the changed case of a skill with central evals is re-run; --no-carry and --max-age force a re-run', (t) => {
+  const { root, write } = fixture(t);
+  const day = 24 * 60 * 60 * 1000;
+  const t0 = new Date('2026-11-01T12:00:00Z');
+  const central = path.join(root, 'central');
+  const args = (job, ...extra) => ['--root', path.join(root, 'repo'), '--evals-root', central, '--skill', 'land-pr', '--out', path.join(root, `out-${job}`), '--report', path.join(root, job), '--json', ...extra];
+  const read = (job) => JSON.parse(readFileSync(path.join(root, job, 'result.json'), 'utf8'));
+  write('central/repo/land-pr/evals.json', JSON.stringify({ evals: [{ name: 'merge', prompt: 'Land PR 7.', expectations: ['Waits for CI'] }, { name: 'rebase', prompt: 'Rebase PR 8.', expectations: ['Rebases'] }] }));
+  main(args('w1'), { log: () => {}, spawn: fakeRunner().spawn, exec, now: () => t0 });
+  writeFileSync(path.join(root, 'b1.json'), readFileSync(path.join(root, 'w1/result.json')));
+  write('central/repo/land-pr/evals.json', JSON.stringify({ evals: [{ name: 'merge', prompt: 'Land PR 7.', expectations: ['Waits for CI'] }, { name: 'rebase', prompt: 'Rebase PR 8 onto main.', expectations: ['Rebases'] }] }));
+  const partly = fakeRunner({ 'land-pr--rebase': 0.5 });
+  const t1 = new Date(t0.getTime() + 7 * day);
+  main(args('w2', '--baseline', path.join(root, 'b1.json')), { log: () => {}, spawn: partly.spawn, exec, now: () => t1 });
+  assert.deepEqual(partly.calls, [['land-pr--rebase']], 'only the case whose spec changed goes into the wrapper');
+  const w2 = read('w2');
+  assert.deepEqual(w2.data.cases.map((c) => [c.case, c.carried, c.runAt]), [['merge', true, iso(t0)], ['rebase', false, iso(t1)]]);
+  assert.match(w2.report, /- Cases: 1 run \/ 1 carried \/ 2 total/);
+  assert.match(w2.report, /\| land-pr \| 2 \| 1 \| 0\.75 \| 2\/2 \| land-pr--rebase\/criteria \| 0 \|/, 'the row combines fresh and carried cases');
+  assert.deepEqual(w2.data.baseline.regressions.map((c) => c.cases), [['rebase']]);
+  writeFileSync(path.join(root, 'b2.json'), readFileSync(path.join(root, 'w2/result.json')));
+  const full = fakeRunner();
+  main(args('w3', '--baseline', path.join(root, 'b2.json'), '--no-carry'), { log: () => {}, spawn: full.spawn, exec, now: () => t1 });
+  assert.deepEqual(full.calls, [['land-pr--merge', 'land-pr--rebase']], '--no-carry re-runs everything');
+  const stale = fakeRunner();
+  main(args('w4', '--baseline', path.join(root, 'b2.json')), { log: () => {}, spawn: stale.spawn, exec, now: () => new Date(t0.getTime() + 29 * day) });
+  assert.deepEqual(stale.calls, [['land-pr--merge']], 'a result older than the default 28 days is re-run');
+  assert.deepEqual(read('w4').data.cases.map((c) => c.carried), [false, true]);
+  const narrow = fakeRunner();
+  main(args('w5', '--baseline', path.join(root, 'b2.json'), '--max-age', '1'), { log: () => {}, spawn: narrow.spawn, exec, now: () => new Date(t1.getTime() + 2 * day) });
+  assert.deepEqual(narrow.calls, [['land-pr--merge', 'land-pr--rebase']]);
+  assert.equal(parseArgs(['--max-age', '7']).maxAgeDays, 7);
+  assert.equal(parseArgs([]).maxAgeDays, 28);
+  assert.throws(() => parseArgs(['--max-age', 'soon']), /--max-age/);
+  assert.equal(parseArgs(['--no-carry']).carry, false);
+});
+
+test('--cache keeps one record per experiment key so workstation runs carry forward without a baseline', (t) => {
+  const { root } = fixture(t);
+  const cache = path.join(root, 'cache');
+  const args = (job, ...extra) => ['--root', path.join(root, 'repo'), '--skill', 'oncall', '--out', path.join(root, `out-${job}`), '--json', ...extra];
+  const first = fakeRunner({ 'oncall--memory-alert': 0.5 });
+  main(args('a', '--cache', cache), { log: () => {}, spawn: first.spawn, exec });
+  const files = readdirSync(cache).sort();
+  assert.equal(files.length, 2);
+  for (const file of files) {
+    assert.match(file, /^[0-9a-f]{32}\.json$/);
+    const record = JSON.parse(readFileSync(path.join(cache, file), 'utf8'));
+    assert.equal(`${record.key}.json`, file);
+    assert.deepEqual(Object.keys(record), ['skill', 'case', 'key', 'score', 'fired', 'graders', 'runAt', 'carried']);
+  }
+  const logs = [];
+  const second = fakeRunner();
+  assert.equal(main(args('b', '--cache', cache), { log: (m) => logs.push(m), spawn: second.spawn, exec }), 0);
+  assert.equal(second.calls.length, 0, 'the cache alone carries every case');
+  assert.deepEqual(JSON.parse(logs[0]).cases, { run: 0, carried: 2, total: 2 });
+  const offByDefault = fakeRunner();
+  main(args('c'), { log: () => {}, spawn: offByDefault.spawn, exec });
+  assert.equal(offByDefault.calls.length, 1, 'the cache is off by default');
+  writeFileSync(path.join(cache, files[0]), '{broken');
+  const repaired = fakeRunner();
+  main(args('d', '--cache', cache), { log: () => {}, spawn: repaired.spawn, exec });
+  assert.equal(repaired.calls[0].length, 1, 'an unreadable cache entry just re-runs its case');
+  assert.equal(JSON.parse(readFileSync(path.join(cache, files[0]), 'utf8')).key, files[0].replace('.json', ''), 'and is rewritten');
+  assert.equal(parseArgs(['--cache', '--json']).cache, defaultCacheDir());
+  assert.equal(parseArgs(['--cache', 'here']).cache, path.resolve('here'));
+  assert.equal(parseArgs([]).cache, null);
+  assert.equal(defaultCacheDir({ XDG_CACHE_HOME: '/x' }), '/x/repo-skill-evals');
+  assert.match(defaultCacheDir({}), /\.cache\/repo-skill-evals$/);
+});
+
+test('result.json data for 200 cases stays under the 48 KiB baseline bound', (t) => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'skill-evals-size-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  // Fleet skill names average about 15 characters and case names about 20 (for example `change-reconciliation-machinery`).
+  const skills = Array.from({ length: 40 }, (_, i) => `fleet-skill-${String(i).padStart(3, '0')}`);
+  const records = Array.from({ length: 200 }, (_, i) => ({
+    skill: skills[i % 40], case: `realistic-case-${String(i).padStart(3, '0')}`, key: createKey(i), score: i % 3 ? 1 : 0.5, fired: i % 7 !== 0,
+    graders: [{ name: 'criteria', passed: i % 3 !== 0 }], runAt: '2026-11-04T16:30:11Z', carried: i % 2 === 0,
+  }));
+  const manifest = { skills: skills.map((name) => ({ name, evals: `/work/repo/.agents/skills/${name}/evals/evals.json`, manualOnly: false })), cases: records.map((r) => ({ name: `${r.skill}--${r.case}`, skill: r.skill })) };
+  const results = { cases: records.map((r) => ({ name: `${r.skill}--${r.case}`, aggregates: { score: r.score }, arms: { with: [{ graders: [{ name: 'skill-fired', passed: r.fired }, ...r.graders] }] } })) };
+  const rows = summarize(results, manifest);
+  // A bad week: a tenth of the fresh cases regress.
+  const baseline = { skills: rows, cases: records.map((r, i) => ({ ...r, score: i % 20 === 1 ? r.score + 0.5 : r.score })) };
+  const comparison = compareBaseline(rows, baseline, records);
+  const result = writeReport(dir, { options: { roots: [dir] }, rows, results, manifest, run: { status: 1 }, comparison, exec, records, counts: { run: 100, carried: 100, total: 200 } });
+  assert.equal(result.data.cases.length, 200);
+  const bytes = Buffer.byteLength(JSON.stringify(result.data));
+  assert.ok(bytes < 48 * 1024, `data is ${bytes} bytes`);
+});
+const createKey = (i) => i.toString(16).padStart(32, '0');
