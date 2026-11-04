@@ -35,7 +35,7 @@
 // no sandbox backend at all, so a committed case that grants one of those
 // tools is refused outright unless --allow-gated-tools (workstation runs).
 import { spawnSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -428,7 +428,9 @@ export function main(argv, { log = console.log, warn = console.error, spawn = sp
   mkdirSync(outDir, { recursive: true });
   const { plugin, manifest } = writeWrapper(outDir, withEvals, options);
   const resultsFile = path.join(outDir, 'results.json');
-  const command = ['claude', ['plugin', 'eval', plugin, '--trust-plugin', '--no-publish', '--json', resultsFile, '--output-dir', path.join(outDir, 'results'), ...options.passthrough]];
+  // The stock runner otherwise deletes trace.jsonl before this process can archive it.
+  const ownsRunnerTemp = !options.passthrough.includes('--keep-temp');
+  const command = ['claude', ['plugin', 'eval', plugin, '--trust-plugin', '--no-publish', '--keep-temp', '--json', resultsFile, '--output-dir', path.join(outDir, 'results'), ...options.passthrough.filter(a => a !== '--keep-temp')]];
   if (options.dryRun) {
     log(`${manifest.cases.length} cases for ${withEvals.length} skills written under ${plugin}\n${command[0]} ${command[1].map((a) => (/\s/.test(a) ? JSON.stringify(a) : a)).join(' ')}`);
     return 0;
@@ -466,6 +468,16 @@ export function main(argv, { log = console.log, warn = console.error, spawn = sp
     const artifacts = [...filesBelow(outDir), ...traces];
     if (options.report) for (const name of ['report.md', 'result.json']) { const p = path.join(options.report, name); if (existsSync(p)) artifacts.push(p); }
     finishRun(store, history.id, { status: results?.partial ? 'partial' : outcome?.ok ? 'completed' : 'failed', summary: outcome ? `Stock runner exit ${run.status}` : 'Runner failed before producing a usable result', result: outcome ?? { exit: run?.status ?? null }, artifacts: [...new Set(artifacts)] });
+    // Remove only this runner's recognized, account-owned scaffold after the
+    // archive is durable. Explicit --keep-temp preserves it for debugging.
+    if (ownsRunnerTemp) for (const trace of new Set(traces)) {
+      const file = realpathSync(trace), dir = path.dirname(path.dirname(file));
+      if (path.dirname(dir) !== realpathSync(tmpdir()) || !/^claude-eval-[\w-]+$/.test(path.basename(dir)) || file !== path.join(dir, 'out', 'trace.jsonl') || typeof process.getuid !== 'function' || lstatSync(dir).uid !== process.getuid()) continue;
+      try {
+        const writable = p => { if (!lstatSync(p).isDirectory()) return; chmodSync(p, 0o700); for (const e of readdirSync(p)) writable(path.join(p, e)); };
+        writable(dir); rmSync(dir, { recursive: true });
+      } catch (error) { warn(`Trace archived; retained runner temporary directory ${dir}: ${error.message}`); }
+    }
   }
 }
 
