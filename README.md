@@ -33,7 +33,7 @@ web routes, and heading anchors are not checked. Nx inventories include only
 explicit targets, not inferred targets. These are source contracts, not runtime
 health checks.
 
-- `repo-skill-evals [--root DIR]... [--evals-root DIR]... [--skill NAME]... [--list | --dry-run] [--out DIR] [--runs N] [--trigger-only] [--json] [--report DIR] [--baseline FILE] [--allow-gated-tools] [-- <claude plugin eval options>]`
+- `repo-skill-evals [--root DIR]... [--evals-root DIR]... [--skill NAME]... [--list | --dry-run] [--out DIR] [--runs N] [--trigger-only] [--json] [--report DIR] [--baseline FILE] [--max-age DAYS] [--no-carry] [--cache [DIR]] [--allow-gated-tools] [-- <claude plugin eval options>]`
   — score a repository's skills with the stock Claude Code runner. It finds
   every `*/SKILL.md` below the roots, reads each skill's committed
   skill-creator `evals/evals.json` (or `<evals-root>/<skill>/evals.json`),
@@ -48,12 +48,18 @@ health checks.
   with the table, uncovered skills, errored runs and failed-case evidence)
   and `DIR/result.json` (`{ report, complete, data }`) for automation;
   `--baseline FILE` compares with a previous `result.json` and lists
-  regressions first. A case whose `allowed_tools` grants Bash, PowerShell,
-  Write, Edit, WebFetch or an `mcp__*` tool is refused because LCARS
-  worker pods have no sandbox backend; `--allow-gated-tools` opts out for
-  workstation runs. Exit status is the runner's. The `skill-evals` skill
-  owns when and how to use it. Actual runs retain input snapshots, results
-  and available traces in the private evaluation history, including failures.
+  regressions first. Each case gets an experiment key (skill files, case
+  spec, fixtures, claude version, model, repo-tools version); a case whose
+  key matches a baseline result younger than `--max-age` days (default 28)
+  is carried forward instead of re-run, and claude is not invoked when every
+  case carries. `--no-carry` re-runs everything; `--cache [DIR]` keeps a
+  per-key record cache for workstation runs. A case whose `allowed_tools`
+  grants Bash, PowerShell, Write, Edit, WebFetch or an `mcp__*` tool is
+  refused because LCARS worker pods have no sandbox backend;
+  `--allow-gated-tools` opts out for workstation runs. Exit status is the
+  runner's. The `skill-evals` skill owns when and how to use it. Actual
+  runs retain input snapshots, results and available traces in the private
+  evaluation history, including failures.
 - `repo-eval-history begin|finish|record|find|show` — retain and search regular
   skill/model evaluations and optimization attempts, including rejected
   hypotheses. See [evaluation history](docs/evaluation-history.md) for the
