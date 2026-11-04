@@ -1,7 +1,7 @@
 // Optional shared blob archive, using rclone's maintained S3/GCS backends.
 import { spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync, renameSync, chmodSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync, renameSync, chmodSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { readRun, historyRoot, selectRuns, findRuns } from './eval-history.mjs';
@@ -64,11 +64,18 @@ export function archiveRun(root, id, config = archiveConfig()) {
 
 export function remoteFind(options = {}, config = archiveConfig()) {
   if (!config) throw Error('No shared evaluation archive configured');
-  const listing = JSON.parse(command(config, ['lsjson', config.remote, '--recursive', '--files-only', '--include', '/runs/*/record.json']));
-  const records = listing.filter(f => /^runs\/[0-9a-f-]{36}\/record\.json$/.test(f.Path)).map(f => {
-    const r = JSON.parse(command(config, ['cat', `${config.remote}/${f.Path}`]));
-    if (f.Path !== `runs/${r.id}/record.json`) throw Error('Shared evaluation record identity mismatch');
-    artifactPaths(r);
+  // Terminal records are immutable: refresh only missing markers in one native
+  // batch, then filter locally. Repeated lookups never spawn one process/GET per
+  // historical run. Keep each remote profile's private catalog separate.
+  const cache = config.cacheDir ?? path.join(historyRoot(), 'catalog', sha(Buffer.from(JSON.stringify([config.remote, config.rcloneConfig ?? '']))));
+  mkdirSync(cache, { recursive: true, mode: 0o700 });
+  command(config, ['copy', config.remote, cache, '--include', '/runs/*/record.json', '--fast-list', '--ignore-existing', '--transfers', '4', '--checkers', '4']);
+  const runs = path.join(cache, 'runs');
+  const records = (existsSync(runs) ? readdirSync(runs) : []).filter(uuid).map(id => {
+    const marker = path.join(runs, id, 'record.json');
+    const r = JSON.parse(readFileSync(marker, 'utf8'));
+    if (r.id !== id) throw Error('Shared evaluation record identity mismatch');
+    artifactPaths(r); chmodSync(marker, 0o600);
     return { ...r, archive: { remote: `${config.remote}/runs/${r.id}` } };
   });
   return selectRuns(records, options);

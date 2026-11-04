@@ -117,7 +117,9 @@ repo-eval-history fetch --all         # verified portable backup/export
 ```
 
 Objects use `runs/<UUID>/artifacts/<name>` and a final `record.json` discovery
-marker. Uploads use immutable checksum comparisons; no sync, deletion or pruning
+marker. Shared lookups batch new markers into a private local catalog, then
+filter cached immutable records; historical records are not downloaded again
+on every lookup. Uploads use immutable checksum comparisons; no sync, deletion or pruning
 occurs. Retrieval checks artifact sizes and SHA-256 before publishing a private
 local run directory. Existing local records are never overwritten. Terminal
 records remain unchanged; a separate local `archive.json` records upload success.
