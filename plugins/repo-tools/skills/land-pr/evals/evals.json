@@ -1,0 +1,29 @@
+{
+  "skill_name": "land-pr",
+  "evals": [
+    {
+      "name": "ship-this-change",
+      "prompt": "The fix on my branch is done and tested locally. Ship it all the way: I don't want to come back to a PR link and find it waiting. Lay out every step you'd take from here to the branch being gone, and what you'd check at each gate. Don't run anything yet.",
+      "expected_output": "Describes the full lifecycle: reconcile repo policy, isolate in a worktree, stage only intended files, run verification without --no-verify, push with tracking, open a ready PR with a complete body, confirm checks exist and head SHA matches, arm auto-merge and run the bundled watcher, fix CI and address/resolve review threads on the current head, merge through protection and verify MERGED state and merge commit, then post-merge fast-forward and worktree/branch cleanup via worktree-hygiene.",
+      "assertions": [
+        "Opens a ready (not draft) PR with squash merge as default, confirms required checks were created and the PR head SHA matches the pushed commit, and arms protected auto-merge while continuing to monitor",
+        "Resolves review threads only after the requested change is present and verified in the PR head, and restarts the watch loop on each new head",
+        "Verifies the actual MERGED state, merge timestamp and merge commit rather than a CLI message, then cleans up with repo-safe-remove-worktree and deletes the exact local and remote feature branches"
+      ],
+      "id": 1,
+      "files": []
+    },
+    {
+      "name": "pr-sitting-with-review-comments",
+      "prompt": "My PR has been open for two days with a couple of inline review comments and a failing lint job. Get it merged. What's your process for the comments versus the failing job, and when would you stop and ask me instead?",
+      "expected_output": "Inspects the failing check's logs and fixes the cause in scope, reads thread-aware inline comments (not the flat list), addresses unambiguous actionable feedback by default and replies/resolves threads only once fixed in the head, pushes corrections and re-checks after every push; stops only for ambiguous or scope-expanding feedback, auth/permission issues, or an unsafe dirty checkout.",
+      "assertions": [
+        "Inspects the failing job's actual logs, fixes the cause within scope, verifies locally, pushes, and restarts monitoring on the new head SHA",
+        "Uses thread-aware review comments and addresses every unambiguous actionable comment, asking only when feedback is ambiguous, conflicting, materially scope-expanding or regression-inducing",
+        "Does not declare success while an actionable unresolved thread or required check remains, and never bypasses hooks or protection"
+      ],
+      "id": 2,
+      "files": []
+    }
+  ]
+}

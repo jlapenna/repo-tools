@@ -1,0 +1,29 @@
+{
+  "skill_name": "autonomous-work",
+  "evals": [
+    {
+      "name": "keep-going-dont-ask",
+      "prompt": "I'm heading out for the afternoon. Finish the retry-logic change in the uploader, get it through tests and up as a PR, and don't ask me questions while I'm gone. Before you start, tell me how you'll handle the little decisions that come up and what you'll do if something genuinely blocks you.",
+      "expected_output": "Explains it will recover scope and acceptance from the conversation, resolve missing facts by inspection, follow repository conventions for implementation choices, take conservative reversible defaults for preferences and state them, pick and justify judgment calls, defer only consequential uncertainty, continue through PR/CI, and report with evidence; a blocker is declared only after documenting the exact operation, why no alternative works, and what remains.",
+      "assertions": [
+        "States it will not end the turn with optional questions or a 'your call' item and will resolve routine choices with stated reversible defaults",
+        "Distinguishes real blockers (missing authority, credentials, enforced approvals, reserved decisions) from policy or preference choices it must make itself",
+        "Says it will continue through verification and the already-authorized delivery steps rather than stopping at a plan, first green check or PR link, without adding new scope, deployments or messages to others"
+      ],
+      "id": 1,
+      "files": []
+    },
+    {
+      "name": "report-ended-with-todo-for-me",
+      "prompt": "Last night's unattended run ended with a report listing four 'next actions for Joe': rerun a flaky check, comment on the issue with the findings, pick between two equivalent config layouts, and clean up its own worktree. I had said I couldn't answer anything. Which of those should it have just done, and what's the test for deciding?",
+      "expected_output": "All four should have been done by the agent: rerunning a check, commenting on an issue, cleaning up its own artifacts, and choosing between options are within existing tools and authorization; an item belongs to the user only when it needs authority, access, facts or physical action the agent cannot obtain.",
+      "assertions": [
+        "Identifies that rerunning a check, filing/commenting on an issue, and cleaning up its own worktree are things the agent should do with tools it already holds, then report as done",
+        "States the agent should make the choice between equivalent config layouts itself and say why, rather than handing it back",
+        "Gives the ownership test: an item is the user's only when it needs authority, access, facts or physical action unobtainable within the task (e.g. interactive login, enforced approval, explicitly reserved decision)"
+      ],
+      "id": 2,
+      "files": []
+    }
+  ]
+}

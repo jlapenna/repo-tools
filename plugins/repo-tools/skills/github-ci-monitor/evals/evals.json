@@ -1,0 +1,29 @@
+{
+  "skill_name": "github-ci-monitor",
+  "evals": [
+    {
+      "name": "did-my-push-pass",
+      "prompt": "I just pushed a commit to my branch. How do you check whether CI for that exact commit passed, and how would you wait for it without hammering GitHub in a sleep loop? Give me the commands; don't run them.",
+      "expected_output": "Resolves the pushed SHA, lists runs filtered by --commit, --workflow and --event push, verifies the returned SHA/event, then watches that run ID with a bounded timeout gh run watch --exit-status; exit 124 means still pending, and failures are inspected with gh run view --log-failed.",
+      "assertions": [
+        "Uses `gh run list --commit \"$(git rev-parse HEAD)\" --workflow CI --event push --json ...` and verifies the returned SHA and event match before watching",
+        "Watches the exact run ID with `timeout <budget> gh run watch <run-id> --exit-status --compact --interval 30` and treats timeout exit 124 as still pending, not success",
+        "Says no matching run means validation is not yet established, not success, and uses `gh run view <run-id> --log-failed` on failure"
+      ],
+      "id": 1,
+      "files": []
+    },
+    {
+      "name": "auto-merge-armed-did-it-land",
+      "prompt": "I enabled auto-merge on two PRs an hour ago. Did they land, and if not what's holding them? How would you keep an eye on them until they merge or need me, and what do you do when the watcher says something needs attention?",
+      "expected_output": "Runs the bundled repo-watch-prs.sh (or repo-watch-prs on PATH) from inside the repo for the PR numbers, reads the final VERDICT line (ALL-MERGED or ATTENTION <pr> dirty/behind/auto-merge-unarmed/checks-failed/unresolved-threads/closed-unmerged), makes one targeted correction on attention and restarts the watcher against the new head.",
+      "assertions": [
+        "Uses `bash \"$REPO_TOOLS_PLUGIN_ROOT/scripts/repo-watch-prs.sh\" [--strict] <pr> [<pr>...]` (or repo-watch-prs on PATH) rather than a sleep/gh loop, with --strict only when branch protection requires up-to-date heads",
+        "Interprets the VERDICT line, including that auto-merge-unarmed is a decision point requiring gh pr merge --auto or a direct merge",
+        "On an ATTENTION verdict, diagnoses, makes one targeted correction and restarts the watcher against the new head rather than treating attention as completion"
+      ],
+      "id": 2,
+      "files": []
+    }
+  ]
+}
