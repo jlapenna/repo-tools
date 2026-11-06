@@ -152,6 +152,8 @@ export function readTools(
     ...filesBelow(path.join(caseDir, "resources")),
   ];
   const permitted = new Set(available.map((p) => realpathSync(p)));
+  const aliases = new Map(available.map(p => [p.startsWith(path.join(plugin, 'skills')+path.sep) ? path.relative(plugin,p) : path.relative(caseDir,p),p]));
+  let loadedSkill;
   const skills = new Map();
   const skillRoot = path.join(plugin, "skills");
   for (const p of available.filter((p) => p.startsWith(skillRoot+path.sep) && path.relative(skillRoot,p).split(path.sep).length === 2 && path.basename(p) === "SKILL.md")) {
@@ -165,7 +167,8 @@ export function readTools(
     });
   }
   const read = (p) => {
-    const real = realpathSync(path.resolve(caseDir, p));
+    const source = path.isAbsolute(p) ? p : aliases.get(p) ?? path.resolve(loadedSkill ? path.dirname(loadedSkill.path) : caseDir, p);
+    const real = realpathSync(source);
     if (!permitted.has(real))
       throw Error("File is outside the eval skills and fixtures");
     const text = readFileSync(real, "utf8");
@@ -184,18 +187,14 @@ export function readTools(
       if (name === "Skill") {
         const skill = skills.get(args.skill);
         if (!skill) throw Error("Unknown skill");
-        return read(skill.path);
+        loadedSkill = skill;
+        return `Base directory: ${path.relative(plugin,path.dirname(skill.path))}\n\n${read(skill.path)}`;
       }
       if (name === "Read") return read(args.path);
       if (typeof args.pattern !== "string" || args.pattern.length > 256)
         throw Error("Invalid search pattern");
       if (name === "Glob")
-        return available
-          .filter((p) =>
-            path.matchesGlob(path.relative(caseDir, p), args.pattern),
-          )
-          .slice(0, 200)
-          .join("\n");
+        return [...aliases].filter(([alias,file]) => path.matchesGlob(alias,args.pattern) || (loadedSkill && file.startsWith(path.dirname(loadedSkill.path)+path.sep) && path.matchesGlob(path.relative(path.dirname(loadedSkill.path),file),args.pattern))).slice(0,200).map(([alias])=>alias).join('\n');
       if (name === "Grep")
         return available
           .flatMap((p) =>

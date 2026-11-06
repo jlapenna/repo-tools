@@ -412,3 +412,14 @@ test('app-server death before the turn acknowledgement is a preserved rejection'
  const child=new EventEmitter();child.exitCode=null;child.stdout=new PassThrough();child.stderr=new PassThrough();child.stdin=new Writable({write(chunk,enc,cb){const m=JSON.parse(String(chunk));if(m.method==='initialize')queueMicrotask(()=>child.stdout.write(JSON.stringify({id:m.id,result:{}})+'\n'));if(m.method==='thread/start')queueMicrotask(()=>child.stdout.write(JSON.stringify({id:m.id,result:{model:'gpt-6.1-sol',thread:{id:'test'}}})+'\n'));if(m.method==='turn/start')queueMicrotask(()=>{child.exitCode=1;child.emit('exit',1);});cb();}});
  const client=new CodexClient({env:{CODEX_HOME:f.dir},start:()=>child});await client.initialize();await assert.rejects(client.run({cwd:f.caseDir,model:'gpt-6.1-sol',prompt:'probe',instructions:'probe'}),/exited/);await new Promise(r=>setImmediate(r));await client.close();
 });
+
+
+test('loaded skills expose their base and resolve linked references through a discoverable namespace', t => {
+ const f=fixture(t);const ref=path.join(f.plugin,'skills','triage','references','scope.md');mkdirSync(path.dirname(ref),{recursive:true});writeFileSync(ref,'Reference scope is repository only.');
+ const tools=readTools(f.plugin,f.caseDir);assert.match(tools.call('Skill',{skill:'triage'}),/Base directory: skills\/triage/);
+ assert.equal(tools.call('Read',{path:'references/scope.md'}),'Reference scope is repository only.');
+ assert.equal(tools.call('Read',{path:'skills/triage/references/scope.md'}),'Reference scope is repository only.');
+ assert.match(tools.call('Glob',{pattern:'**/*.md'}),/skills\/triage\/references\/scope.md/);
+ assert.match(tools.call('Glob',{pattern:'references/*.md'}),/skills\/triage\/references\/scope.md/);
+ assert.throws(()=>tools.call('Read',{path:'../../../../../../etc/passwd'}));
+});
