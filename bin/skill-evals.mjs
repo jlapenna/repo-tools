@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Run a repository's skill evals through the stock Claude Code runner
+// Run repository skill evals through Codex or the stock Claude Code runner
 // (`claude plugin eval`) without turning every skills directory into a plugin
 // by hand.
 //
@@ -14,7 +14,7 @@
 // (or its expected_output). Fixture files listed in `files` are copied into
 // the case and granted read-only through `context.add_dirs`.
 //
-// Usage: repo-skill-evals [--root DIR]... [--evals-root DIR]... [--skill NAME]...
+// Usage: repo-skill-evals [--runner codex|claude] [--root DIR]... [--evals-root DIR]... [--skill NAME]...
 //                         [--list | --dry-run] [--out DIR] [--runs N]
 //                         [--trigger-only] [--json] [--report DIR] [--baseline FILE]
 //                         [--max-age DAYS] [--no-carry] [--cache [DIR]]
@@ -50,6 +50,7 @@ import { parse } from 'yaml';
 import { createHash } from 'node:crypto';
 import { beginRun, finishRun, findRuns, historyRoot } from './eval-history.mjs';
 import { archiveRun, archiveConfig, remoteFind } from './eval-history-remote.mjs';
+import { parseOptions as codexOptions } from './skill-evals-codex.mjs';
 
 const SKIP_DIRS = new Set(['node_modules', '.git', 'results', '.venv', 'dist', 'build']);
 const MAX_DEPTH = 8;
@@ -259,8 +260,8 @@ export function fixtureFiles(evalsFile, files) {
   });
 }
 
-export function experimentKey({ skill, spec, fixtures, claudeVersion, model, toolsVersion }) {
-  return sha256(canonicalJson({ skill, spec, fixtures, claudeVersion: claudeVersion ?? null, model, toolsVersion })).slice(0, 32);
+export function experimentKey({ skill, spec, fixtures, claudeVersion, model, toolsVersion, runner, judgeModel }) {
+  return sha256(canonicalJson({ skill, spec, fixtures, claudeVersion: claudeVersion ?? null, model, toolsVersion, ...(runner ? { runner, judgeModel } : {}) })).slice(0, 32);
 }
 
 export function modelOf(passthrough) {
@@ -471,9 +472,9 @@ export function renderReport({ roots, revision, runnerVersion, date, exit, resul
   lines.push(`- Exit: ${exit}${partial ? ` (partial: ${results.partialReason ?? 'unknown reason'})` : ''}`);
   if (counts) lines.push(`- Cases: ${counts.run} run / ${counts.carried} carried / ${counts.total} total`);
   lines.push(`- Cases passed: ${casesPassed}/${casesTotal}`);
-  if (counts?.run === 0) lines.push('- claude plugin eval not invoked: every case was carried forward', '');
+  if (counts?.run === 0) lines.push('- Evaluator not invoked: every case was carried forward', '');
   else {
-    lines.push(`- Runner list-price cost estimate (not billed spend): $${Number(results.costUsd ?? 0).toFixed(2)}`);
+    lines.push(`- Runner list-price cost estimate (not billed spend): ${results.costUsd == null ? 'unknown' : '$'+Number(results.costUsd).toFixed(2)}`);
     lines.push(`- Duration: ${results.durationSeconds ?? '?'}s`, '');
   }
   lines.push('## Results', '', '| Skill | Cases | Carried | Score | Fired | Failed graders | Run errors |', '| --- | --- | --- | --- | --- | --- | --- |');
@@ -534,7 +535,7 @@ function probe(exec, cmd, args, cwd) {
 
 export function writeReport(dir, { options, rows, results, manifest, run, comparison, exec, claudeVersion, records = [], counts, now = new Date() }) {
   const revision = probe(exec, 'git', ['rev-parse', 'HEAD'], options.roots[0]);
-  const runnerVersion = (claudeVersion === undefined ? probe(exec, 'claude', ['--version'], undefined) : claudeVersion) ?? (results.claudeVersion ? `${results.claudeVersion} (Claude Code)` : null);
+  const runnerVersion = (claudeVersion === undefined ? probe(exec, options.runner ?? 'claude', ['--version'], undefined) : claudeVersion) ?? (results.claudeVersion ? `${results.claudeVersion} (Claude Code)` : null);
   const exit = run.status ?? 1;
   const partial = results.partial ?? false;
   const { markdown, casesTotal, casesPassed } = renderReport({ roots: options.roots.map((r) => path.resolve(r)), revision, runnerVersion, date: now.toISOString(), exit, results, rows, manifest, comparison, counts, records, now });
@@ -542,7 +543,7 @@ export function writeReport(dir, { options, rows, results, manifest, run, compar
     report: markdown,
     complete: exit === 0 && !partial,
     // data is the next run's baseline, bounded to 48 KiB: rows drop the per-case scores, paths and failed graders that data.cases and the report carry.
-    data: { skills: rows.map(({ scores, evals, failed, ...row }) => row), exit, partial, partialReason: results.partialReason ?? null, costUsd: results.costUsd ?? null, durationSeconds: results.durationSeconds ?? null, casesTotal, casesPassed, casesRun: counts?.run ?? null, casesCarried: counts?.carried ?? 0, baseline: comparison ?? null, cases: records },
+    data: { runner: options.runner ?? 'claude', model: results.model ?? null, judgeModel: results.judgeModel ?? null, skills: rows.map(({ scores, evals, failed, ...row }) => row), exit, partial, partialReason: results.partialReason ?? null, costUsd: results.costUsd ?? null, durationSeconds: results.durationSeconds ?? null, casesTotal, casesPassed, casesRun: counts?.run ?? null, casesCarried: counts?.carried ?? 0, baseline: comparison ?? null, cases: records },
   };
   mkdirSync(dir, { recursive: true });
   writeFileSync(path.join(dir, 'report.md'), markdown);
@@ -551,12 +552,13 @@ export function writeReport(dir, { options, rows, results, manifest, run, compar
 }
 
 export function parseArgs(argv) {
-  const options = { roots: [], evalsRoots: [], only: [], passthrough: [], list: false, dryRun: false, json: false, triggerOnly: false, allowGatedTools: false, carry: true, maxAgeDays: DEFAULT_MAX_AGE_DAYS, cache: null };
+  const options = { runner: process.env.REPO_SKILL_EVALS_RUNNER ?? 'claude', roots: [], evalsRoots: [], only: [], passthrough: [], list: false, dryRun: false, json: false, triggerOnly: false, allowGatedTools: false, carry: true, maxAgeDays: DEFAULT_MAX_AGE_DAYS, cache: null };
   const args = [...argv];
   while (args.length) {
     const arg = args.shift();
     if (arg === '--') { options.passthrough = args.splice(0); break; }
-    if (arg === '--root' && args.length) options.roots.push(args.shift());
+    if (arg === '--runner' && args.length) options.runner = args.shift();
+    else if (arg === '--root' && args.length) options.roots.push(args.shift());
     else if (arg === '--evals-root' && args.length) options.evalsRoots.push(args.shift());
     else if (arg === '--skill' && args.length) options.only.push(args.shift());
     else if (arg === '--out' && args.length) options.out = path.resolve(args.shift());
@@ -577,6 +579,7 @@ export function parseArgs(argv) {
     else if (arg === '--allow-gated-tools') options.allowGatedTools = true;
     else throw new Error(`Unknown or incomplete option: ${arg}`);
   }
+  if (!['codex', 'claude'].includes(options.runner)) throw Error('--runner must be codex or claude');
   if (!options.roots.length) options.roots.push(process.cwd());
   return options;
 }
@@ -606,8 +609,9 @@ export function main(argv, { log = console.log, warn = console.error, spawn = sp
     return 0;
   }
   if (!withEvals.length) throw new Error(`none of the ${skills.length} skills has an evals.json; use --list to see them`);
-  const claudeVersion = probe(exec, 'claude', ['--version'], undefined);
-  const planned = planCases(withEvals, options, { claudeVersion, model: modelOf(options.passthrough), toolsVersion: toolsVersion() });
+  const runnerOptions = options.runner === 'codex' ? codexOptions(options.passthrough) : null;
+  const claudeVersion = probe(exec, options.runner, ['--version'], undefined);
+  const planned = planCases(withEvals, options, { claudeVersion, model: runnerOptions?.model ?? modelOf(options.passthrough), toolsVersion: toolsVersion(), ...(runnerOptions ? {runner: 'codex', judgeModel: runnerOptions.judgeModel} : {}) });
   const startedAt = now();
   const sources = [baseline?.cases ?? [], options.cache ? readCache(options.cache, planned) : []];
   const carried = options.carry ? carryForward(planned, sources, startedAt, options.maxAgeDays) : new Map();
@@ -642,7 +646,7 @@ export function main(argv, { log = console.log, warn = console.error, spawn = sp
     const summary = { ok: run.status === 0, exit: run.status, partial: results.partial ?? false, partialReason: results.partialReason ?? null, costUsd: results.costUsd ?? null, durationSeconds: results.durationSeconds ?? null, out: outDir, report: options.report ?? null, cases: counts, baseline: comparison, history, skills: rows };
     const changes = comparison ? `\n\n${renderChanges(comparison)}` : '';
     const report = options.report ? `, report in ${options.report}` : '';
-    const ran = outDir ? `, runner cost estimate $${Number(results.costUsd ?? 0).toFixed(2)} (list price, not billed spend), ${results.durationSeconds ?? '?'}s, results in ${outDir}` : ', claude not invoked';
+    const ran = outDir ? `, runner cost estimate ${results.costUsd == null ? 'unknown' : '$'+Number(results.costUsd).toFixed(2)} (list price, not billed spend), ${results.durationSeconds ?? '?'}s, results in ${outDir}` : ', evaluator not invoked';
     log(options.json ? JSON.stringify(summary, null, 2) : `\n${renderTable(rows)}${changes}\n\nexit ${run.status}${results.partial ? ` (partial: ${results.partialReason})` : ''}, cases ${countLine}${ran}${report}`);
     return summary;
   };
@@ -661,7 +665,7 @@ export function main(argv, { log = console.log, warn = console.error, spawn = sp
   const resultsFile = path.join(outDir, 'results.json');
   // The stock runner otherwise deletes trace.jsonl before this process can archive it.
   const ownsRunnerTemp = !options.passthrough.includes('--keep-temp');
-  const command = ['claude', ['plugin', 'eval', plugin, '--trust-plugin', '--no-publish', '--keep-temp', '--json', resultsFile, '--output-dir', path.join(outDir, 'results'), ...options.passthrough.filter(a => a !== '--keep-temp')]];
+  const command = options.runner === 'codex' ? [process.execPath, [fileURLToPath(new URL('./skill-evals-codex.mjs', import.meta.url)), plugin, resultsFile, ...options.passthrough]] : ['claude', ['plugin', 'eval', plugin, '--trust-plugin', '--no-publish', '--keep-temp', '--json', resultsFile, '--output-dir', path.join(outDir, 'results'), ...options.passthrough.filter(a => a !== '--keep-temp')]];
   if (options.dryRun) {
     log(`${manifest.cases.length} cases for ${toRun.length} skills written under ${plugin} (${countLine})\n${command[0]} ${command[1].map((a) => (/\s/.test(a) ? JSON.stringify(a) : a)).join(' ')}`);
     return 0;
@@ -669,7 +673,7 @@ export function main(argv, { log = console.log, warn = console.error, spawn = sp
   const filesBelow = (dir) => readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name)).flatMap(e => e.isDirectory() ? filesBelow(path.join(dir, e.name)) : e.isFile() ? [path.join(dir, e.name)] : []);
   const inputFiles = filesBelow(plugin);
   const inputs = { files: Object.fromEntries(inputFiles.map(file => [path.relative(plugin, file), createHash('sha256').update(readFileSync(file)).digest('hex')])),
-    arguments: options.passthrough, modelAlias: process.env.ANTHROPIC_MODEL ?? 'client default' };
+    arguments: options.passthrough, runner: options.runner, modelAlias: runnerOptions?.model ?? process.env.ANTHROPIC_MODEL ?? 'client default' };
   const subject = manifest.skills.map(s => s.name).sort().join(',');
   const localPrevious = findRuns({ root: store, kind: 'skill', subject, inputs });
   const sharedPrevious = archiveConfig() ? remoteFind({ kind: 'skill', subject, inputs }) : [];
@@ -682,9 +686,9 @@ export function main(argv, { log = console.log, warn = console.error, spawn = sp
     const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => key !== 'CLAUDECODE'));
     // The runner's own progress lines stay out of --json output; they are kept in runner.log instead.
     run = spawn(command[0], command[1], { cwd: plugin, stdio: ['ignore', options.json ? 'pipe' : 'inherit', 'inherit'], env, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
-    if (run.error) throw new Error(`could not run claude: ${run.error.message}`);
+    if (run.error) throw new Error(`could not run evaluator: ${run.error.message}`);
     if (options.json && run.stdout) writeFileSync(path.join(outDir, 'runner.log'), run.stdout);
-    if (!existsSync(resultsFile)) throw new Error(`claude plugin eval exited ${run.status} without writing ${resultsFile}`);
+    if (!existsSync(resultsFile)) throw new Error(`${options.runner} evaluator exited ${run.status} without writing ${resultsFile}`);
     results = JSON.parse(readFileSync(resultsFile, 'utf8'));
     outcome = conclude(results, run, outDir, { id: history.id, store, previous: previous.map(r => r.id) });
     return run.status ?? 1;

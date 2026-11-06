@@ -484,7 +484,7 @@ test('carries forward a case whose experiment key matches a recent baseline resu
   assert.deepEqual(week2.data.skills.find((s) => s.skill === 'oncall'), { skill: 'oncall', manualOnly: false, cases: 2, carried: 2, runs: 2, fired: 2, errors: 0, score: 0.75 }, 'rows in data leave per-case detail to data.cases');
   assert.equal(week2.data.baseline.unchanged, 1, 'carried cases cannot regress');
   assert.match(week2.report, /- Cases: 0 run \/ 2 carried \/ 2 total/);
-  assert.match(week2.report, /- claude plugin eval not invoked: every case was carried forward\n/);
+  assert.match(week2.report, /- Evaluator not invoked: every case was carried forward\n/);
   assert.doesNotMatch(week2.report, /cost estimate|Duration/);
   assert.match(week2.report, /\| oncall \| 2 \| 2 \| 0\.75 \| 2\/2 \| oncall--memory-alert\/criteria \| 0 \|/);
   assert.match(week2.report, /## Carried results\n\n.*\n\n- oncall--eval-1: score 1, fired yes, 3 days old \(run 2026-11-01T12:00:00Z, key [0-9a-f]{32}\)\n- oncall--memory-alert: score 0\.5/);

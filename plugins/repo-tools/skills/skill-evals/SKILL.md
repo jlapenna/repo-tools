@@ -1,13 +1,13 @@
 ---
 name: skill-evals
-description: Measure whether a repository's agent skills trigger and behave as intended by running their committed evals.json prompts through the stock Claude Code runner (claude plugin eval), and keep eval coverage honest. Use when asked to eval, test, benchmark, score or validate a skill or a repository's skills, to check that a skill description triggers on real requests, to write or fix eval prompts and assertions, when a skill's evals fail, error, or seem to need hosts, credentials or a checkout, or before and after editing a SKILL.md description or body. Not for evaluating models or inference servers.
+description: Measure whether a repository's agent skills trigger and behave as intended by running their committed evals.json prompts through Codex or the stock Claude Code runner, and keep eval coverage honest. Use when asked to eval, test, benchmark, score or validate a skill or a repository's skills, to check that a skill description triggers on real requests, to write or fix eval prompts and assertions, when a skill's evals fail, error, or seem to need hosts, credentials or a checkout, or before and after editing a SKILL.md description or body. Not for evaluating models or inference servers.
 ---
 
 # Skill evals
 
-Score skills with the stock runner instead of hand-built harnesses. The unit
+Score committed cases with `repo-skill-evals` and read its actual per-case evidence. The unit
 of proof is a committed eval prompt with checkable assertions, run through
-`claude plugin eval` and read back per skill. Read
+`repo-skill-evals --runner codex` or `--runner claude` and read back per skill. Read
 [evals format](references/evals-format.md) before writing or editing an
 `evals.json`.
 
@@ -24,6 +24,37 @@ or local-store miss does not erase another host's run. Keep raw traces and
 credentials out of public source. When retention/publication is already part
 of the user's request, complete it without asking for the same permission
 again; a new external destination still needs its own authority.
+
+## Codex execution
+
+`--runner codex` (or `REPO_SKILL_EVALS_RUNNER=codex`) evaluates the same
+committed prompts and assertions using the installed Codex app-server.
+It requires a dedicated `CODEX_HOME` containing authentication only, with no
+config.toml, hooks, plugins or MCP servers. The caller owns authentication
+and any rotating subscription lease; never copy a live workstation login to
+another host or put rotating auth.json in a static secret binding.
+
+Cases see skill names/descriptions and load a matching skill through an
+observed `Skill` tool call. Only bounded `Skill`, `Read`, `Glob` and literal
+`Grep` tools can read copied skill references and fixtures. Shell, network,
+write and live repository tools are not granted. A separate Codex thread
+judges each rubric against the actual response and full tool trace. This is a
+Codex backend with its own trigger/tool semantics, not a claim of model or
+Claude-runner parity.
+
+The reviewed default is `gpt-6.1-sol`, low reasoning, for cases and judges.
+Use `-- --model gpt-6.1-sol --judge-model gpt-6.1-sol --ablation none
+--max-cost-usd 12 -j 2`. Models without reviewed list prices and unsupported
+options are refused before inference. Case/judge turns run sequentially in
+one app-server (concurrency is an upper bound). The list-price estimate is
+checked before every paid turn, so overrun is bounded to one in-flight turn;
+it is not billed spend or subscription quota. Provider/usage errors stop
+further cases and produce partial, unscored reports. The existing report,
+baseline, cache and history interfaces remain; provider and judge identity
+participate in experiment keys, so Claude scores cannot carry into Codex.
+
+Without a runner selection, the command retains the Claude backend. The
+sections below describe its stock-runner flags and behavior.
 
 ## 1. Check coverage first
 
