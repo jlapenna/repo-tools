@@ -5,7 +5,7 @@
 // and the skill-evals skill, which tells agents to run this command.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -260,7 +260,7 @@ test('refuses a committed case that grants a gated tool unless --allow-gated-too
     assert.throws(() => buildCase(skill, entry, {}), (error) => {
       assert.match(error.message, /^oncall: case oncall--shell grants the tool /);
       assert.ok(error.message.includes(tool), `names ${tool}`);
-      assert.match(error.message, /no sandbox in LCARS worker pods/);
+      assert.match(error.message, /shared evals are read-only/);
       assert.match(error.message, /must not be committed/);
       return true;
     }, tool);
@@ -629,4 +629,156 @@ test('failed skill runs auto-upload and consult matching evidence from another h
   assert.equal(run(), 1);
   assert.deepEqual(outputs[1].history.previous, [first]);
   assert.match(warnings[0], /recent matching/);
+});
+
+// Public process boundary: another harness consumes neutral cases, without
+// implementing Claude's plugin CLI or Codex's app-server protocol. CI acts on
+// these tests before publishing the generic adapter interface.
+function externalHarness(t, mode = 'complete') {
+  const f = fixture(t);
+  const executable = path.join(f.root, 'fixture-harness');
+  writeFileSync(executable, `#!/usr/bin/env node
+const fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict');
+const mode = ${JSON.stringify(mode)}, schema = 'repo-skill-evals.adapter/v1';
+const capabilities = ['context.isolated','skill.load','file.read','file.glob','file.grep','criteria.grade','budget.usd'];
+const version = process.argv.includes('--new-version') ? '2' : '1';
+if (process.argv[2] === '--describe') {
+ console.log(JSON.stringify({schema,harness:'fixture',version,model:'fixture-model',judgeModel:'fixture-judge',capabilities:mode==='unsupported'?['skill.load']:capabilities}));
+ process.exit(0);
+}
+const request = JSON.parse(fs.readFileSync(process.argv[2]));
+const resultFile = process.argv[3], root = path.dirname(resultFile);
+fs.writeFileSync(path.join(root,'adapter-entered'),'yes');
+assert.equal(request.schema,schema);
+assert.equal(request.harness,'fixture');
+assert.equal(request.plugin,undefined);
+assert.equal(request.cases[0].graders,undefined);
+for (const skill of request.skills) assert.ok(skill.directory.startsWith(root+path.sep));
+for (const c of request.cases) {
+ assert.equal(c.prompt.startsWith('/handoff'),false);
+ if (c.skill==='handoff') assert.equal(c.invocation,'explicit');
+ if (c.resources) assert.match(fs.readFileSync(path.join(c.resources,'probe.log'),'utf8'),/probe failed/);
+}
+const cases = request.cases.map(c => ({id:c.id,runs:Array.from({length:c.runs},(_,i)=>{
+ const tracePath=c.id+'-'+i+'.trace.jsonl';
+ const trace=[...(mode==='no-load'?[]:[{type:'skill.loaded',skill:c.skill}]),{type:'response',text:'Check probe.service logs first.'},...(mode==='no-judge'?[]:[{type:'criteria.judged',model:'fixture-judge',passed:mode!=='grade-fail'}])];
+ fs.writeFileSync(path.join(root,tracePath),trace.map(e=>JSON.stringify(e)).join('\\n')+'\\n');
+ return {tracePath:mode==='outside-trace'?'../outside.jsonl':tracePath,criteriaPassed:mode!=='grade-fail'};
+})}));
+if(mode==='partial') cases.pop();
+if(mode==='duplicate') cases.push(cases[0]);
+fs.writeFileSync(resultFile,JSON.stringify({schema,harness:'fixture',adapterVersion:request.adapter.version,model:mode==='wrong-model'?'different-model':'fixture-model',judgeModel:'fixture-judge',costUsd:null,durationSeconds:0.01,cases}));
+if(mode==='outside-result'){const other=path.join(root,'..','outside-result.json');fs.renameSync(resultFile,other);fs.symlinkSync(other,resultFile);}
+`);
+  chmodSync(executable, 0o700);
+  const invoke = (name = 'out', extra = []) => {
+    const out = path.join(f.root, name), report = path.join(f.root, `${name}-report`);
+    const result = spawnSync(process.execPath, [script, '--runner', 'fixture', '--adapter', executable, '--root', path.join(f.root, 'repo'), '--skill', 'oncall', '--skill', 'handoff', '--json', '--out', out, '--report', report, ...extra], { encoding: 'utf8' });
+    return { ...result, out, report, summary: result.stdout.trim() ? JSON.parse(result.stdout) : null };
+  };
+  return { ...f, executable, invoke };
+}
+
+test('a third harness executes unchanged shared evals through the neutral process contract', t => {
+  const f = externalHarness(t);
+  const r = f.invoke('first', ['--', '--max-cost-usd', '12']);
+  assert.equal(r.status, 0, r.stderr);
+  const report = JSON.parse(readFileSync(path.join(r.report, 'result.json')));
+  assert.equal(report.complete, true);
+  assert.equal(report.data.runner, 'fixture');
+  assert.equal(report.data.model, 'fixture-model');
+  assert.equal(report.data.judgeModel, 'fixture-judge');
+  assert.equal(report.data.costUsd, null, 'unknown cost stays unknown');
+  assert.equal(report.data.adapter.version, '1');
+  assert.equal(report.data.casesTotal, 4);
+  assert.equal(report.data.casesPassed, 4);
+  const request = JSON.parse(readFileSync(path.join(r.out, 'adapter-request.json')));
+  assert.equal(request.cases.find(c => c.skill === 'handoff').prompt, 'Write the handoff.');
+  assert.deepEqual(request.arguments, ['--max-cost-usd', '12']);
+  assert.equal(request.budgetUsd, 12);
+  assert.equal(request.cases.find(c => c.skill === 'oncall').tools[0].capability, 'skill.load');
+  const history = readRun(r.summary.history.store, r.summary.history.id);
+  assert.ok(history.artifacts.some(a => a.source.endsWith('adapter-result.json')));
+});
+
+test('missing adapter cases remain partial and unscored instead of passing a shorter suite', t => {
+  const r = externalHarness(t, 'partial').invoke();
+  assert.equal(r.status, 2, r.stderr);
+  const report = JSON.parse(readFileSync(path.join(r.report, 'result.json')));
+  assert.equal(report.complete, false);
+  assert.equal(report.data.partial, true);
+  assert.equal(report.data.casesTotal, 4);
+  assert.match(report.data.partialReason, /omitted/);
+  assert.equal(report.data.cases.length, 3, 'omitted case has no reusable score');
+});
+
+test('adapter trigger scores require observed skill loading, not a claimed rubric pass', t => {
+  const r = externalHarness(t, 'no-load').invoke();
+  assert.equal(r.status, 1, r.stderr);
+  const report = JSON.parse(readFileSync(path.join(r.report, 'result.json')));
+  assert.equal(report.data.partial, false);
+  assert.equal(report.data.skills.find(s => s.skill === 'oncall').fired, 0);
+  assert.equal(report.data.casesPassed, 2, 'explicit-only cases are graded on behavior');
+});
+
+test('adapter rubric failures remain real failures', t => {
+  const r = externalHarness(t, 'grade-fail').invoke();
+  assert.equal(r.status, 1, r.stderr);
+  const report = JSON.parse(readFileSync(path.join(r.report, 'result.json')));
+  assert.equal(report.data.casesPassed, 0);
+  assert.equal(report.data.partial, false);
+});
+
+test('unsupported adapter capabilities fail before evaluation starts', t => {
+  const f = externalHarness(t, 'unsupported');
+  const r = f.invoke();
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /does not support required capabilities/);
+  assert.equal(existsSync(path.join(r.out, 'adapter-entered')), false);
+});
+
+test('adapter identity and evidence cannot silently change or escape the snapshot', t => {
+  for (const mode of ['wrong-model', 'duplicate', 'outside-trace', 'outside-result', 'no-judge']) {
+    const r = externalHarness(t, mode).invoke();
+    assert.notEqual(r.status, 0, mode);
+    if (mode === 'outside-trace' || mode === 'no-judge') {
+      assert.equal(r.status, 2);
+      assert.equal(JSON.parse(readFileSync(path.join(r.report, 'result.json'))).data.cases.length, 0);
+    } else assert.match(r.stderr, mode === 'wrong-model' ? /models differ/ : mode === 'outside-result' ? /result must stay inside/ : /unknown or duplicate/);
+  }
+});
+
+test('adapter changes cannot reuse scores from another adapter version', t => {
+  const f = externalHarness(t);
+  const first = f.invoke('first');
+  assert.equal(first.status, 0, first.stderr);
+  const second = f.invoke('second', ['--baseline', path.join(first.report, 'result.json'), '--', '--new-version']);
+  assert.equal(second.status, 0, second.stderr);
+  assert.equal(second.summary.cases.carried, 0);
+  assert.equal(second.summary.cases.run, 4);
+});
+
+test('unchanged adapter baselines skip inference and preserve harness and judge provenance', t => {
+  const f = externalHarness(t);
+  const first = f.invoke('first');
+  assert.equal(first.status, 0, first.stderr);
+  const second = f.invoke('second', ['--baseline', path.join(first.report, 'result.json')]);
+  assert.equal(second.status, 0, second.stderr);
+  assert.equal(second.summary.cases.carried, 4);
+  assert.equal(existsSync(path.join(second.out, 'adapter-entered')), false);
+  const report = JSON.parse(readFileSync(path.join(second.report, 'result.json')));
+  assert.equal(report.data.adapter.version, '1');
+  assert.equal(report.data.model, 'fixture-model');
+  assert.equal(report.data.judgeModel, 'fixture-judge');
+});
+
+test('portable execution settings retain legacy eval definitions and reject conflicting transports', t => {
+  const f = fixture(t);
+  const file = path.join(f.root, 'portable.json');
+  writeFileSync(file, JSON.stringify({evals:[{prompt:'Read the fixture.',execution:{max_turns:2,allowed_tools:['Read']}}]}));
+  assert.deepEqual(loadEntries(file)[0].options, {max_turns:2,allowed_tools:['Read']});
+  writeFileSync(file, JSON.stringify({evals:[{prompt:'x',execution:{runner:'shell'}}]}));
+  assert.throws(() => loadEntries(file), /unsupported option runner/);
+  writeFileSync(file, JSON.stringify({evals:[{prompt:'x',execution:{},plugin_eval:{}}]}));
+  assert.throws(() => loadEntries(file), /not both/);
 });

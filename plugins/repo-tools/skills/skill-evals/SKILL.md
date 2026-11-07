@@ -7,7 +7,8 @@ description: Measure whether a repository's agent skills trigger and behave as i
 
 Score committed cases with `repo-skill-evals` and read its actual per-case evidence. The unit
 of proof is a committed eval prompt with checkable assertions, run through
-`repo-skill-evals --runner codex` or `--runner claude` and read back per skill. Read
+`repo-skill-evals --runner codex`, `--runner claude`, or an explicitly selected
+`--runner NAME --adapter EXECUTABLE`, and read back per skill. Read
 [evals format](references/evals-format.md) before writing or editing an
 `evals.json`.
 
@@ -24,6 +25,17 @@ or local-store miss does not erase another host's run. Keep raw traces and
 credentials out of public source. When retention/publication is already part
 of the user's request, complete it without asking for the same permission
 again; a new external destination still needs its own authority.
+
+## Harness selection
+
+Keep prompts, fixtures and assertions shared between harnesses. Choose execution
+and authentication at the command or job-profile boundary. The built-in Codex
+and Claude runners use the same committed cases. Other harnesses integrate through
+the [versioned executable adapter contract](https://github.com/jlapenna/repo-tools/blob/main/docs/skill-eval-adapters.md),
+which maps native skill-loading evidence and rubric judgments into the same
+reports, history and cache. An adapter must implement the declared isolation,
+tools and budget capabilities; a new harness name alone does not provide them.
+Provider-specific execution options belong after `--`, not in eval prompts.
 
 ## Codex execution
 
