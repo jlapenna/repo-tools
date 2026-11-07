@@ -19,7 +19,7 @@ const app=agent({name:'fixture',version:'fixture-1'})
  let text='{"passed":true,"explanation":"Observed the actual bounded skill load."}';
  if(mcp){
   const list=await mcp.listTools();
-  if(list.tools.some(t=>t.name==='Skill')) {
+  if(process.env.EVAL_FIXTURE_SKIP_SKILL!=='1' && list.tools.some(t=>t.name==='Skill')) {
    const result=await mcp.callTool({name:'Skill',arguments:{skill:'triage'}});
    if(process.env.EVAL_FIXTURE_ARTIFACT==='1'){
     const gemini=process.argv[process.argv.indexOf('--gemini-dir')+1];

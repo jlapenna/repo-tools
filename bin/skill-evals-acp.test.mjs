@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {spawn} from 'node:child_process';
-import {existsSync,mkdirSync,mkdtempSync,readFileSync,rmSync,writeFileSync,realpathSync} from 'node:fs';
+import {appendFileSync,existsSync,mkdirSync,mkdtempSync,readFileSync,rmSync,writeFileSync,realpathSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -76,4 +76,20 @@ test('partial native permission updates inherit trusted tool identity before a s
  const exit=await evaluate('antigravity',f.plugin,f.file,parseOptions(['--model','fixture/model']),{client});
  assert.equal(exit,0,readFileSync(f.file,'utf8'));
  const r=JSON.parse(readFileSync(f.file));assert.match(readFileSync(r.cases[0].arms.with[0].tracePath,'utf8'),/native.artifact.read/);
+});
+
+test('reusing an output directory cannot reuse old skill loads or exhausted tool limits',async t=>{
+ const f=input(t);let skip=false;
+ const client=new AcpClient('opencode',{start:(_command,args,options)=>spawn(process.execPath,[fixture,...args],{...options,env:{...options.env,EVAL_FIXTURE_SKIP_SKILL:skip?'1':'0'}})});
+ const options=parseOptions(['--model','fixture/model']);
+ assert.equal(await evaluate('opencode',f.plugin,f.file,options,{client}),0);
+ const first=JSON.parse(readFileSync(f.file));const trace=first.cases[0].arms.with[0].tracePath;
+ skip=true;
+ assert.equal(await evaluate('opencode',f.plugin,f.file,options,{client}),1,'the new run never loads the skill');
+ const second=JSON.parse(readFileSync(f.file));
+ assert.equal(second.partial,false);assert.equal(second.cases[0].arms.with[0].graders.find(x=>x.name==='skill-fired').passed,false);
+ appendFileSync(`${trace}.native.jsonl.tools`,JSON.stringify({type:'limit.exceeded'})+'\n');
+ appendFileSync(`${trace}.native.jsonl`,JSON.stringify({event:'prior-run'})+'\n');
+ assert.equal(await evaluate('opencode',f.plugin,f.file,options,{client}),1,'old limits must not abort a new invocation');
+ assert.doesNotMatch(readFileSync(`${trace}.native.jsonl`,'utf8'),/prior-run/);
 });
