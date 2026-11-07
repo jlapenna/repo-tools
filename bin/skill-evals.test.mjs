@@ -156,13 +156,13 @@ test('summarizes runner results per skill', () => {
     { name: 'oncall--memory-alert', aggregates: { score: 0.5 }, arms: { with: [{ graders: [{ name: 'skill-fired', passed: false }, { name: 'criteria', passed: true }] }, { error: 'boom', graders: [] }, { error: 'exit 1: Reached maximum number of turns (3)', graders: [{ name: 'skill-fired', passed: true }] }] } },
   ] };
   const rows = summarize(results, manifest);
-  assert.equal(rows[0].score, 0.75);
+  assert.equal(rows[0].score, null);
   assert.equal(rows[0].fired, 2);
   assert.equal(rows[0].runs, 4);
   assert.equal(rows[0].errors, 1);
   assert.deepEqual(rows[0].failed, ['oncall--memory-alert/skill-fired']);
   assert.equal(rows[1].cases, 0);
-  assert.match(renderTable(rows), /^oncall\s+2\s+0\.75\s+2\/4\s+oncall--memory-alert\/skill-fired \(1 run error\)$/m);
+  assert.match(renderTable(rows), /^oncall\s+2\s+-\s+2\/4\s+oncall--memory-alert\/skill-fired \(1 run error\)$/m);
   assert.match(renderTable(rows), /^plain\s+0\s+no evals/m);
 });
 
@@ -361,13 +361,13 @@ test('writes a Markdown job report and result.json with the baseline comparison'
   assert.match(report, /list-price cost estimate \(not billed spend\): \$0\.50/);
   assert.doesNotMatch(report, /spent/i);
   assert.match(report, /\| Skill \| Cases \| Carried \| Score \| Fired \| Failed graders \| Run errors \|/);
-  assert.match(report, /\| oncall \| 2 \| 0 \| 0\.75 \| 2\/3 \| oncall--probe\/criteria \| 1 \|/);
+  assert.match(report, /\| oncall \| 2 \| 0 \| - \| 2\/3 \| oncall--probe\/criteria \| 1 \|/);
   assert.match(report, /\| plain \| 0 \| 0 \| no evals \| - \|  \| 0 \|/);
   assert.match(report, /\| handoff \| 2 \| 0 \| 0\.75 \| manual \| handoff--eval-1\/criteria \| 0 \|/);
   assert.match(report, /- Cases: 4 run \/ 0 carried \/ 4 total/);
   assert.match(report, /## Skills without evals\n\n- land-pr\n- plain\n/);
   assert.match(report, /## Runs that errored\n\n- oncall--probe \(run 2\): boom\n/);
-  assert.match(report, /## Changes since baseline\n\n### Regressions \(1\)\n\n- oncall: score 1 -> 0\.75, fired 2\/2 -> 2\/3\n\n### Improvements \(0\)\n\n- none\n\n- Unchanged: 1\n/);
+  assert.match(report, /## Changes since baseline\n\n### Regressions \(1\)\n\n- oncall: score 1 -> -, fired 2\/2 -> 2\/3\n\n### Improvements \(0\)\n\n- none\n\n- Unchanged: 1\n/);
   assert.ok(report.indexOf('### Regressions') < report.indexOf('### Improvements'), 'regressions come first');
   assert.match(report, /- New skills: land-pr, plain\n- Removed skills: retired\n/);
   assert.match(report, /## Failures\n\n### oncall\n\nfired 2\/3\n\n#### oncall--probe\n\nPrompt:\n\n```text\nHeadscale probe is failing, x+…\n```\n/);
@@ -781,4 +781,9 @@ test('portable execution settings retain legacy eval definitions and reject conf
   assert.throws(() => loadEntries(file), /unsupported option runner/);
   writeFileSync(file, JSON.stringify({evals:[{prompt:'x',execution:{},plugin_eval:{}}]}));
   assert.throws(() => loadEntries(file), /not both/);
+});
+
+test('provider errors remain unscored even when a native runner supplies aggregate zero', () => {
+ const rows = summarize({cases:[{name:'one',aggregates:{score:0},arms:{with:[{error:'monthly spend limit',graders:[]}]}}]}, {skills:[{name:'test',cases:1}],cases:[{name:'one',skill:'test'}]});
+ assert.equal(rows[0].score,null);assert.equal(rows[0].errors,1);
 });

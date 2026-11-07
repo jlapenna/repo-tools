@@ -49,6 +49,7 @@ import { parse } from 'yaml';
 import { createHash } from 'node:crypto';
 import { beginRun, finishRun, findRuns, historyRoot } from './eval-history.mjs';
 import { archiveRun, archiveConfig, remoteFind } from './eval-history-remote.mjs';
+import { HARNESSES, nativeBinary, nativeConfiguration, parseOptions as acpOptions } from './skill-evals-acp.mjs';
 import { parseOptions as codexOptions } from './skill-evals-codex.mjs';
 import { describeAdapter, normalizeAdapterResult, writeAdapterRequest } from './skill-evals-adapter.mjs';
 
@@ -265,8 +266,8 @@ export function fixtureFiles(evalsFile, files) {
   });
 }
 
-export function experimentKey({ skill, spec, fixtures, claudeVersion, model, toolsVersion, runner, judgeModel, adapter }) {
-  return sha256(canonicalJson({ skill, spec, fixtures, claudeVersion: claudeVersion ?? null, model, toolsVersion, ...(runner ? { runner, judgeModel } : {}), ...(adapter ? { adapter } : {}) })).slice(0, 32);
+export function experimentKey({ skill, spec, fixtures, claudeVersion, model, toolsVersion, runner, judgeModel, adapter, native }) {
+  return sha256(canonicalJson({ skill, spec, fixtures, claudeVersion: claudeVersion ?? null, model, toolsVersion, ...(runner ? { runner, judgeModel } : {}), ...(adapter ? { adapter } : {}), ...(native ? { native } : {}) })).slice(0, 32);
 }
 
 export function modelOf(passthrough) {
@@ -381,7 +382,7 @@ export function summarize(results, manifest) {
   }
   return [...bySkill.values()].map((row) => ({
     ...row,
-    score: row.scores.length ? Number((row.scores.reduce((a, b) => a + b, 0) / row.scores.length).toFixed(2)) : null,
+    score: row.scores.length && !row.errors ? Number((row.scores.reduce((a, b) => a + b, 0) / row.scores.length).toFixed(2)) : null,
   }));
 }
 
@@ -566,6 +567,7 @@ export function parseArgs(argv) {
     else if (arg === '--adapter' && args.length) options.adapter = path.resolve(args.shift());
     else if (arg === '--root' && args.length) options.roots.push(args.shift());
     else if (arg === '--evals-root' && args.length) options.evalsRoots.push(args.shift());
+    else if (arg === '--case' && args.length) options.case = args.shift();
     else if (arg === '--skill' && args.length) options.only.push(args.shift());
     else if (arg === '--out' && args.length) options.out = path.resolve(args.shift());
     else if (arg === '--report' && args.length) options.report = path.resolve(args.shift());
@@ -586,7 +588,8 @@ export function parseArgs(argv) {
     else throw new Error(`Unknown or incomplete option: ${arg}`);
   }
   if (!/^[a-z][a-z0-9_-]{0,63}$/.test(options.runner)) throw Error('--runner must be a harness name');
-  if (!['codex', 'claude'].includes(options.runner) && !options.adapter && !options.list) throw Error('custom --runner requires --adapter EXECUTABLE');
+  if (options.runner === 'agy') options.runner = 'antigravity';
+  if (!['codex', 'claude', ...HARNESSES].includes(options.runner) && !options.adapter && !options.list) throw Error('custom --runner requires --adapter EXECUTABLE');
   if (!options.roots.length) options.roots.push(process.cwd());
   return options;
 }
@@ -597,6 +600,7 @@ export function plan(options) {
   for (const skill of skills) {
     skill.evals = findEvals(skill, options.evalsRoots) ?? null;
     skill.entries = skill.evals ? loadEntries(skill.evals) : [];
+    if (options.case) skill.entries = skill.entries.filter(entry => path.matchesGlob(`${skill.name}--${entry.slug}`, options.case));
     // --trigger-only has nothing to measure for a skill the model may not invoke; a behavior case invokes it explicitly.
     if (options.triggerOnly && skill.manualOnly) skill.entries = [];
   }
@@ -617,9 +621,9 @@ export function main(argv, { log = console.log, warn = console.error, spawn = sp
   }
   if (!withEvals.length) throw new Error(`none of the ${skills.length} skills has an evals.json; use --list to see them`);
   const adapter = options.adapter ? describeAdapter(options.adapter, options.runner, exec, options.passthrough) : null;
-  const runnerOptions = !adapter && options.runner === 'codex' ? codexOptions(options.passthrough) : null;
-  const claudeVersion = adapter ? `${options.runner} ${adapter.descriptor.version}` : probe(exec, options.runner, ['--version'], undefined);
-  const planned = planCases(withEvals, options, { claudeVersion, model: adapter?.identity.model ?? runnerOptions?.model ?? modelOf(options.passthrough), toolsVersion: toolsVersion(), ...(adapter ? { runner: options.runner, judgeModel: adapter.identity.judgeModel, adapter: adapter.identity } : runnerOptions ? {runner: 'codex', judgeModel: runnerOptions.judgeModel} : {}) });
+  const runnerOptions = !adapter && options.runner === 'codex' ? codexOptions(options.passthrough) : !adapter && HARNESSES.includes(options.runner) ? acpOptions(options.passthrough) : null;
+  const claudeVersion = adapter ? `${options.runner} ${adapter.descriptor.version}` : probe(exec, HARNESSES.includes(options.runner) ? nativeBinary(options.runner) : options.runner, ['--version'], undefined);
+  const planned = planCases(withEvals, options, { claudeVersion, model: adapter?.identity.model ?? runnerOptions?.model ?? modelOf(options.passthrough), toolsVersion: toolsVersion(), ...(adapter ? { runner: options.runner, judgeModel: adapter.identity.judgeModel, adapter: adapter.identity } : runnerOptions ? {runner: options.runner, judgeModel: runnerOptions.judgeModel, ...(HARNESSES.includes(options.runner) ? { native: nativeConfiguration(options.runner) } : {})} : {}) });
   const startedAt = now();
   const sources = [baseline?.cases ?? [], options.cache ? readCache(options.cache, planned) : []];
   const carried = options.carry ? carryForward(planned, sources, startedAt, options.maxAgeDays) : new Map();
@@ -645,7 +649,7 @@ export function main(argv, { log = console.log, warn = console.error, spawn = sp
     const carriedCases = [...carried.values()].map(carriedResult);
     const freshTotal = results.aggregates?.casesTotal ?? (results.cases ?? []).length;
     const freshPassed = results.aggregates?.casesPassed ?? (results.cases ?? []).filter((c) => c.aggregates?.passRate === 1).length;
-    const identity = adapter ? { runner: options.runner, model: adapter.identity.model, judgeModel: adapter.identity.judgeModel, adapter: adapter.identity } : runnerOptions ? { runner: 'codex', model: runnerOptions.model, judgeModel: runnerOptions.judgeModel } : {};
+    const identity = adapter ? { runner: options.runner, model: adapter.identity.model, judgeModel: adapter.identity.judgeModel, adapter: adapter.identity } : runnerOptions ? { runner: options.runner, model: runnerOptions.model, judgeModel: runnerOptions.judgeModel } : {};
     const combined = { ...identity, ...results, cases: [...(results.cases ?? []), ...carriedCases], aggregates: { ...results.aggregates, casesTotal: freshTotal + carriedCases.length, casesPassed: freshPassed + carriedCases.filter((c) => c.aggregates.passRate === 1).length } };
     const manifest = { skills: withEvals.map((s) => ({ name: s.name, evals: s.evals, cases: s.entries.length, manualOnly: s.manualOnly ?? false })), cases: planned.map((p) => ({ name: p.name, skill: p.skill, prompt: p.manualOnly ? `/${p.skill} ${p.entry.prompt}` : p.entry.prompt })) };
     // Skills without evals stay visible in the run output, as in --list, so coverage gaps are reported with the scores.
@@ -676,7 +680,7 @@ export function main(argv, { log = console.log, warn = console.error, spawn = sp
   const ownsRunnerTemp = !adapter && options.runner === 'claude' && !options.passthrough.includes('--keep-temp');
   const requestFile = path.join(outDir, 'adapter-request.json'), adapterResultFile = path.join(outDir, 'adapter-result.json');
   const adapterRequest = adapter ? writeAdapterRequest(requestFile, plugin, toRun, options, adapter, buildCase, criteria) : null;
-  const command = adapter ? [adapter.command, [requestFile, adapterResultFile]] : options.runner === 'codex' ? [process.execPath, [fileURLToPath(new URL('./skill-evals-codex.mjs', import.meta.url)), plugin, resultsFile, ...options.passthrough]] : ['claude', ['plugin', 'eval', plugin, '--trust-plugin', '--no-publish', '--keep-temp', '--json', resultsFile, '--output-dir', path.join(outDir, 'results'), ...options.passthrough.filter(a => a !== '--keep-temp')]];
+  const command = adapter ? [adapter.command, [requestFile, adapterResultFile]] : options.runner === 'codex' ? [process.execPath, [fileURLToPath(new URL('./skill-evals-codex.mjs', import.meta.url)), plugin, resultsFile, ...options.passthrough]] : HARNESSES.includes(options.runner) ? [process.execPath, [fileURLToPath(new URL('./skill-evals-acp.mjs', import.meta.url)), options.runner, plugin, resultsFile, ...options.passthrough]] : ['claude', ['plugin', 'eval', plugin, '--trust-plugin', '--no-publish', '--keep-temp', '--json', resultsFile, '--output-dir', path.join(outDir, 'results'), ...options.passthrough.filter(a => a !== '--keep-temp')]];
   if (options.dryRun) {
     log(`${manifest.cases.length} cases for ${toRun.length} skills written under ${plugin} (${countLine})\n${command[0]} ${command[1].map((a) => (/\s/.test(a) ? JSON.stringify(a) : a)).join(' ')}`);
     return 0;

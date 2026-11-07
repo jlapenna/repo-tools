@@ -429,3 +429,6 @@ in `plugins/manifests.test.mjs` protects this shared source layout.
 
 Repository-local documentation may retain its own protection policy and check
 names, but should link to these skills rather than mirror their bodies.
+
+The five built-in skill-eval runners (`claude`, `codex`, `opencode`, `goose`,
+`antigravity`) share committed cases. See [native harness setup and qualification](docs/skill-eval-native-harnesses.md).

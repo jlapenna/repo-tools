@@ -1,6 +1,6 @@
 ---
 name: skill-evals
-description: Measure whether a repository's agent skills trigger and behave as intended by running their committed evals.json prompts through Codex or the stock Claude Code runner, and keep eval coverage honest. Use when asked to eval, test, benchmark, score or validate a skill or a repository's skills, to check that a skill description triggers on real requests, to write or fix eval prompts and assertions, when a skill's evals fail, error, or seem to need hosts, credentials or a checkout, or before and after editing a SKILL.md description or body. Not for evaluating models or inference servers.
+description: Measure whether a repository's agent skills trigger and behave as intended by running their committed evals.json prompts through Codex, Claude Code, OpenCode, Goose or Antigravity, and keep eval coverage honest. Use when asked to eval, test, benchmark, score or validate a skill or a repository's skills, to check that a skill description triggers on real requests, to write or fix eval prompts and assertions, when a skill's evals fail, error, or seem to need hosts, credentials or a checkout, or before and after editing a SKILL.md description or body. Not for evaluating models or inference servers.
 ---
 
 # Skill evals
@@ -36,6 +36,16 @@ which maps native skill-loading evidence and rubric judgments into the same
 reports, history and cache. An adapter must implement the declared isolation,
 tools and budget capabilities; a new harness name alone does not provide them.
 Provider-specific execution options belong after `--`, not in eval prompts.
+
+## Native harness selection
+
+Keep one committed suite across all harnesses. Select `--runner opencode`,
+`--runner goose` or `--runner antigravity` (alias `agy`) with an explicit
+case and judge model. Read [native harness setup](https://github.com/jlapenna/repo-tools/blob/main/docs/skill-eval-native-harnesses.md)
+for caller-owned auth, bounded tools and unknown-cost behavior. Qualify the
+actual native binary; an adapter fixture alone is not qualification.
+Use shared `--case PATTERN` before `--` to select a small committed case first.
+Never change credentials or account limits to hide a provider failure.
 
 ## Codex execution
 
