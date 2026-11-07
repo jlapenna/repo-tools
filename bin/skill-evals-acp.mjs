@@ -130,6 +130,10 @@ export class AcpClient {
     try {
       prepared = prepareNative(this.harness, root, this.env);
       const toolTrace = evidenceFile ? `${evidenceFile}.tools` : path.join(root, 'tools.jsonl'), configFile = path.join(root, 'tools.json');
+      // Previous evidence is archived by the caller before --out is reused.
+      // Never import an earlier invocation's tool loads or exhausted limits.
+      writeFileSync(toolTrace, '', { mode: 0o600 });
+      if (evidenceFile) writeFileSync(evidenceFile, '', { mode: 0o600 });
       writeJson(configFile, { plugin, caseDir: cwd, allowed, maxCalls, tracePath: toolTrace });
       watched = toolTrace;
       watchFile(toolTrace, { interval: 100, persistent: false }, () => {
