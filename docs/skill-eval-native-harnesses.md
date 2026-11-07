@@ -73,6 +73,18 @@ Tool-call limits and case deadlines are enforced. The native child process
 group is terminated on timeout or completion. Temporary workspaces and configuration are removed; native authentication
 and application-owned session history remain owned by the application. Raw evidence is private evaluation history, never public source.
 
+The eval workspace contains copied skills and declared fixtures, not the source
+checkout. Skill loading lists its supplied files; a missing reference reports
+that it was not supplied. Plan-only cases should use that guidance and identify
+missing evidence rather than search for a checkout or live host. Native cases
+receive their existing call budget explicitly; failed requests and `Skill`
+calls count toward it. This does not grant more calls or filesystem access.
+
+Codex tool events are written as they occur, including a rejected call at the
+limit. Failed case and judge traces remain archived and unscored; a judge error
+does not overwrite the completed case evidence. Reusing an output directory
+cannot attach an earlier successful trace to a new failed invocation.
+
 ACP context occupancy (`used`/`size`) is not billed token usage. A valid native
 USD cost is retained; missing usage or another currency stays **unknown**, not
 zero. `--max-cost-usd` is checked before each case/judge prompt, with overrun

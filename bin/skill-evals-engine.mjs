@@ -68,6 +68,9 @@ export async function evaluateCases(
           `${spec.name}-${i + 1}.trace.jsonl`,
         );
         run.tracePath = tracePath;
+        // Reusing --out must never attach a prior successful trace to a failure.
+        writeFileSync(tracePath, "", { mode: 0o600 });
+        let phase = "case";
         try {
           const tools = readTools(
             plugin,
@@ -83,7 +86,7 @@ export async function evaluateCases(
             tools,
             maxCalls: spec.execution.max_turns,
             timeout: spec.execution.timeout_seconds,
-            instructions: `You are evaluating a repository skill. Use a matching skill by calling Skill with its name before following its guidance. Available skills:\n${tools.catalog}\nOnly the provided read-only tools exist. Fixtures and copied skill references are available through Read/Glob/Grep. Do not execute commands, access live services or edit files. Answer plan and decision prompts using the requested commands or decisions.`,
+            instructions: `You are evaluating a repository skill in an isolated workspace, not its source repository. Use a matching skill by calling Skill with its name before following its guidance. Available skills:\n${tools.catalog}\nOnly the provided read-only tools exist. Only copied skill files and declared fixtures are available through Read/Glob/Grep. Source-checkout paths mentioned in a skill may not be supplied: do not search for a host checkout or live service when a file is unavailable. Answer plan and decision prompts from the supplied guidance, using the requested commands or decisions and identifying unavailable evidence. You have at most ${spec.execution.max_turns} tool calls in total, including Skill and failed requests; finish your answer within that budget. Do not execute commands, access live services or edit files.`,
           });
           writeFileSync(
             tracePath,
@@ -97,6 +100,7 @@ export async function evaluateCases(
             { mode: 0o600 },
           );
           charge(response.usage, options.model);
+          phase = "judge";
           for (const g of spec.graders) {
             if (g.name === "skill-fired")
               run.graders.push({
@@ -148,6 +152,15 @@ export async function evaluateCases(
             } else throw Error("Unsupported skill-eval grader");
           }
         } catch (e) {
+          if (Array.isArray(e.trace))
+            appendFileSync(
+              tracePath,
+              e.trace.map((event) => JSON.stringify({ phase, ...event })).join("\n") + "\n",
+            );
+          appendFileSync(
+            tracePath,
+            JSON.stringify({ phase, error: e.message, answer: e.answer, usage: e.usage }) + "\n",
+          );
           run.error = e.message;
           results.partial = true;
           results.partialReason = "provider or grading error";
