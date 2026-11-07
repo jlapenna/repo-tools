@@ -15,6 +15,8 @@ Use the smallest source that owns the question.
 | Continue authorized work while the user is unavailable | [`../plugins/repo-tools/skills/autonomous-work/SKILL.md`](../plugins/repo-tools/skills/autonomous-work/SKILL.md) |
 | Maintain Renovate updates | [`../plugins/repo-tools/skills/renovate-maintenance/SKILL.md`](../plugins/repo-tools/skills/renovate-maintenance/SKILL.md) |
 | Score a repository's skills or check their eval coverage | [`../plugins/repo-tools/skills/skill-evals/SKILL.md`](../plugins/repo-tools/skills/skill-evals/SKILL.md) |
+| Configure the five native eval runners | [`skill-eval-native-harnesses.md`](skill-eval-native-harnesses.md) |
+| Integrate another harness with the shared eval definitions | [`skill-eval-adapters.md`](skill-eval-adapters.md) |
 | Find and retain regular evals and discarded experiments | [`evaluation-history.md`](evaluation-history.md) |
 | Analyze or clean up complexity, legacy paths, diagnostics, or a combination | [`../plugins/repo-tools/skills/complexity-sweep/SKILL.md`](../plugins/repo-tools/skills/complexity-sweep/SKILL.md) |
 

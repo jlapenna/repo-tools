@@ -33,7 +33,13 @@ repository that keeps evals outside its skill directories, at
 | `assertions` (or `expectations`) | no | The `llm` grader rubric: PASS only if every statement holds. |
 | `expected_output` | no | Rubric when there are no assertions; otherwise shown to humans as the expected outcome. |
 | `files` | no | Fixture paths relative to the `evals.json` directory, copied into the case's `resources/` and granted read-only. |
-| `plugin_eval` | no | Per-entry runner overrides: `runs`, `max_turns` (default 8), `timeout_seconds` (default 600), `allowed_tools` (default `Skill, Read, Glob, Grep`). |
+| `execution` | no | Shared per-entry limits: `runs`, `max_turns` (default 8), `timeout_seconds` (default 600), `allowed_tools` (default `Skill, Read, Glob, Grep`). These are logical capabilities mapped by the selected harness. |
+| `plugin_eval` | no | Existing spelling of `execution`, retained for committed cases. Use one field, not both. |
+
+The same prompts, assertions, expected output and fixtures work across harnesses.
+Execution limits do not select a harness, model, adapter executable or credentials;
+the caller owns those choices. An adapter receives explicit invocation separately
+from the unchanged prompt, using its native skill-loading mechanism.
 
 `allowed_tools` must not grant `Bash`, `PowerShell`, `Write`, `Edit`,
 `WebFetch` or any `mcp__*` tool (including scoped forms such as

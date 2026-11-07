@@ -33,13 +33,13 @@ web routes, and heading anchors are not checked. Nx inventories include only
 explicit targets, not inferred targets. These are source contracts, not runtime
 health checks.
 
-- `repo-skill-evals [--root DIR]... [--evals-root DIR]... [--skill NAME]... [--list | --dry-run] [--out DIR] [--runs N] [--trigger-only] [--json] [--report DIR] [--baseline FILE] [--max-age DAYS] [--no-carry] [--cache [DIR]] [--allow-gated-tools] [-- <claude plugin eval options>]`
-  — score a repository's skills with the stock Claude Code runner. It finds
+- `repo-skill-evals [--runner NAME] [--adapter EXECUTABLE] [--root DIR]... [--evals-root DIR]... [--skill NAME]... [--list | --dry-run] [--out DIR] [--runs N] [--trigger-only] [--json] [--report DIR] [--baseline FILE] [--max-age DAYS] [--no-carry] [--cache [DIR]] [--allow-gated-tools] [-- <runner options>]`
+  — score shared skill evals with built-in Codex/Claude runners or a harness
+  adapter ([adapter contract](docs/skill-eval-adapters.md)). It finds
   every `*/SKILL.md` below the roots, reads each skill's committed
   skill-creator `evals/evals.json` (or `<evals-root>/<skill>/evals.json`),
-  generates one `claude plugin eval` case per prompt inside a temporary
-  wrapper plugin (a `tool_used` grader proving the skill fired plus an `llm`
-  grader from the entry's assertions), runs it, and prints one row per
+  stages copied skills and fixtures, grades observed skill loading and the
+  entry's assertions through the selected harness, and prints one row per
   skill: cases, mean score, runs that fired the skill, failed graders.
   `--list` reports coverage without running anything; `--trigger-only`
   keeps just the skill-fired grader at three turns. Runs and judges are
@@ -49,14 +49,14 @@ health checks.
   and `DIR/result.json` (`{ report, complete, data }`) for automation;
   `--baseline FILE` compares with a previous `result.json` and lists
   regressions first. Each case gets an experiment key (skill files, case
-  spec, fixtures, claude version, model, repo-tools version); a case whose
+  spec, fixtures, harness/adapter version, case and judge model, repo-tools version); a case whose
   key matches a baseline result younger than `--max-age` days (default 28)
-  is carried forward instead of re-run, and claude is not invoked when every
+  is carried forward instead of re-run, and inference is not invoked when every
   case carries. `--no-carry` re-runs everything; `--cache [DIR]` keeps a
   per-key record cache for workstation runs. A case whose `allowed_tools`
   grants Bash, PowerShell, Write, Edit, WebFetch or an `mcp__*` tool is
-  refused because LCARS worker pods have no sandbox backend;
-  `--allow-gated-tools` opts out for workstation runs. Exit status is the
+  refused by default; `--allow-gated-tools` is an explicit caller grant for an
+  environment that supports those tools. Exit status is the
   runner's. The `skill-evals` skill owns when and how to use it. Actual
   runs retain input snapshots, results and available traces in the private
   evaluation history, including failures.
@@ -429,3 +429,6 @@ in `plugins/manifests.test.mjs` protects this shared source layout.
 
 Repository-local documentation may retain its own protection policy and check
 names, but should link to these skills rather than mirror their bodies.
+
+The five built-in skill-eval runners (`claude`, `codex`, `opencode`, `goose`,
+`antigravity`) share committed cases. See [native harness setup and qualification](docs/skill-eval-native-harnesses.md).

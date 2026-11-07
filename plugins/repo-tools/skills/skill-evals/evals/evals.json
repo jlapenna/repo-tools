@@ -35,6 +35,18 @@
         "The proposed bounded summary includes run identity and owning host/path/report references, with raw traces and credentials kept out of public source. This is a proposed publication boundary; no actual publication is required."
       ],
       "files": []
+    },
+    {
+      "id": 4,
+      "name": "harness-independent-cases",
+      "prompt": "Our skill evals need to run with any harness. We already use Claude and Codex and now want OpenCode. Should I rewrite the prompts, give the evals new credentials, or make another plugin-shaped test suite? Explain the integration and verification steps without executing commands or invoking a model.",
+      "assertions": [
+        "Keeps one shared set of prompts, assertions and fixtures instead of creating harness-specific copies.",
+        "Places native execution and authentication in a caller-selected adapter; mentions --runner NAME with --adapter EXECUTABLE or the versioned adapter contract.",
+        "Requires native skill-loading evidence, model and grader provenance, and capability/budget verification before claiming the new harness is supported; does not claim all harnesses are already integrated.",
+        "Does not grant eval definitions authority to choose credentials, invoke shell/network tools or rewrite permission scopes."
+      ],
+      "files": []
     }
   ]
 }
