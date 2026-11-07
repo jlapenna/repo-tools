@@ -4,7 +4,7 @@
 // tools are exposed. No model-generated command, network call or write runs.
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
-import { existsSync } from "node:fs";
+import { appendFileSync, existsSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { evaluateCases } from "./skill-evals-engine.mjs";
@@ -138,11 +138,15 @@ export class CodexClient {
     this.child.stderr.resume(); // credential-bearing provider diagnostics never reach reports
     this.lines = createInterface({ input: this.child.stdout });
     this.lines.on("line", (line) => {
+      let message;
       try {
-        this.message(JSON.parse(line));
+        message = JSON.parse(line);
       } catch {
         this.fail(Error("Invalid Codex protocol response"));
+        return;
       }
+      try { this.message(message); }
+      catch (error) { this.fail(error); }
     });
     this.child.on("error", () =>
       this.fail(Error("Could not start Codex app-server")),
@@ -195,17 +199,19 @@ export class CodexClient {
       }
       const { tool, arguments: args } = m.params;
       let output,
-        success = true;
+        success = true,
+        event;
       try {
         if (++t.calls > t.maxCalls)
           throw Error("Eval tool-call limit exceeded");
         output = t.tools.call(tool, args);
-        t.trace.push({ tool, arguments: args, output });
+        event = { tool, arguments: args, output };
       } catch (e) {
         output = e.message;
         success = false;
-        t.trace.push({ tool, arguments: args, error: output });
+        event = { tool, arguments: args, error: output };
       }
+      t.record(event);
       this.send({
         id: m.id,
         result: {
@@ -261,7 +267,9 @@ export class CodexClient {
     maxCalls = 8,
     timeout = 600,
     outputSchema,
+    evidenceFile,
   }) {
+    if (evidenceFile) writeFileSync(evidenceFile, "", { mode: 0o600 });
     const response = await this.request("thread/start", {
       cwd,
       model,
@@ -277,6 +285,7 @@ export class CodexClient {
       throw Error("Codex resolved a different model");
     const threadId = response.thread.id;
     let timer;
+    const trace = [];
     try {
       const done = new Promise((resolve, reject) => {
         this.turns.set(threadId, {
@@ -284,7 +293,12 @@ export class CodexClient {
           resolve,
           reject,
           tools,
-          trace: [],
+          trace,
+          record(event) {
+            trace.push(event);
+            if (evidenceFile)
+              appendFileSync(evidenceFile, JSON.stringify(event) + "\n");
+          },
           maxCalls,
           calls: 0,
         });
@@ -303,6 +317,18 @@ export class CodexClient {
       });
       this.turns.get(threadId).turnId = turn.turn.id;
       return await done;
+    } catch (error) {
+      // Keep the actual failed call sequence before the turn is discarded.
+      // Provider failures remain errors, with unknown total cost and no score.
+      error.trace = [...trace];
+      error.answer = this.turns.get(threadId)?.answer;
+      error.usage = this.turns.get(threadId)?.usage;
+      if (evidenceFile)
+        appendFileSync(
+          evidenceFile,
+          JSON.stringify({ error: error.message, usage: error.usage }) + "\n",
+        );
+      throw error;
     } finally {
       clearTimeout(timer);
       this.turns.delete(threadId);

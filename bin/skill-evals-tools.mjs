@@ -74,6 +74,10 @@ export function readTools(
   const permitted = new Set(available.map((p) => realpathSync(p)));
   const aliases = new Map(available.map(p => [p.startsWith(path.join(plugin, 'skills')+path.sep) ? path.relative(plugin,p) : path.relative(caseDir,p),p]));
   let loadedSkill;
+  const scope = () => {
+    const names = [...aliases].filter(([alias, file]) => alias.startsWith('resources'+path.sep) || !loadedSkill || file.startsWith(path.dirname(loadedSkill.path)+path.sep)).map(([alias]) => alias);
+    return `Available copied files for this skill and case:\n${names.slice(0,200).join('\n').slice(0,8192)}\n${names.length > 200 ? 'Use Glob to list further copied files.\n' : ''}The source repository checkout and live services are not supplied. If a referenced file is unavailable, describe the inspection as a plan using the supplied guidance.`;
+  };
   const skills = new Map();
   const skillRoot = path.join(plugin, "skills");
   for (const p of available.filter((p) => p.startsWith(skillRoot+path.sep) && path.relative(skillRoot,p).split(path.sep).length === 2 && path.basename(p) === "SKILL.md")) {
@@ -88,7 +92,12 @@ export function readTools(
   }
   const read = (p) => {
     const source = path.isAbsolute(p) ? p : aliases.get(p) ?? path.resolve(loadedSkill ? path.dirname(loadedSkill.path) : caseDir, p);
-    const real = realpathSync(source);
+    let real;
+    try { real = realpathSync(source); }
+    catch (error) {
+      if (error.code !== 'ENOENT' && error.code !== 'ENOTDIR') throw error;
+      throw Error(`File is not supplied by this isolated eval.\n${scope()}`);
+    }
     if (!permitted.has(real))
       throw Error("File is outside the eval skills and fixtures");
     const text = readFileSync(real, "utf8");
@@ -108,7 +117,7 @@ export function readTools(
         const skill = skills.get(args.skill);
         if (!skill) throw Error("Unknown skill");
         loadedSkill = skill;
-        return `Base directory: ${path.relative(plugin,path.dirname(skill.path))}\n\n${read(skill.path)}`;
+        return `Base directory: ${path.relative(plugin,path.dirname(skill.path))}\n\n${read(skill.path)}\n\n${scope()}`;
       }
       if (name === "Read") return read(args.path);
       if (typeof args.pattern !== "string" || args.pattern.length > 256)

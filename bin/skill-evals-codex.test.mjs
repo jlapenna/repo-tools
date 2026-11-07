@@ -10,6 +10,7 @@ import {
   readFileSync,
   rmSync,
   symlinkSync,
+  statSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -18,6 +19,7 @@ import {
   parseOptions,
   readTools,
   tokenCost,
+  CodexClient,
 } from "./skill-evals-codex.mjs";
 import { experimentKey, main, parseArgs } from "./skill-evals.mjs";
 function fixture(t) {
@@ -64,6 +66,14 @@ test("only copied skills and fixtures can be read; gated tools and symlink escap
     tools = readTools(f.plugin, f.caseDir);
   assert.match(tools.catalog, /triage: Triage/);
   assert.match(tools.call("Skill", { skill: "triage" }), /journalctl/);
+  const loaded = tools.call("Skill", { skill: "triage" });
+  assert.match(loaded, /skills\/triage\/SKILL\.md/);
+  assert.match(loaded, /resources\/probe\.log/);
+  assert.match(loaded, /source repository checkout.*not supplied/);
+  assert.throws(
+    () => tools.call("Read", { path: "../../../docs/deployment.md" }),
+    /not supplied.*isolated eval[\s\S]*Available copied files/,
+  );
   assert.equal(
     tools.call("Read", { path: "resources/probe.log" }),
     "probe failed",
@@ -72,6 +82,91 @@ test("only copied skills and fixtures can be read; gated tools and symlink escap
   assert.throws(() => readTools(f.plugin, f.caseDir, ["Bash"]), /read-only/);
   symlinkSync("/etc/passwd", path.join(f.caseDir, "resources", "escape"));
   assert.throws(() => readTools(f.plugin, f.caseDir), /escapes/);
+});
+
+test("failed Codex calls retain their exact partial trace and enforce the existing eight-call limit", async (t) => {
+  const {PassThrough, Writable} = await import('node:stream');
+  const {EventEmitter} = await import('node:events');
+  const f = fixture(t), evidenceFile = path.join(f.dir, 'failed.native.jsonl');
+  let nextCall = 0, interrupts = 0;
+  const child = new EventEmitter();
+  child.exitCode = null;
+  child.stdout = new PassThrough(); child.stderr = new PassThrough();
+  const emit = (message) => child.stdout.write(JSON.stringify(message) + '\n');
+  const toolCall = () => emit({id: 100 + ++nextCall, method: 'item/tool/call', params: {threadId: 'thread-one', tool: 'Skill', arguments: {skill: 'triage'}}});
+  child.stdin = new Writable({write(chunk, encoding, done) {
+    const message = JSON.parse(String(chunk));
+    queueMicrotask(() => {
+      if (message.method === 'initialize') emit({id: message.id, result: {}});
+      else if (message.method === 'thread/start') emit({id: message.id, result: {model: 'gpt-6.1-sol', thread: {id: 'thread-one'}}});
+      else if (message.method === 'turn/start') {
+        emit({id: message.id, result: {turn: {id: 'turn-one'}}});
+        queueMicrotask(toolCall);
+      } else if (message.method === 'turn/interrupt') {
+        interrupts++; emit({id: message.id, result: {}});
+      } else if (message.method === 'thread/unsubscribe') emit({id: message.id, result: {}});
+      else if (message.id >= 100 && message.result?.success) queueMicrotask(toolCall);
+    });
+    done();
+  }});
+  child.stdin.on('finish', () => queueMicrotask(() => {child.exitCode = 0; child.emit('exit', 0); child.stdout.end();}));
+  const client = new CodexClient({env: {CODEX_HOME: f.dir}, start: () => child});
+  try {
+    await client.initialize();
+    let failure;
+    await assert.rejects(client.run({cwd: f.caseDir, model: 'gpt-6.1-sol', prompt: 'Use the skill', tools: readTools(f.plugin, f.caseDir), maxCalls: 8, evidenceFile}), error => {
+      failure = error; return error.message === 'Eval tool-call limit exceeded';
+    });
+    assert.equal(nextCall, 9);
+    assert.equal(interrupts, 1);
+    assert.equal(failure.trace.length, 9);
+    assert.equal(failure.trace[8].error, 'Eval tool-call limit exceeded');
+    const evidence = readFileSync(evidenceFile, 'utf8').trim().split('\n').map(JSON.parse);
+    assert.deepEqual(evidence.slice(0, 9), failure.trace);
+    assert.equal(evidence.at(-1).error, failure.message);
+  } finally { await client.close(); }
+});
+
+test("an errored case replaces stale evidence with its partial trace without scoring or retrying", async (t) => {
+  const f = fixture(t), tracePath = path.join(f.dir, 'triage--one-1.trace.jsonl');
+  writeFileSync(tracePath, 'stale successful evidence\n');
+  const trace = [{tool: 'Skill', arguments: {skill: 'triage'}, output: 'actual skill'}, {tool: 'Read', arguments: {path: 'missing'}, error: 'not supplied'}];
+  let calls = 0;
+  const client = {async initialize() {}, async close() {}, async run(input) {
+    calls++; assert.equal(input.maxCalls, 3);
+    assert.match(input.instructions, /isolated workspace, not its source repository/);
+    assert.match(input.instructions, /at most 3 tool calls.*including Skill and failed requests/);
+    throw Object.assign(Error('Eval tool-call limit exceeded'), {trace});
+  }};
+  assert.equal(await evaluate(f.plugin, f.file, parseOptions([]), {client}), 2);
+  const result = JSON.parse(readFileSync(f.file));
+  assert.equal(calls, 1);
+  assert.equal(result.partial, true);
+  assert.equal(result.costUsd, null);
+  assert.equal(result.cases[0].aggregates.score, undefined);
+  const evidence = readFileSync(result.cases[0].arms.with[0].tracePath, 'utf8');
+  assert.doesNotMatch(evidence, /stale successful/);
+  assert.deepEqual(evidence.trim().split('\n').map(JSON.parse).slice(0, 2), trace.map(event => ({phase: 'case', ...event})));
+});
+
+test("a judge failure preserves the completed case evidence and stays unscored", async (t) => {
+  const f = fixture(t);
+  let calls = 0;
+  const client = {async initialize() {}, async close() {}, async run(input) {
+    calls++;
+    if (input.outputSchema) throw Object.assign(Error('judge unavailable'), {trace: []});
+    return {answer: 'original case answer', trace: [{tool: 'Skill', arguments: {skill: 'triage'}, output: 'actual skill'}], usage};
+  }};
+  assert.equal(await evaluate(f.plugin, f.file, parseOptions([]), {client}), 2);
+  const result = JSON.parse(readFileSync(f.file));
+  assert.equal(calls, 2);
+  assert.equal(result.costUsd, null);
+  assert.equal(result.cases[0].aggregates.score, undefined);
+  const evidence = readFileSync(result.cases[0].arms.with[0].tracePath, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse);
+  assert.equal(evidence[0].tool, 'Skill');
+  assert.equal(evidence[1].answer, 'original case answer');
+  assert.equal(evidence.at(-1).phase, 'judge');
+  assert.equal(evidence.at(-1).error, 'judge unavailable');
 });
 test("budget/model options reject silent widening and preserve both case and judge identity", () => {
   assert.equal(parseArgs(["--runner", "codex"]).runner, "codex");
@@ -311,12 +406,16 @@ test("native Codex protocol exposes bounded tools and records the real dynamic S
       tools: readTools(f.plugin, f.caseDir),
       instructions: "Use the read-only skill tools.",
       timeout: 15,
+      evidenceFile: path.join(f.dir, 'native-evidence.jsonl'),
     });
     assert.equal(result.trace[0].tool, "Skill");
     assert.equal(result.trace[0].arguments.skill, "triage");
     assert.equal(result.usage.inputTokens, 200);
     assert.match(result.answer, /journalctl/);
     assert.equal(existsSync(path.join(f.dir,"forbidden-write")),false);
+    const evidence = readFileSync(path.join(f.dir, 'native-evidence.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
+    assert.equal(evidence[0].tool, 'Skill');
+    assert.equal(statSync(path.join(f.dir, 'native-evidence.jsonl')).mode & 0o777, 0o600);
   } finally {
     await client.close();
     server.closeAllConnections();
