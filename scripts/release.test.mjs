@@ -8,6 +8,7 @@ import test from 'node:test';
 import { checkAgainstBase, compareVersions, release } from './release.mjs';
 
 const FIXTURES = {
+  'package.json': { name: '@jlapenna/repo-tools', version: '1.0.0' },
   '.claude-plugin/marketplace.json': { metadata: { version: '1.0.0' } },
   'plugins/repo-tools/.claude-plugin/plugin.json': { name: 'repo-tools', version: '1.0.0' },
   'plugins/repo-tools/.codex-plugin/plugin.json': { name: 'repo-tools', version: '1.0.0' },
@@ -54,7 +55,7 @@ test('bumps every manifest to the same version and commits atomically', () => {
     const results = release('1.2.3');
     assert.deepEqual(
       results.map((r) => r.to),
-      ['1.2.3', '1.2.3', '1.2.3'],
+      ['1.2.3', '1.2.3', '1.2.3', '1.2.3'],
     );
     const versions = readVersions(dir);
     for (const version of Object.values(versions)) {
@@ -80,7 +81,7 @@ function setVersions(dir, version) {
 }
 
 function assertUntouched(dir, version = '1.0.0') {
-  assert.deepEqual(Object.values(readVersions(dir)), [version, version, version]);
+  assert.deepEqual(Object.values(readVersions(dir)), Object.keys(FIXTURES).map(() => version));
   const status = execFileSync('git', ['status', '--porcelain'], { cwd: dir }).toString();
   assert.equal(status, '');
 }
@@ -91,7 +92,7 @@ test('refuses manifests that disagree and names each version', () => {
     writeFileSync(join(dir, path), `${JSON.stringify({ name: 'repo-tools', version: '0.9.9-drifted' }, null, 2)}\n`);
     execFileSync('git', ['commit', '-qam', 'drift'], { cwd: dir });
     assert.throws(() => release('2.0.0'), /disagree.*\.codex-plugin\/plugin\.json=0\.9\.9-drifted/);
-    assert.deepEqual(Object.values(readVersions(dir)), ['1.0.0', '1.0.0', '0.9.9-drifted']);
+    assert.deepEqual(Object.values(readVersions(dir)), ['1.0.0', '1.0.0', '1.0.0', '0.9.9-drifted']);
   });
 });
 
