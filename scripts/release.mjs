@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Bumps every published repo-tools manifest to the same version in one
-// atomic step and commits the result. The three files below drifted across
+// atomic step and commits the result. The manifests below drifted across
 // separate manual PRs before (#42, #45, #46); the mirror test that used to
 // catch that drift was removed in #46 because it also rejected legitimate
 // temporary divergence between hand-edits. Validate-then-write-all instead
@@ -16,12 +16,23 @@
 // .agents/plugins/marketplace.json (the Codex marketplace manifest) carries
 // no version field of its own -- it only points at ./plugins/repo-tools, so
 // it is not a release target.
+//
+// package.json carries the same version so npm lockfiles in consumer repos
+// record the released tag's version instead of 0.0.0; with 0.0.0 Renovate
+// kept proposing an update to the tag the consumer already pinned.
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 
 const VERSION_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 
 const TARGETS = [
+  {
+    path: 'package.json',
+    get: (manifest) => manifest.version,
+    set: (manifest, version) => {
+      manifest.version = version;
+    },
+  },
   {
     path: '.claude-plugin/marketplace.json',
     get: (manifest) => manifest.metadata?.version,
