@@ -1,6 +1,6 @@
 {
   "name": "@jlapenna/repo-tools",
-  "version": "4.7.2",
+  "version": "4.7.3",
   "private": false,
   "description": "General repository-management commands for worktree safety and CI monitoring.",
   "license": "MIT",
