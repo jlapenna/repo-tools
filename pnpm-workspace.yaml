@@ -16,6 +16,9 @@ overrides:
   # the patched 7.30.1 yet. Scoped to the vulnerable range.
   "undici@>=7.0.0 <7.30.1": 7.30.2
   # GHSA-g3hv-75wg-m249: eslint, @nx/devkit, nx and typescript-eslint still
-  # declare minimatch ^10; the fix ships only in 11.x, whose API matches 10.x.
-  # Scoped to the vulnerable range.
+  # declare minimatch ^10; the fix ships only in 11.x. Scoped to the
+  # vulnerable range.
   "minimatch@>=7.0.0 <11.0.1": 11.0.5
+  # nx calls minimatch.makeRe, which minimatch 11 removed; keep its pinned 10.x
+  # until Nx moves to 11 (jlapenna/repo-tools#229).
+  "nx>minimatch": 10.2.5
