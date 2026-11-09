@@ -62,6 +62,23 @@
       "allowedVersions": "<7 || >=8"
     },
     {
+      "description": [
+        "minimatch 11 (the only line fixing GHSA-g3hv-75wg-m249) removed makeRe, which Nx 24 calls for project globs. Consumers override vulnerable minimatch to 11.x but keep Nx's own copy on 10.x (pnpm `nx>minimatch`, npm nested `nx: { minimatch }`). Never update that exemption, including as a security PR, until Nx adopts minimatch 11 (nrwl/nx#37727); then delete the exemption and this rule (repo-tools#229)."
+      ],
+      "matchDepNames": ["nx>minimatch"],
+      "enabled": false
+    },
+    {
+      "description": [
+        "npm nested form of the Nx minimatch exemption above: depName is plain `minimatch`, an `overrides` dep pinned to 10.x. Top-level range-keyed overrides use a different depName and are unaffected."
+      ],
+      "matchManagers": ["npm"],
+      "matchDepTypes": ["overrides"],
+      "matchDepNames": ["minimatch"],
+      "matchCurrentValue": "/^10\\./",
+      "enabled": false
+    },
+    {
       "description": "Images hosted only on LAN registries (docker-registry.lan.jlapenna.net, local/ tags) are unreachable from Renovate's hosted runner, so lookups fail as recurring 'Error obtaining docker token' repository problems. These pins are deliberate and updated by hand.",
       "matchDatasources": ["docker"],
       "matchPackageNames": ["local/**", "docker-registry.lan.jlapenna.net/**"],
