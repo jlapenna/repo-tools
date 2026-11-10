@@ -145,15 +145,25 @@ test("Renovate age values use its duration-string schema, not pnpm numbers", () 
   }
 });
 
-test("lock file maintenance passes release age without dropping npm's --before", () => {
-  const lfm = preset.lockFileMaintenance;
+test("npm lock file maintenance passes release age without dropping --before", () => {
   // Lock file maintenance has no release timestamp; timestamp-required would
   // hold renovate/stability-days pending forever wherever native auto-merge
-  // cannot bypass it.
-  assert.equal(lfm.minimumReleaseAgeBehaviour, "timestamp-optional");
+  // cannot bypass it. Only the npm manager's package managers enforce the age
+  // themselves (npm --before, pnpm 11+), so the opt-out is scoped to npm.
+  const optional = rules.filter(
+    (r) => r.minimumReleaseAgeBehaviour === "timestamp-optional",
+  );
+  assert.equal(optional.length, 1);
+  assert.deepEqual(optional[0].matchManagers, ["npm"]);
+  assert.deepEqual(optional[0].matchUpdateTypes, ["lockFileMaintenance"]);
+  assert.equal(preset.minimumReleaseAgeBehaviour, undefined);
+  assert.equal(
+    preset.lockFileMaintenance.minimumReleaseAgeBehaviour,
+    undefined,
+  );
   // Renovate derives npm's --before cutoff from minimumReleaseAge, so the
   // lock file maintenance path must not clear it.
-  assert.equal(lfm.minimumReleaseAge, undefined);
+  assert.equal(preset.lockFileMaintenance.minimumReleaseAge, undefined);
   for (const rule of rules) {
     if (!rule.matchUpdateTypes?.includes("lockFileMaintenance")) continue;
     assert.ok(
