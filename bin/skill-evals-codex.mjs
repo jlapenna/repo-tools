@@ -15,6 +15,30 @@ export const DEFAULT_MODEL = "gpt-6.1-sol";
 // https://developers.openai.com/api/docs/models/gpt-6.1-sol . These are an
 // experiment budget estimate, not subscription billing or remaining quota.
 const PRICES = { "gpt-6.1-sol": { input: 2, cached: 0.1, output: 10 } };
+// A subscription quota stop is a provider limit, not a grading failure: callers
+// (e.g. LCARS) may rerun the same committed suite on another harness.
+const PROVIDER_LIMIT =
+  /\b(?:usage limit|rate limit|quota)\b|usageLimitExceeded|insufficient_quota/i;
+
+export function codexTurnError(turn) {
+  const detail = String(turn.error?.message ?? "")
+    .replace(
+      /(?:sk-[A-Za-z0-9_-]{12,}|eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)/g,
+      "[redacted]",
+    )
+    .slice(0, 500);
+  const error = Error(
+    `Codex turn ${turn.status}${detail ? ": " + detail : ""}`,
+  );
+  const info = turn.error?.codexErrorInfo;
+  if (
+    PROVIDER_LIMIT.test(detail) ||
+    PROVIDER_LIMIT.test(typeof info === "string" ? info : JSON.stringify(info ?? ""))
+  )
+    error.providerLimit = true;
+  return error;
+}
+
 export function tokenCost(usage, model) {
   if (!PRICES[model])
     throw Error(`No reviewed cost estimate for Codex model ${model}`);
@@ -235,19 +259,9 @@ export class CodexClient {
     else if (t && m.method === "thread/tokenUsage/updated")
       t.usage = m.params.tokenUsage.total;
     else if (t && m.method === "turn/completed") {
-      if (m.params.turn.status !== "completed") {
-        const detail = String(m.params.turn.error?.message ?? "")
-          .replace(
-            /(?:sk-[A-Za-z0-9_-]{12,}|eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)/g,
-            "[redacted]",
-          )
-          .slice(0, 500);
-        t.reject(
-          Error(
-            `Codex turn ${m.params.turn.status}${detail ? ": " + detail : ""}`,
-          ),
-        );
-      } else
+      if (m.params.turn.status !== "completed")
+        t.reject(codexTurnError(m.params.turn));
+      else
         t.resolve({ answer: t.answer ?? "", trace: t.trace, usage: t.usage });
     }
   }

@@ -163,7 +163,10 @@ export async function evaluateCases(
           );
           run.error = e.message;
           results.partial = true;
-          results.partialReason = "provider or grading error";
+          // A structured reason lets callers fall back to another harness.
+          results.partialReason = e.providerLimit
+            ? "provider-limit"
+            : "provider or grading error";
           results.costIncomplete = true;
           break;
         }

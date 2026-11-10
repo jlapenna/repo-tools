@@ -71,7 +71,10 @@ options are refused before inference. Case/judge turns run sequentially in
 one app-server (concurrency is an upper bound). The list-price estimate is
 checked before every paid turn, so overrun is bounded to one in-flight turn;
 it is not billed spend or subscription quota. Provider/usage errors stop
-further cases and produce partial, unscored reports. The existing report,
+further cases and produce partial, unscored reports. A subscription quota
+or rate-limit stop sets `partialReason: "provider-limit"` so a caller can rerun
+the same suite on another harness; other failures keep "provider or grading
+error". The existing report,
 baseline, cache and history interfaces remain; provider and judge identity
 participate in experiment keys, so Claude scores cannot carry into Codex.
 
