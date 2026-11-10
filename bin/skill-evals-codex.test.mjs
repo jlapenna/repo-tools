@@ -20,6 +20,7 @@ import {
   readTools,
   tokenCost,
   CodexClient,
+  codexTurnError,
 } from "./skill-evals-codex.mjs";
 import { experimentKey, main, parseArgs } from "./skill-evals.mjs";
 function fixture(t) {
@@ -521,4 +522,52 @@ test('loaded skills expose their base and resolve linked references through a di
  assert.match(tools.call('Glob',{pattern:'**/*.md'}),/skills\/triage\/references\/scope.md/);
  assert.match(tools.call('Glob',{pattern:'references/*.md'}),/skills\/triage\/references\/scope.md/);
  assert.throws(()=>tools.call('Read',{path:'../../../../../../etc/passwd'}));
+});
+
+test("a Codex quota stop is a structured provider limit, other turn failures are not", () => {
+  const limited = codexTurnError({
+    status: "failed",
+    error: {
+      message:
+        "You've hit your usage limit. Visit https://chatgpt.com/settings/usage to purchase more credits or try again at Nov 11th, 2026 6:48 AM.",
+    },
+  });
+  assert.equal(limited.providerLimit, true);
+  assert.match(limited.message, /^Codex turn failed: You've hit your usage limit/);
+  assert.equal(
+    codexTurnError({
+      status: "failed",
+      error: { message: "upstream", codexErrorInfo: "usageLimitExceeded" },
+    }).providerLimit,
+    true,
+  );
+  const other = codexTurnError({
+    status: "failed",
+    error: { message: "stream disconnected sk-abcdefghijklmnop" },
+  });
+  assert.equal(other.providerLimit, undefined);
+  assert.match(other.message, /\[redacted\]/);
+});
+test("a provider limit stops paid cases with the provider-limit partial reason", async (t) => {
+  const f = fixture(t);
+  let calls = 0;
+  const client = {
+    async initialize() {},
+    async run() {
+      calls++;
+      throw codexTurnError({
+        status: "failed",
+        error: { message: "You've hit your usage limit." },
+      });
+    },
+    async close() {},
+  };
+  assert.equal(
+    await evaluate(f.plugin, f.file, parseOptions([]), { client }),
+    2,
+  );
+  const result = JSON.parse(readFileSync(f.file));
+  assert.equal(result.partial, true);
+  assert.equal(result.partialReason, "provider-limit");
+  assert.equal(calls, 1);
 });
