@@ -16,6 +16,7 @@ const app=agent({name:'fixture',version:'fixture-1'})
  return{sessionId:'fixture',configOptions:[{id:'model',name:'Model',category:'model',type:'select',currentValue:'fixture/model',options:[{value:'fixture/model',name:'Fixture'}]}]};
 })
 .onRequest(methods.agent.session.prompt,async ctx=>{
+ if(process.env.EVAL_FIXTURE_QUOTA==='1')throw Object.assign(Error('RESOURCE_EXHAUSTED: fixture quota exhausted'),{code:-32603});
  let text='{"passed":true,"explanation":"Observed the actual bounded skill load."}';
  if(mcp){
   const list=await mcp.listTools();

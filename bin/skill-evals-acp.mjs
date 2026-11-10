@@ -21,7 +21,7 @@ export function nativeConfiguration(harness, env = process.env) {
   if (harness === 'goose') return { provider: env.GOOSE_PROVIDER ?? null, endpoint: endpoint(env.LITELLM_HOST ?? env.OPENAI_HOST) };
   return null;
 }
-export function parseOptions(args) {
+export function parseOptions(args, env = process.env) {
   const out = { concurrency: 1, threshold: 1, maxCostUsd: null };
   for (let i = 0; i < args.length; i++) {
     const a = args[i], value = () => { if (++i === args.length) throw Error(`${a} needs a value`); return args[i]; };
@@ -34,7 +34,9 @@ export function parseOptions(args) {
     else if (a === '--ablation') { if (value() !== 'none') throw Error('Native ACP evals support --ablation none only'); }
     else if (a !== '--keep-temp') throw Error(`Unsupported native eval option: ${a}`);
   }
-  if (!out.model) throw Error('Native ACP evals require an explicit --model');
+  // Unattended callers (LCARS recipe profiles) select the model by environment.
+  out.model ??= env.REPO_SKILL_EVALS_MODEL || undefined;
+  if (!out.model) throw Error('Native ACP evals require an explicit --model or REPO_SKILL_EVALS_MODEL');
   out.judgeModel ??= out.model;
   if (!Number.isInteger(out.concurrency) || out.concurrency < 1 || out.concurrency > 2 || !Number.isFinite(out.threshold) || out.threshold < 0 || out.threshold > 1 || (out.maxCostUsd !== null && (!Number.isFinite(out.maxCostUsd) || out.maxCostUsd <= 0))) throw Error('Invalid native eval options');
   return out;
@@ -113,6 +115,16 @@ export function authorizeArtifactRead(call, root, sessionId, toolTrace) {
     const content = readFileSync(file, 'utf8');
     return readFileSync(toolTrace, 'utf8').split('\n').filter(Boolean).map(line => JSON.parse(line)).some(event => event.type === 'tool.call' && event.result === content);
   } catch { return false; }
+}
+
+// Quota stops let callers fall back to another harness. ACP diagnostics can
+// carry credentials, so only the classification leaves this process. The native
+// log is matched only on structured quota codes, never on ordinary prose.
+const PROVIDER_LIMIT = /\b(?:usage limit|rate limit|quota|spend limit)\b|credit balance is too low|RESOURCE_EXHAUSTED|ResourceExhausted|usage_limit_reached|insufficient_quota/i;
+const NATIVE_LOG_LIMIT = /RESOURCE_EXHAUSTED|ResourceExhausted|usage_limit_reached|insufficient_quota/;
+export function providerLimited(error, nativeLog) {
+  if ([error?.message, JSON.stringify(error?.data ?? '')].some((text) => PROVIDER_LIMIT.test(String(text ?? '')))) return true;
+  try { return NATIVE_LOG_LIMIT.test(readFileSync(nativeLog, 'utf8').slice(-262144)); } catch { return false; }
 }
 
 export class AcpClient {
@@ -208,6 +220,11 @@ export class AcpClient {
     } catch (error) {
       // ACP errors can embed credential-bearing provider diagnostics.
       if (abort.signal.aborted && abort.signal.reason?.message === 'Eval tool-call limit exceeded') throw abort.signal.reason;
+      if (providerLimited(error, path.join(root, 'native.log'))) {
+        const limited = Error(`Native ${this.harness} stopped on a provider limit during ${phase}`);
+        limited.providerLimit = true;
+        throw limited;
+      }
       if (/model is not advertised|tool-call limit|Native eval (timed out|stopped|returned)/.test(error.message)) throw error;
       throw Error(`Native ${this.harness} failed during ${phase}`);
     } finally {

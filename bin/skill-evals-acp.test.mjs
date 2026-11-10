@@ -5,7 +5,7 @@ import {appendFileSync,existsSync,mkdirSync,mkdtempSync,readFileSync,rmSync,writ
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {AcpClient,evaluate,nativeCost,parseOptions,prepareNative,authorizeArtifactRead} from './skill-evals-acp.mjs';
+import {AcpClient,evaluate,nativeCost,parseOptions,prepareNative,authorizeArtifactRead,providerLimited} from './skill-evals-acp.mjs';
 import {parseArgs,plan} from './skill-evals.mjs';
 const fixture=fileURLToPath(new URL('./skill-evals-acp.fixture.mjs',import.meta.url));
 function input(t){
@@ -92,4 +92,29 @@ test('reusing an output directory cannot reuse old skill loads or exhausted tool
  appendFileSync(`${trace}.native.jsonl`,JSON.stringify({event:'prior-run'})+'\n');
  assert.equal(await evaluate('opencode',f.plugin,f.file,options,{client}),1,'old limits must not abort a new invocation');
  assert.doesNotMatch(readFileSync(`${trace}.native.jsonl`,'utf8'),/prior-run/);
+});
+test('REPO_SKILL_EVALS_MODEL selects the model for unattended callers; an explicit --model still wins',()=>{
+ assert.throws(()=>parseOptions([],{}),/explicit --model or REPO_SKILL_EVALS_MODEL/);
+ assert.equal(parseOptions([],{REPO_SKILL_EVALS_MODEL:'env/model'}).model,'env/model');
+ assert.equal(parseOptions([],{REPO_SKILL_EVALS_MODEL:'env/model'}).judgeModel,'env/model');
+ assert.equal(parseOptions(['--model','flag/model'],{REPO_SKILL_EVALS_MODEL:'env/model'}).model,'flag/model');
+});
+test('provider quota stops are classified without exposing native diagnostics',t=>{
+ const root=mkdtempSync(path.join(tmpdir(),'eval-native-limit-'));t.after(()=>rmSync(root,{recursive:true,force:true}));
+ const log=path.join(root,'native.log');
+ assert.equal(providerLimited(Error('RESOURCE_EXHAUSTED'),log),true);
+ assert.equal(providerLimited({message:'Internal error',data:{details:'usage_limit_reached'}},log),true);
+ assert.equal(providerLimited(Error('Eval tool-call limit exceeded'),log),false);
+ writeFileSync(log,'planning the quota of tool calls\n');
+ assert.equal(providerLimited(Error('Internal error'),log),false);
+ writeFileSync(log,'error: code=RESOURCE_EXHAUSTED\n');
+ assert.equal(providerLimited(Error('Internal error'),log),true);
+});
+test('a native quota stop settles the run partial with the provider-limit reason',async t=>{
+ const f=input(t);
+ const client=new AcpClient('opencode',{start:(_command,args,options)=>spawn(process.execPath,[fixture,...args],{...options,env:{...options.env,EVAL_FIXTURE_QUOTA:'1'}})});
+ const exit=await evaluate('opencode',f.plugin,f.file,parseOptions(['--model','fixture/model']),{client});
+ const result=JSON.parse(readFileSync(f.file,'utf8'));
+ assert.equal(exit,2);assert.equal(result.partial,true);assert.equal(result.partialReason,'provider-limit');
+ assert.doesNotMatch(result.cases[0].arms.with[0].error,/fixture quota exhausted/);
 });

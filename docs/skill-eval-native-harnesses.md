@@ -14,7 +14,8 @@ not select credentials, models or executable code.
 
 Installed binaries are prerequisites. Package installation does not install,
 log in to, upgrade or change defaults for these native applications. The native
-ACP clients require an explicit `--model`; the judge defaults to the same
+ACP clients require an explicit `--model` (or, for unattended callers,
+`REPO_SKILL_EVALS_MODEL`; a `--model` flag wins); the judge defaults to the same
 model. A model must be advertised by the native session and a model change
 must be acknowledged before a prompt is submitted. Case and judge use separate
 sessions. Sessions, tool calls, timeouts, failures and unknown usage remain
