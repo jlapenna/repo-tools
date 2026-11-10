@@ -26,11 +26,15 @@ For example, first select one committed case for a bounded qualification:
 ```bash
 repo-skill-evals --runner antigravity --skill deploy \
   --case 'deploy--coverage-first' --runs 1 --report /private/eval-report \
-  -- --model gemini-4-argon-medium --ablation none
+  -- --model gemini-4-argon --ablation none
 ```
 
 The model here is an example, not an automatically selected default. Use a
-model advertised by your installed native client. `--case` before `--` filters
+value of the native session's stable `model` config option. Antigravity lists
+model families there (`gemini-4-argon`) with a separate `thought_level`
+(default `medium`); per-thought-level ids such as `gemini-4-argon-medium` from
+its unstable model list are refused before inference, and the error names the
+advertised values. `--case` before `--` filters
 the shared suite before snapshots, cache lookup, inference and reporting.
 
 ## Native configuration

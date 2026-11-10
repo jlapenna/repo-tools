@@ -118,3 +118,11 @@ test('a native quota stop settles the run partial with the provider-limit reason
  assert.equal(exit,2);assert.equal(result.partial,true);assert.equal(result.partialReason,'provider-limit');
  assert.doesNotMatch(result.cases[0].arms.with[0].error,/fixture quota exhausted/);
 });
+test('an unadvertised model is refused before inference and the error names the stable selector values',async t=>{
+ const f=input(t);
+ const client=new AcpClient('opencode',{start:(_command,args,options)=>spawn(process.execPath,[fixture,...args],options)});
+ const exit=await evaluate('opencode',f.plugin,f.file,parseOptions(['--model','fixture/model-medium']),{client});
+ const result=JSON.parse(readFileSync(f.file,'utf8'));
+ assert.equal(exit,2);assert.equal(result.partial,true);assert.notEqual(result.partialReason,'provider-limit');
+ assert.match(result.cases[0].arms.with[0].error,/not advertised through a stable native selector; this session advertises: fixture\/model$/);
+});
