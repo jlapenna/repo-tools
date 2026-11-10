@@ -144,3 +144,32 @@ test("Renovate age values use its duration-string schema, not pnpm numbers", () 
     }
   }
 });
+
+test("lock file maintenance passes release age without dropping npm's --before", () => {
+  const lfm = preset.lockFileMaintenance;
+  // Lock file maintenance has no release timestamp; timestamp-required would
+  // hold renovate/stability-days pending forever wherever native auto-merge
+  // cannot bypass it.
+  assert.equal(lfm.minimumReleaseAgeBehaviour, "timestamp-optional");
+  // Renovate derives npm's --before cutoff from minimumReleaseAge, so the
+  // lock file maintenance path must not clear it.
+  assert.equal(lfm.minimumReleaseAge, undefined);
+  for (const rule of rules) {
+    if (!rule.matchUpdateTypes?.includes("lockFileMaintenance")) continue;
+    assert.ok(
+      !("minimumReleaseAge" in rule),
+      `rule would drop npm --before for lock file maintenance: ${rule.description}`,
+    );
+  }
+  assert.equal(releaseAgeFor({ packageName: "react" }), "1 day");
+  assert.ok(
+    preset.logLevelRemap?.some(
+      (remap) =>
+        remap.newLogLevel === "info" &&
+        remap.matchMessage.includes(
+          "minimumReleaseAgeBehaviour=timestamp-optional",
+        ),
+    ),
+    "timestamp-optional warning is demoted from the Dependency Dashboard",
+  );
+});

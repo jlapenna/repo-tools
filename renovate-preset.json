@@ -35,12 +35,20 @@
   "lockFileMaintenance": {
     "enabled": true,
     "description": [
-      "Refreshes transitive versions within their declared ranges, which security PRs cannot reach (they only bump declared dependencies). Monday-wide schedule because Mend controls hosted run timing and a narrow window can starve it (repo-tools#188). Rides the grouped automerge path like other in-range updates."
+      "Refreshes transitive versions within their declared ranges, which security PRs cannot reach (they only bump declared dependencies). Monday-wide schedule because Mend controls hosted run timing and a narrow window can starve it (repo-tools#188). Rides the grouped automerge path like other in-range updates.",
+      "Release age: lock file maintenance has no release timestamp, so under Renovate's default minimumReleaseAgeBehaviour=timestamp-required the npm rule's minimumReleaseAge keeps renovate/stability-days pending forever (Renovate docs, key-concepts/minimum-release-age, 'lockFileMaintenance updates'). Only repositories whose branch protection let GitHub native auto-merge ignore that status ever merged one; wedding#85 and x1c#34 sat open. timestamp-optional lets the status pass while minimumReleaseAge stays set, because the package managers enforce the age during regeneration: Renovate passes npm --before=now-minimumReleaseAge, and pnpm 11 applies its own 24-hour minimumReleaseAge. Do not replace this with minimumReleaseAge null or 0 days, which would drop npm's --before. logLevelRemap demotes the resulting once-per-run timestamp-optional WARN, which would otherwise sit permanently under Repository Problems on every consumer's Dependency Dashboard."
     ],
     "schedule": ["* * * * 1"],
     "automerge": true,
-    "automergeType": "pr"
+    "automergeType": "pr",
+    "minimumReleaseAgeBehaviour": "timestamp-optional"
   },
+  "logLevelRemap": [
+    {
+      "matchMessage": "/Some .+ did not have a releaseTimestamp, but as we're running with minimumReleaseAgeBehaviour=timestamp-optional, proceeding/",
+      "newLogLevel": "info"
+    }
+  ],
   "packageRules": [
     {
       "description": "Group and automerge updates that preserve the declared compatibility range",
