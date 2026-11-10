@@ -190,7 +190,10 @@ export class AcpClient {
             // Model switching uses only a model advertised by this native peer.
             if (!metadataOnly && current !== model) {
               const selector = session.configOptions?.find(option => option.category === 'model' && option.options?.some(value => value.value === model));
-              if (!selector) throw Error('Requested model is not advertised through a stable native selector');
+              if (!selector) {
+                const advertised = session.configOptions?.find(option => option.category === 'model')?.options?.map(value => value.value) ?? [];
+                throw Error(`Requested model is not advertised through a stable native selector; this session advertises: ${advertised.join(', ') || 'none'}`);
+              }
               const selected = await request(methods.agent.session.setConfigOption, { sessionId, configId: selector.id, value: model });
               if (selected.configOptions?.find(x => x.id === selector.id)?.currentValue !== model) throw Error('Requested model is not advertised through a stable native selector');
             }
