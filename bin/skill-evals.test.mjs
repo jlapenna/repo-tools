@@ -11,7 +11,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { findRuns, readRun } from './eval-history.mjs';
-import { buildCase, canonicalJson, compareBaseline, defaultCacheDir, discoverSkills, findEvals, fixturePath, gatedTool, loadBaseline, loadEntries, main, modelOf, parseArgs, plan, planCases, renderTable, summarize, writeReport, writeWrapper } from './skill-evals.mjs';
+import { buildCase, markProviderLimit, canonicalJson, compareBaseline, defaultCacheDir, discoverSkills, findEvals, fixturePath, gatedTool, loadBaseline, loadEntries, main, modelOf, parseArgs, plan, planCases, renderTable, summarize, writeReport, writeWrapper } from './skill-evals.mjs';
 
 const script = fileURLToPath(new URL('./skill-evals.mjs', import.meta.url));
 
@@ -786,4 +786,14 @@ test('portable execution settings retain legacy eval definitions and reject conf
 test('provider errors remain unscored even when a native runner supplies aggregate zero', () => {
  const rows = summarize({cases:[{name:'one',aggregates:{score:0},arms:{with:[{error:'monthly spend limit',graders:[]}]}}]}, {skills:[{name:'test',cases:1}],cases:[{name:'one',skill:'test'}]});
  assert.equal(rows[0].score,null);assert.equal(rows[0].errors,1);
+});
+
+test('a stock-runner quota stop becomes the provider-limit partial reason', () => {
+  const run = (error) => ({ partial: true, partialReason: 'runner error', cases: [{ name: 'a', arms: { with: [{ error }] } }] });
+  assert.equal(markProviderLimit(run("You've hit your weekly limit · resets 3pm")).partialReason, 'provider-limit');
+  assert.equal(markProviderLimit(run('Credit balance is too low')).partialReason, 'provider-limit');
+  assert.equal(markProviderLimit(run('API Error: 529 overloaded')).partialReason, 'runner error');
+  assert.equal(markProviderLimit(run('Eval tool-call limit exceeded')).partialReason, 'runner error');
+  const complete = { partial: false, cases: [{ name: 'a', arms: { with: [{ error: 'usage limit' }] } }] };
+  assert.equal(markProviderLimit(complete), complete);
 });

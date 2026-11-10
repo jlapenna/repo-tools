@@ -74,7 +74,9 @@ it is not billed spend or subscription quota. Provider/usage errors stop
 further cases and produce partial, unscored reports. A subscription quota
 or rate-limit stop sets `partialReason: "provider-limit"` so a caller can rerun
 the same suite on another harness; other failures keep "provider or grading
-error". The existing report,
+error". Native ACP harnesses (including Antigravity quota codes such as
+`RESOURCE_EXHAUSTED`) and the stock Claude runner (weekly, usage, spend and
+credit limits) report the same reason. The existing report,
 baseline, cache and history interfaces remain; provider and judge identity
 participate in experiment keys, so Claude scores cannot carry into Codex.
 

@@ -301,6 +301,15 @@ export function planCases(skills, options, context) {
 }
 
 // A hit is the run of a runner case the run did not error on; hitting max_turns is a --trigger-only design.
+// Provider quota stops in any runner's per-run errors become the structured
+// partial reason callers use to retry on another harness. Grading failures and
+// other provider errors keep their own reason.
+const PROVIDER_LIMIT_ERROR = /\b(?:usage limit|rate limit|quota|spend limit)\b|hit your (?:weekly |monthly |usage )?limit|credit balance is too low|RESOURCE_EXHAUSTED|ResourceExhausted|usage_limit_reached|insufficient_quota/i;
+export function markProviderLimit(results) {
+  if (!results?.partial || results.partialReason === 'provider-limit') return results;
+  const limited = (results.cases ?? []).some((c) => (c.arms?.with ?? []).some((run) => typeof run.error === 'string' && PROVIDER_LIMIT_ERROR.test(run.error)));
+  return limited ? { ...results, partialReason: 'provider-limit' } : results;
+}
 const runErrored = (run) => Boolean((run.error && !/maximum number of turns/i.test(run.error)) || run.aborted);
 
 // The compact per-case record kept in result.json data and the cache. It holds no evidence text, `fired`
@@ -713,7 +722,7 @@ export function main(argv, { log = console.log, warn = console.error, spawn = sp
       writeFileSync(resultsFile, JSON.stringify(normalized.results, null, 2) + '\n');
     }
     if (!existsSync(resultsFile)) throw new Error(`${options.runner} evaluator exited ${run.status} without writing ${resultsFile}`);
-    results = JSON.parse(readFileSync(resultsFile, 'utf8'));
+    results = markProviderLimit(JSON.parse(readFileSync(resultsFile, 'utf8')));
     outcome = conclude(results, run, outDir, { id: history.id, store, previous: previous.map(r => r.id) });
     return run.status ?? 1;
   } finally {
