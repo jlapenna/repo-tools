@@ -41,6 +41,12 @@
     "automerge": true,
     "automergeType": "pr"
   },
+  "logLevelRemap": [
+    {
+      "matchMessage": "/Some .+ did not have a releaseTimestamp, but as we're running with minimumReleaseAgeBehaviour=timestamp-optional, proceeding/",
+      "newLogLevel": "info"
+    }
+  ],
   "packageRules": [
     {
       "description": "Group and automerge updates that preserve the declared compatibility range",
@@ -88,6 +94,12 @@
       "description": "Match pnpm 11's own default 24-hour minimumReleaseAge install-time policy, for every pnpm 11 consumer. Without this, Renovate can open and auto-merge an npm bump for a package published hours ago, landing a lockfile entry that pnpm itself then rejects on the very next install (agent-lcars#1345/#1391). Consumers without npm packages are unaffected.",
       "matchManagers": ["npm"],
       "minimumReleaseAge": "1 day"
+    },
+    {
+      "description": "Lock file maintenance has no release timestamp, so under Renovate's default minimumReleaseAgeBehaviour=timestamp-required the npm rule's minimumReleaseAge keeps renovate/stability-days pending forever (Renovate docs, key-concepts/minimum-release-age, 'lockFileMaintenance updates'). Only repositories whose branch protection let GitHub native auto-merge ignore that status ever merged one; wedding#85 and x1c#34 sat open. Scoped to the npm manager, where the package manager enforces the age while it regenerates the lock file: Renovate passes npm --before=now-minimumReleaseAge, and every pnpm consumer runs pnpm 11+, which applies its own 24-hour minimumReleaseAge. No consumer uses Yarn, which does neither; revisit this rule before one does. Do not replace it with minimumReleaseAge null or 0 days, which would drop npm's --before. logLevelRemap demotes the resulting once-per-run timestamp-optional WARN, which would otherwise sit permanently under Repository Problems on the Dependency Dashboard.",
+      "matchManagers": ["npm"],
+      "matchUpdateTypes": ["lockFileMaintenance"],
+      "minimumReleaseAgeBehaviour": "timestamp-optional"
     },
     {
       "description": "Maintainer-owned source repositories are first-party releases and do not wait for release age; third-party dependencies in those repositories retain their normal policy.",
