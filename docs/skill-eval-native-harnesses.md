@@ -100,7 +100,10 @@ Antigravity's ACP reports no USD usage, so a budgeted Antigravity run stops
 after its first prompt. An unattended caller whose login is billed by
 subscription quota sets `REPO_SKILL_EVALS_QUOTA_BILLED=1`; the cap is then
 ignored with a logged notice, cost stays unknown, and an exhausted quota still
-settles as `provider-limit`.
+settles as `provider-limit`. Antigravity reports an exhausted quota as a
+normal turn whose whole reply is a `⚠ … quota reached` notice; a short,
+tool-free reply of that form also settles as `provider-limit` instead of being
+graded.
 Codex retains its separately reviewed token-price estimate and default ceiling.
 
 ## Qualification

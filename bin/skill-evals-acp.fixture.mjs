@@ -16,6 +16,10 @@ const app=agent({name:'fixture',version:'fixture-1'})
  return{sessionId:'fixture',configOptions:[{id:'model',name:'Model',category:'model',type:'select',currentValue:'fixture/model',options:[{value:'fixture/model',name:'Fixture'}]}]};
 })
 .onRequest(methods.agent.session.prompt,async ctx=>{
+ if(process.env.EVAL_FIXTURE_QUOTA_NOTICE==='1'){
+  await ctx.client.notify(methods.client.session.update,{sessionId:'fixture',update:{sessionUpdate:'agent_message_chunk',content:{type:'text',text:'\n⚠ Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 64h37m24s.\n'}}});
+  return {stopReason:'end_turn'};
+ }
  if(process.env.EVAL_FIXTURE_QUOTA==='1')throw Object.assign(Error('RESOURCE_EXHAUSTED: fixture quota exhausted'),{code:-32603});
  let text='{"passed":true,"explanation":"Observed the actual bounded skill load."}';
  if(mcp){
