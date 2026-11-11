@@ -126,3 +126,9 @@ test('an unadvertised model is refused before inference and the error names the 
  assert.equal(exit,2);assert.equal(result.partial,true);assert.notEqual(result.partialReason,'provider-limit');
  assert.match(result.cases[0].arms.with[0].error,/not advertised through a stable native selector; this session advertises: fixture\/model$/);
 });
+test('a quota-billed caller drops the USD cap it cannot enforce; other callers keep it',()=>{
+ const args=['--max-cost-usd','12'];
+ assert.equal(parseOptions(args,{REPO_SKILL_EVALS_MODEL:'m'}).maxCostUsd,12);
+ assert.equal(parseOptions(args,{REPO_SKILL_EVALS_MODEL:'m',REPO_SKILL_EVALS_QUOTA_BILLED:'0'}).maxCostUsd,12);
+ assert.equal(parseOptions(args,{REPO_SKILL_EVALS_MODEL:'m',REPO_SKILL_EVALS_QUOTA_BILLED:'1'}).maxCostUsd,null);
+});

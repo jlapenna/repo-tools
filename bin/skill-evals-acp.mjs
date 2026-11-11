@@ -38,6 +38,13 @@ export function parseOptions(args, env = process.env) {
   out.model ??= env.REPO_SKILL_EVALS_MODEL || undefined;
   if (!out.model) throw Error('Native ACP evals require an explicit --model or REPO_SKILL_EVALS_MODEL');
   out.judgeModel ??= out.model;
+  // A caller whose native login is billed by subscription quota (LCARS Antigravity
+  // jobs) declares it: no USD usage exists, so a USD cap cannot be enforced. The
+  // quota itself still stops the run as a provider limit.
+  if (env.REPO_SKILL_EVALS_QUOTA_BILLED === '1' && out.maxCostUsd !== null) {
+    process.stderr.write(`Ignoring --max-cost-usd ${out.maxCostUsd}: REPO_SKILL_EVALS_QUOTA_BILLED=1 declares quota billing with no USD usage\n`);
+    out.maxCostUsd = null;
+  }
   if (!Number.isInteger(out.concurrency) || out.concurrency < 1 || out.concurrency > 2 || !Number.isFinite(out.threshold) || out.threshold < 0 || out.threshold > 1 || (out.maxCostUsd !== null && (!Number.isFinite(out.maxCostUsd) || out.maxCostUsd <= 0))) throw Error('Invalid native eval options');
   return out;
 }

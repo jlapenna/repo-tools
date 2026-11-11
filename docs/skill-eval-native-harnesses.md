@@ -96,6 +96,11 @@ zero. `--max-cost-usd` is checked before each case/judge prompt, with overrun
 bounded to one in-flight prompt. If a budgeted prompt returns no valid USD
 usage, evaluation stops partial before further prompts. Do not use a claimed
 USD cap as a credit/subscription quota or convert currencies by guessing.
+Antigravity's ACP reports no USD usage, so a budgeted Antigravity run stops
+after its first prompt. An unattended caller whose login is billed by
+subscription quota sets `REPO_SKILL_EVALS_QUOTA_BILLED=1`; the cap is then
+ignored with a logged notice, cost stays unknown, and an exhausted quota still
+settles as `provider-limit`.
 Codex retains its separately reviewed token-price estimate and default ceiling.
 
 ## Qualification
