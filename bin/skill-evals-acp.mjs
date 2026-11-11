@@ -129,6 +129,12 @@ export function authorizeArtifactRead(call, root, sessionId, toolTrace) {
 // log is matched only on structured quota codes, never on ordinary prose.
 const PROVIDER_LIMIT = /\b(?:usage limit|rate limit|quota|spend limit)\b|credit balance is too low|RESOURCE_EXHAUSTED|ResourceExhausted|usage_limit_reached|insufficient_quota/i;
 const NATIVE_LOG_LIMIT = /RESOURCE_EXHAUSTED|ResourceExhausted|usage_limit_reached|insufficient_quota/;
+// Antigravity ends a quota-exhausted turn normally, with only this notice as
+// its reply. Only a short, tool-free reply that is the notice itself counts.
+const QUOTA_NOTICE = /^\s*⚠\s*(?:Individual |Team |Organization )?quota reached\b/i;
+export function quotaNotice(answer, trace) {
+  return !trace.some(event => event.tool) && answer.length <= 1024 && QUOTA_NOTICE.test(answer);
+}
 export function providerLimited(error, nativeLog) {
   if ([error?.message, JSON.stringify(error?.data ?? '')].some((text) => PROVIDER_LIMIT.test(String(text ?? '')))) return true;
   try { return NATIVE_LOG_LIMIT.test(readFileSync(nativeLog, 'utf8').slice(-262144)); } catch { return false; }
@@ -226,6 +232,7 @@ export class AcpClient {
         }
       }
       if (!metadataOnly && !chunks.join('').trim()) throw Error('Native eval returned no final response');
+      if (!metadataOnly && quotaNotice(chunks.join(''), trace)) throw Error('Native eval returned a provider quota notice instead of a response');
       return { answer: chunks.join(''), trace, usage, native: { harness: this.harness, version: init.agentInfo?.version, model: session.models?.currentModelId, models: session.models?.availableModels?.map(x => x.modelId), configOptions: session.configOptions, sessionId } };
     } catch (error) {
       // ACP errors can embed credential-bearing provider diagnostics.

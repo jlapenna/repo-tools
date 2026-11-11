@@ -5,7 +5,7 @@ import {appendFileSync,existsSync,mkdirSync,mkdtempSync,readFileSync,rmSync,writ
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {AcpClient,evaluate,nativeCost,parseOptions,prepareNative,authorizeArtifactRead,providerLimited} from './skill-evals-acp.mjs';
+import {AcpClient,quotaNotice,evaluate,nativeCost,parseOptions,prepareNative,authorizeArtifactRead,providerLimited} from './skill-evals-acp.mjs';
 import {parseArgs,plan} from './skill-evals.mjs';
 const fixture=fileURLToPath(new URL('./skill-evals-acp.fixture.mjs',import.meta.url));
 function input(t){
@@ -131,4 +131,20 @@ test('a quota-billed caller drops the USD cap it cannot enforce; other callers k
  assert.equal(parseOptions(args,{REPO_SKILL_EVALS_MODEL:'m'}).maxCostUsd,12);
  assert.equal(parseOptions(args,{REPO_SKILL_EVALS_MODEL:'m',REPO_SKILL_EVALS_QUOTA_BILLED:'0'}).maxCostUsd,12);
  assert.equal(parseOptions(args,{REPO_SKILL_EVALS_MODEL:'m',REPO_SKILL_EVALS_QUOTA_BILLED:'1'}).maxCostUsd,null);
+});
+test('an Antigravity quota notice returned as a normal turn settles provider-limit instead of being graded',async t=>{
+ const f=input(t),app=path.join(f.root,'auth-app');mkdirSync(app);
+ const client=new AcpClient('antigravity',{env:{...process.env,REPO_EVAL_ANTIGRAVITY_AUTH_DIR:app},start:(_command,args,options)=>spawn(process.execPath,[fixture,...args],{...options,env:{...options.env,EVAL_FIXTURE_QUOTA_NOTICE:'1'}})});
+ const exit=await evaluate('antigravity',f.plugin,f.file,parseOptions(['--model','fixture/model']),{client});
+ const result=JSON.parse(readFileSync(f.file,'utf8'));
+ assert.equal(exit,2);assert.equal(result.partial,true);assert.equal(result.partialReason,'provider-limit');
+ assert.doesNotMatch(result.cases[0].arms.with[0].error,/upgrade your subscription/);
+});
+test('only a short tool-free reply that is the quota notice counts',()=>{
+ const notice='\n⚠ Individual quota reached. Please upgrade your subscription. Resets in 1h.\n';
+ assert.equal(quotaNotice(notice,[]),true);
+ assert.equal(quotaNotice(notice,[{event:'native.session'},{event:'acp.update',type:'agent_message_chunk'}]),true);
+ assert.equal(quotaNotice(notice,[{tool:'Skill'}]),false);
+ assert.equal(quotaNotice('The skill says: ⚠ quota reached means wait.',[]),false);
+ assert.equal(quotaNotice(notice+'x'.repeat(1100),[]),false);
 });
