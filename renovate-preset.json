@@ -16,10 +16,16 @@
     "Blocked schedule until one clean run, consistent with sprinkles going",
     "silent 2026-08-24 to 2026-09-15. The cap covers Renovate plus pnpm, so",
     "this uses 1536, the bottom of Mend's recommended 1.5-2.5 GB range",
-    "(https://docs.renovatebot.com/mend-hosted/faq/)."
+    "(https://docs.renovatebot.com/mend-hosted/faq/).",
+    "postUpdateOptions gomodTidy runs go mod tidy after gomod updates; without",
+    "it Renovate only rewrites go.mod/go.sum for the bumped module, so every",
+    "Go bump left the previous version's go.sum checksums behind (agent-lcars",
+    "runner-autoscaler had five stale module versions, cleaned in",
+    "agent-lcars#3313). It affects only the gomod manager."
   ],
   "extends": ["config:recommended"],
   "labels": ["bot:renovate", "type:dependency-update"],
+  "postUpdateOptions": ["gomodTidy"],
   "platformAutomerge": true,
   "rebaseWhen": "auto",
   "pre-commit": {
