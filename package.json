@@ -50,9 +50,9 @@
     "test:skill-evals-native": "REPO_EVAL_NATIVE_CODEX=1 node --test bin/skill-evals-codex.test.mjs"
   },
   "dependencies": {
-    "@agentclientprotocol/sdk": "2.5.0",
+    "@agentclientprotocol/sdk": "2.6.0",
     "@modelcontextprotocol/server": "2.4.0",
-    "@nx/devkit": "24.0.5",
+    "@nx/devkit": "24.0.6",
     "@typescript-eslint/utils": "8.72.2",
     "yaml": "2.9.1",
     "zod": "4.6.7"
