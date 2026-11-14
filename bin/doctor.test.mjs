@@ -188,3 +188,77 @@ test('runtime diagnosis rejects vulnerable patches and unsupported majors', () =
     if (expected === 'warn') assert.match(runtime.detail, /package engines require >=24\.22\.1 <25 \|\| >=26\.12\.1 <27/);
   }
 });
+
+test('diagnoses Antigravity and OpenCode plugin installations and four-harness version drift', () => {
+  const fx = fixture();
+  const gemini = path.join(tmp, 'gemini');
+  const xdgConfig = path.join(tmp, 'xdg-config');
+
+  // Healthy aligned Antigravity + OpenCode installs at 2.0.10.
+  const agyDir = path.join(gemini, 'config/plugins/repo-tools');
+  mkdirSync(path.join(agyDir, 'scripts'), { recursive: true });
+  writeFileSync(path.join(agyDir, 'plugin.json'), JSON.stringify({ name: 'repo-tools', version: '2.0.10' }));
+  writeFileSync(
+    path.join(agyDir, 'hooks.json'),
+    JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command: 'node "./scripts/repo-autonomous-work-hook.mjs" --harness antigravity # SECRET_AGY_HOOK' }] }] } }),
+  );
+  writeFileSync(path.join(agyDir, 'scripts/repo-autonomous-work-hook.mjs'), '#!/usr/bin/env node\n');
+
+  const marketplacePlugin = path.join(fx.claude, 'plugins/marketplaces/repo-tools/plugins/repo-tools');
+  mkdirSync(path.join(marketplacePlugin, 'opencode'), { recursive: true });
+  writeFileSync(path.join(marketplacePlugin, 'plugin.json'), JSON.stringify({ name: 'repo-tools', version: '2.0.10' }));
+  writeFileSync(path.join(marketplacePlugin, 'opencode/autonomous-work.mjs'), 'export default async () => ({});\n');
+
+  mkdirSync(path.join(xdgConfig, 'opencode/plugins'), { recursive: true });
+  writeFileSync(path.join(xdgConfig, 'opencode/plugins/repo-tools-autonomous-work.js'), 'export default async () => ({});\n');
+
+  const runFour = () => {
+    const result = spawnSync(process.execPath, [script, '--json'], {
+      cwd: tmp,
+      encoding: 'utf8',
+      env: {
+        HOME: tmp,
+        PATH: fx.path,
+        CODEX_HOME: fx.codex,
+        CLAUDE_CONFIG_DIR: fx.claude,
+        GEMINI_CONFIG_DIR: gemini,
+        XDG_CONFIG_HOME: xdgConfig,
+      },
+    });
+    return { status: result.status, stdout: result.stdout, json: JSON.parse(result.stdout) };
+  };
+
+  const healthy = runFour();
+  assert.equal(healthy.status, 0, healthy.stdout);
+  assert.equal(check(healthy.json, 'plugin:antigravity').status, 'ok');
+  assert.equal(check(healthy.json, 'plugin:opencode').status, 'ok');
+  assert.equal(check(healthy.json, 'plugin:versions'), undefined);
+  assert.doesNotMatch(healthy.stdout, /SECRET_AGY_HOOK/);
+
+  // Antigravity version drift warns (exit 0) without failing reconciliation.
+  writeFileSync(path.join(agyDir, 'plugin.json'), JSON.stringify({ name: 'repo-tools', version: '2.0.9' }));
+  const drifted = runFour();
+  assert.equal(drifted.status, 0);
+  assert.deepEqual(check(drifted.json, 'plugin:versions'), {
+    name: 'plugin:versions',
+    status: 'warn',
+    detail: 'codex has 2.0.10, claude has 2.0.10, antigravity has 2.0.9, opencode has 2.0.10',
+  });
+
+  // Missing script referenced by Antigravity hooks.json fails (exit 1).
+  rmSync(path.join(agyDir, 'scripts/repo-autonomous-work-hook.mjs'));
+  const brokenAgy = runFour();
+  assert.equal(brokenAgy.status, 1);
+  assert.equal(check(brokenAgy.json, 'plugin:antigravity').status, 'fail');
+
+  // Direct opencode.jsonc file:// entry pointing at a missing module also fails.
+  rmSync(agyDir, { recursive: true });
+  rmSync(path.join(xdgConfig, 'opencode/plugins/repo-tools-autonomous-work.js'));
+  writeFileSync(
+    path.join(xdgConfig, 'opencode/opencode.jsonc'),
+    `{\n  // comment\n  "plugin": ["file://${path.join(tmp, 'missing/opencode/autonomous-work.mjs')}"]\n}\n`,
+  );
+  const brokenOpenCode = runFour();
+  assert.equal(brokenOpenCode.status, 1);
+  assert.equal(check(brokenOpenCode.json, 'plugin:opencode').status, 'fail');
+});

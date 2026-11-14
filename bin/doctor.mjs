@@ -72,6 +72,42 @@ function hookCommands(file) {
   return [...found].sort();
 }
 
+function pluginScriptPaths(file) {
+  let config;
+  try {
+    config = JSON.parse(readFileSync(file, 'utf8'));
+  } catch {
+    return null;
+  }
+  const found = new Set();
+  const visit = (node) => {
+    if (Array.isArray(node)) node.forEach(visit);
+    else if (node && typeof node === 'object') {
+      for (const [key, value] of Object.entries(node)) {
+        if (key === 'command' && typeof value === 'string') {
+          for (const [, rel] of value.matchAll(/(?:^|[\s"'])(\.\/scripts\/[^\s"';&|)`]+)(?=$|[\s"';&|)`])/g)) found.add(rel);
+        } else visit(value);
+      }
+    }
+  };
+  visit(config.hooks);
+  return [...found].sort();
+}
+
+function readPluginVersion(pluginDir) {
+  for (const rel of ['plugin.json', '.claude-plugin/plugin.json', '../../package.json']) {
+    const candidate = path.join(pluginDir, rel);
+    if (!existsSync(candidate)) continue;
+    try {
+      const version = JSON.parse(readFileSync(candidate, 'utf8')).version;
+      if (typeof version === 'string' && version.length > 0) return version;
+    } catch {
+      // try the next manifest
+    }
+  }
+  return null;
+}
+
 function versions(dir) {
   try {
     return readdirSync(dir, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name);
@@ -102,6 +138,8 @@ export function diagnose({ env = process.env, cwd = process.cwd() } = {}) {
   const home = env.HOME ?? homedir();
   const codexHome = env.CODEX_HOME ?? path.join(home, '.codex');
   const claudeHome = env.CLAUDE_CONFIG_DIR ?? path.join(home, '.claude');
+  const geminiHome = env.GEMINI_CONFIG_DIR ?? path.join(home, '.gemini');
+  const opencodeHome = path.join(env.XDG_CONFIG_HOME ?? path.join(home, '.config'), 'opencode');
 
   let packageCommit = null;
   try {
@@ -120,6 +158,7 @@ export function diagnose({ env = process.env, cwd = process.cwd() } = {}) {
   const hooks = [
     ['codex', path.join(codexHome, 'hooks.json')],
     ['claude', path.join(claudeHome, 'settings.json')],
+    ['antigravity', path.join(geminiHome, 'antigravity-cli', 'hooks.json')],
   ];
   const hooked = new Map();
   for (const [runtime, file] of hooks) {
@@ -175,19 +214,93 @@ export function diagnose({ env = process.env, cwd = process.cwd() } = {}) {
     }
   }
   const codexConfig = path.join(codexHome, 'config.toml');
+  let codexLatest = null;
   // Enabled unless its own section says `enabled = false`.
   const codexSection = existsSync(codexConfig)
     ? /^\[plugins\."repo-tools@[^"]+"\]\s*\n((?:(?!\[).*\n?)*)/m.exec(readFileSync(codexConfig, 'utf8'))
     : null;
   if (codexSection && !/^\s*enabled\s*=\s*false\b/m.test(codexSection[1])) {
     const cache = path.join(codexHome, 'plugins', 'cache', 'repo-tools', 'repo-tools');
-    const latest = newest(versions(cache));
-    if (latest) add('plugin:codex', 'ok', `${latest} at ${path.join(cache, latest)}`);
+    codexLatest = newest(versions(cache));
+    if (codexLatest) add('plugin:codex', 'ok', `${codexLatest} at ${path.join(cache, codexLatest)}`);
     else add('plugin:codex', 'fail', `stale: repo-tools is enabled in ${codexConfig} but ${cache} has no installed version`);
-    const claudeLatest = newest(claudeVersions);
-    if (latest && claudeLatest && latest !== claudeLatest) {
-      add('plugin:versions', 'warn', `codex has ${latest}, claude has ${claudeLatest}`);
+  }
+
+  const agyPluginDir = path.join(geminiHome, 'config', 'plugins', 'repo-tools');
+  let agyVersion = null;
+  if (existsSync(agyPluginDir)) {
+    const agyManifest = path.join(agyPluginDir, 'plugin.json');
+    let parsedVersion = null;
+    try {
+      const parsed = JSON.parse(readFileSync(agyManifest, 'utf8'));
+      if (typeof parsed.version === 'string' && parsed.version.length > 0) parsedVersion = parsed.version;
+    } catch {
+      // handled below
     }
+    if (!parsedVersion) {
+      add('plugin:antigravity', 'warn', `${agyManifest} is missing or not valid JSON`);
+    } else {
+      const agyHooks = path.join(agyPluginDir, 'hooks.json');
+      const scripts = existsSync(agyHooks) ? pluginScriptPaths(agyHooks) : [];
+      const missingScript = Array.isArray(scripts) ? scripts.find((rel) => !existsSync(path.join(agyPluginDir, rel))) : null;
+      if (scripts === null) {
+        add('plugin:antigravity', 'warn', `${agyHooks} is not valid JSON`);
+      } else if (missingScript) {
+        add('plugin:antigravity', 'fail', `stale: ${agyHooks} points at missing ${missingScript} in ${agyPluginDir}`);
+      } else {
+        agyVersion = parsedVersion;
+        add('plugin:antigravity', 'ok', `${agyVersion} at ${agyPluginDir}`);
+      }
+    }
+  }
+
+  let opencodeVersion = null;
+  const opencodeLoader = ['js', 'mjs', 'ts']
+    .map((ext) => path.join(opencodeHome, 'plugins', `repo-tools-autonomous-work.${ext}`))
+    .find((candidate) => existsSync(candidate));
+  if (opencodeLoader) {
+    const candidates = [
+      path.join(claudeHome, 'plugins', 'marketplaces', 'repo-tools', 'plugins', 'repo-tools', 'opencode', 'autonomous-work.mjs'),
+      path.join(packageRoot, 'plugins', 'repo-tools', 'opencode', 'autonomous-work.mjs'),
+    ];
+    const resolved = candidates.find((candidate) => existsSync(candidate));
+    if (resolved) {
+      opencodeVersion = readPluginVersion(path.dirname(path.dirname(resolved)));
+      add('plugin:opencode', 'ok', `${opencodeVersion ? `${opencodeVersion} via ` : ''}${opencodeLoader} -> ${resolved}`);
+    } else {
+      add('plugin:opencode', 'warn', `${opencodeLoader} has no resolved opencode/autonomous-work.mjs target`);
+    }
+  } else {
+    for (const name of ['opencode.json', 'opencode.jsonc']) {
+      const cfgFile = path.join(opencodeHome, name);
+      if (!existsSync(cfgFile)) continue;
+      const text = readFileSync(cfgFile, 'utf8');
+      const match = /file:\/\/([^\s"',]+\/opencode\/autonomous-work\.mjs)/.exec(text);
+      if (!match) continue;
+      let targetPath;
+      try {
+        targetPath = fileURLToPath(`file://${match[1]}`);
+      } catch {
+        targetPath = match[1];
+      }
+      if (!existsSync(targetPath)) {
+        add('plugin:opencode', 'fail', `stale: ${cfgFile} points at missing ${targetPath}`);
+      } else {
+        opencodeVersion = readPluginVersion(path.dirname(path.dirname(targetPath)));
+        add('plugin:opencode', 'ok', `${opencodeVersion ? `${opencodeVersion} at ` : ''}${targetPath}`);
+      }
+      break;
+    }
+  }
+
+  const installedVersions = [
+    ['codex', codexLatest],
+    ['claude', newest(claudeVersions)],
+    ['antigravity', agyVersion],
+    ['opencode', opencodeVersion],
+  ].filter(([, version]) => Boolean(version));
+  if (new Set(installedVersions.map(([, version]) => version)).size > 1) {
+    add('plugin:versions', 'warn', installedVersions.map(([name, version]) => `${name} has ${version}`).join(', '));
   }
 
   let repository = null;
