@@ -834,13 +834,14 @@ test('a with-without ablation reports the skill lift and its own experiment key'
     { name: 'triage--b', aggregates: { score: 1 }, arms: { with: [{ graders: [fired, { name: 'criteria', passed: true }] }], without: [{ graders: [{ name: 'skill-fired', passed: false }, { name: 'criteria', passed: true }] }] } },
   ] };
   assert.equal(withoutScore(results.cases[1]), 1);
-  assert.equal(withoutScore({ aggregates: { score: 0, scoreWithout: 0.25 }, arms: { without: [{ graders: [{ name: 'criteria', passed: true }] }] } }), 0.25, 'the runner\'s own without-arm score wins');
+  assert.equal(withoutScore({ aggregates: { score: 0, scoreWithout: 0.25 }, arms: { without: [{ graders: [{ name: 'skill-fired', passed: false }, { name: 'criteria', passed: true }] }] } }), 1, 'claude\'s scoreWithout counts skill-fired, so the judged graders score the arm');
   const [row] = summarize(results, manifest);
   assert.equal(row.withoutScore, 0.5);
   assert.equal(row.lift, 0.5);
   assert.match(renderTable([row]), /without\s+lift/);
   const record = caseRecord(results.cases[0], { skill: 'triage', slug: 'a', key: 'k', manualOnly: false }, '2026-11-14T00:00:00Z');
   assert.equal(record.withoutScore, 0);
+  assert.equal(record.withScore, 1);
   // An errored without-skill run leaves the case unrecorded so it runs again.
   assert.equal(caseRecord({ ...results.cases[1], aggregates: { score: 1 }, arms: { ...results.cases[1].arms, without: [{ error: 'boom', graders: [] }] } }, { skill: 'triage', slug: 'b', key: 'k', manualOnly: false }, '2026-11-14T00:00:00Z'), null);
   assert.equal(ablationOf(['--model', 'm', '--ablation', 'with-without']), 'with-without');
@@ -849,4 +850,30 @@ test('a with-without ablation reports the skill lift and its own experiment key'
   const base = { skill: [], spec: {}, fixtures: [], model: 'm', toolsVersion: '1' };
   assert.equal(experimentKey({ ...base, ablation: 'none' }), experimentKey(base), 'existing keys stay valid');
   assert.notEqual(experimentKey({ ...base, ablation: 'with-without' }), experimentKey(base), 'a with-only result cannot satisfy a lift request');
+});
+
+test('lift compares judged graders only, so a skill that fires without improving the answer has no lift', () => {
+  // The labels regression: the skill fired in every with-skill run, the criteria failed in every run of both arms.
+  const fired = { name: 'skill-fired', passed: true }, failed = { name: 'criteria', passed: false };
+  const manifest = { skills: [{ name: 'triage', cases: 1 }], cases: [{ name: 'triage--a', skill: 'triage' }] };
+  const engine = { name: 'triage--a', aggregates: { score: 0.5, withoutScore: 0 }, arms: { with: Array(3).fill({ graders: [fired, failed] }), without: Array(3).fill({ graders: [failed] }) } };
+  // claude plugin eval shape: the without arm reports skill-fired failing, and its scoreWithout counts it.
+  const claude = { name: 'triage--a', aggregates: { score: 0.5, scoreWithout: 0 }, arms: { with: Array(3).fill({ graders: [fired, failed] }), without: Array(3).fill({ graders: [{ name: 'skill-fired', passed: false }, failed] }) } };
+  for (const c of [engine, claude]) {
+    const [row] = summarize({ cases: [c] }, manifest);
+    assert.deepEqual([row.score, row.withScore, row.withoutScore, row.lift], [0.5, 0, 0, 0]);
+    const record = caseRecord(c, { skill: 'triage', slug: 'a', key: 'k', manualOnly: false }, '2026-11-14T00:00:00Z');
+    assert.deepEqual([record.score, record.withScore, record.withoutScore], [0.5, 0, 0]);
+    // The judged pair survives carry-forward.
+    const carried = carryForward([{ skill: 'triage', slug: 'a', key: 'k', manualOnly: false }], [[record]], new Date('2026-11-15T00:00:00Z'), 28).get('k');
+    const [again] = summarize({ cases: [carriedResult(carried)] }, manifest);
+    assert.deepEqual([again.withScore, again.withoutScore, again.lift], [0, 0, 0]);
+  }
+  // A carried record from before the judged pair has no lift rather than a mismatched one.
+  const legacy = carryForward([{ skill: 'triage', slug: 'a', key: 'k', manualOnly: false }], [[{ skill: 'triage', case: 'a', key: 'k', score: 0.5, fired: true, graders: [{ name: 'criteria', passed: false }], runAt: '2026-11-14T00:00:00Z', withoutScore: 0 }]], new Date('2026-11-15T00:00:00Z'), 28).get('k');
+  assert.ok(!('lift' in summarize({ cases: [carriedResult(legacy)] }, manifest)[0]));
+  // A trigger-only case has nothing judged, so it records without a lift instead of rerunning forever.
+  const triggerOnly = { name: 'triage--a', aggregates: { score: 1 }, arms: { with: [{ graders: [fired] }], without: [{ graders: [] }] } };
+  const rec = caseRecord(triggerOnly, { skill: 'triage', slug: 'a', key: 'k', manualOnly: false }, '2026-11-14T00:00:00Z');
+  assert.ok(rec && !('withoutScore' in rec));
 });
