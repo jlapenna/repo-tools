@@ -171,9 +171,10 @@ test("a judge failure preserves the completed case evidence and stays unscored",
 });
 test("budget/model options reject silent widening and preserve both case and judge identity", () => {
   assert.equal(parseArgs(["--runner", "codex"]).runner, "codex");
+  assert.equal(parseOptions(["--ablation", "with-without"]).ablation, "with-without");
   assert.throws(
-    () => parseOptions(["--ablation", "with-without"]),
-    /none only/,
+    () => parseOptions(["--ablation", "without-only"]),
+    /none or with-without/,
   );
   assert.throws(() => parseOptions(["--model", "unknown"]), /cost estimate/);
   assert.throws(() => parseOptions(["-j", "8"]), /concurrency/);
@@ -570,4 +571,41 @@ test("a provider limit stops paid cases with the provider-limit partial reason",
   assert.equal(result.partial, true);
   assert.equal(result.partialReason, "provider-limit");
   assert.equal(calls, 1);
+});
+
+test("a with-without ablation repeats the case without any skill and judges it by the same rubric", async (t) => {
+  const f = fixture(t);
+  const seen = [];
+  const client = {
+    async initialize() {},
+    async run(input) {
+      if (input.outputSchema) {
+        const { response } = JSON.parse(input.prompt);
+        const passed = /journalctl/.test(response);
+        return { answer: JSON.stringify({ passed, explanation: passed ? "names journalctl" : "no journalctl" }), usage };
+      }
+      seen.push({ catalog: input.tools.catalog, tools: input.tools.definitions.map((d) => d.name), instructions: input.instructions });
+      if (input.tools.definitions.some((d) => d.name === "Skill")) {
+        const output = input.tools.call("Skill", { skill: "triage" });
+        return { answer: "Inspect probe.service using journalctl -u probe.service", trace: [{ tool: "Skill", arguments: { skill: "triage" }, output }], usage };
+      }
+      // The skill's files are not readable from the bare arm; fixtures still are.
+      assert.throws(() => input.tools.call("Read", { path: "skills/triage/SKILL.md" }), /not supplied|outside/);
+      assert.equal(input.tools.call("Read", { path: "resources/probe.log" }), "probe failed");
+      return { answer: "Restart the probe.", trace: [], usage };
+    },
+    async close() {},
+  };
+  assert.equal(await evaluate(f.plugin, f.file, parseOptions(["--ablation", "with-without"]), { client }), 0);
+  assert.equal(seen.length, 2);
+  assert.match(seen[0].catalog, /triage/);
+  assert.equal(seen[1].catalog, "");
+  assert.deepEqual(seen[1].tools, ["Read", "Glob", "Grep"]);
+  assert.match(seen[1].instructions, /No skills are available/);
+  const result = JSON.parse(readFileSync(f.file));
+  const c = result.cases[0];
+  assert.equal(c.aggregates.score, 1);
+  assert.equal(c.aggregates.withoutScore, 0);
+  assert.deepEqual(c.arms.without[0].graders.map((g) => g.name), ["criteria"]);
+  assert.ok(existsSync(path.join(f.dir, "triage--one-without-1.trace.jsonl")));
 });
