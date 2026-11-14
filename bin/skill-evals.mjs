@@ -326,17 +326,27 @@ export function markProviderLimit(results) {
 const runErrored = (run) => Boolean((run.error && !/maximum number of turns/i.test(run.error)) || run.aborted);
 // A run passes when it did not error and every grader in it passed, the skill firing included.
 const runPassed = (run) => !runErrored(run) && (run.graders ?? []).length > 0 && run.graders.every((g) => g.passed !== false);
-// The without-skill arm's score: the share of judged graders passed, averaged over its runs. The
-// skill-fired grader means nothing without the skill, so a runner that still reports it is ignored.
+// Lift compares judged graders only. The skill-fired grader passes only when the skill is loaded, so
+// counting it on one arm alone measures the loading, not the answer. A run's judged share is the share
+// of its non-skill-fired graders that passed; an arm's score averages that share over its runs. It is
+// null when the arm is missing or a run errored, and undefined when the case has no judged grader.
+const judged = (run) => (run.graders ?? []).filter((g) => g.name !== 'skill-fired');
+function judgedShare(runs) {
+  if (!runs?.length || runs.some(runErrored)) return null;
+  if (runs.every((run) => !judged(run).length)) return undefined;
+  const shares = runs.map((run) => { const js = judged(run); return js.length ? js.filter((g) => g.passed !== false).length / js.length : null; });
+  return shares.some((x) => x === null) ? null : shares.reduce((a, b) => a + b, 0) / shares.length;
+}
+// The with-skill arm's judged score; a carried record keeps its own.
+export function withScore(result) {
+  if (typeof result.withScore === 'number') return result.withScore;
+  return judgedShare(result.arms?.with);
+}
+// The without-skill arm's judged score; a carried record keeps its own. Runner aggregates are not used:
+// claude plugin eval's scoreWithout counts skill-fired, so only the per-run graders score both arms alike.
 export function withoutScore(result) {
   if (typeof result.withoutScore === 'number') return result.withoutScore;
-  if (typeof result.aggregates?.withoutScore === 'number') return result.aggregates.withoutScore;
-  // claude plugin eval scores its own without arm; using it keeps both arms under one scorer.
-  if (typeof result.aggregates?.scoreWithout === 'number') return result.aggregates.scoreWithout;
-  const runs = result.arms?.without ?? [];
-  if (!runs.length || runs.some(runErrored)) return null;
-  const shares = runs.map((run) => { const judged = (run.graders ?? []).filter((g) => g.name !== 'skill-fired'); return judged.length ? judged.filter((g) => g.passed !== false).length / judged.length : null; });
-  return shares.some((x) => x === null) ? null : shares.reduce((a, b) => a + b, 0) / shares.length;
+  return judgedShare(result.arms?.without);
 }
 // Runs of the case that passed outright; a carried record keeps its count.
 const passesOf = (result) => (Number.isInteger(result.passes) ? result.passes : (result.arms?.with ?? []).filter(runPassed).length);
@@ -350,12 +360,13 @@ export function caseRecord(result, planned, runAt) {
   // An incomplete without-skill arm leaves the case to run again rather than recording a lift it did not measure.
   const bare = result.arms?.without ? withoutScore(result) : undefined;
   if (bare === null) return null;
+  const paired = typeof bare === 'number' ? withScore(result) : undefined;
   const graders = new Map();
   for (const run of runs) for (const g of run.graders ?? []) if (g.name !== 'skill-fired') graders.set(g.name, (graders.get(g.name) ?? true) && g.passed !== false);
   const fired = planned.manualOnly ? null : runs.every((run) => (run.graders ?? []).some((g) => g.name === 'skill-fired' && g.passed === true));
   const record = { skill: planned.skill, case: planned.slug, key: planned.key, score: Number(result.aggregates.score.toFixed(2)), fired, graders: [...graders].map(([name, passed]) => ({ name, passed })), runAt, carried: false };
   if (runs.length > 1) { record.runs = runs.length; record.passes = passesOf(result); }
-  if (typeof bare === 'number') record.withoutScore = Number(bare.toFixed(2));
+  if (typeof bare === 'number' && typeof paired === 'number') { record.withScore = Number(paired.toFixed(2)); record.withoutScore = Number(bare.toFixed(2)); }
   return record;
 }
 
@@ -376,7 +387,7 @@ export function carryForward(planned, sources, now, maxAgeDays) {
     if (!record) continue;
     const copy = { skill: p.skill, case: p.slug, key: p.key, score: record.score, fired: p.manualOnly ? null : record.fired === true, graders: record.graders.filter((g) => g?.name !== 'skill-fired').map((g) => ({ name: String(g.name), passed: g.passed !== false })), runAt: record.runAt, carried: true };
     if (Number.isInteger(record.runs) && record.runs > 1) { copy.runs = record.runs; if (Number.isInteger(record.passes) && record.passes >= 0 && record.passes <= record.runs) copy.passes = record.passes; }
-    if (typeof record.withoutScore === 'number') copy.withoutScore = record.withoutScore;
+    if (typeof record.withScore === 'number' && typeof record.withoutScore === 'number') { copy.withScore = record.withScore; copy.withoutScore = record.withoutScore; }
     carried.set(p.key, copy);
   }
   return carried;
@@ -385,7 +396,7 @@ export function carryForward(planned, sources, now, maxAgeDays) {
 // A carried record rendered as a runner case so per-skill rows and the report treat it like a fresh one.
 export function carriedResult(record) {
   const graders = [...(record.fired === null ? [] : [{ name: 'skill-fired', passed: record.fired }]), ...record.graders];
-  return { name: `${record.skill}--${record.case}`, carried: true, runAt: record.runAt, aggregates: { score: record.score, passRate: graders.every((g) => g.passed) ? 1 : 0 }, arms: { with: Array.from({ length: record.runs ?? 1 }, () => ({ graders })) }, ...(Number.isInteger(record.passes) ? { passes: record.passes } : {}), ...(typeof record.withoutScore === 'number' ? { withoutScore: record.withoutScore } : {}) };
+  return { name: `${record.skill}--${record.case}`, carried: true, runAt: record.runAt, aggregates: { score: record.score, passRate: graders.every((g) => g.passed) ? 1 : 0 }, arms: { with: Array.from({ length: record.runs ?? 1 }, () => ({ graders })) }, ...(Number.isInteger(record.passes) ? { passes: record.passes } : {}), ...(typeof record.withScore === 'number' && typeof record.withoutScore === 'number' ? { withScore: record.withScore, withoutScore: record.withoutScore } : {}) };
 }
 
 export function defaultCacheDir(env = process.env) {
@@ -421,8 +432,8 @@ export function summarize(results, manifest) {
       if (passes > 0) row.anyPass += 1;
       if (passes === runs) row.allPass += 1;
     }
-    const bare = withoutScore(c);
-    if (typeof bare === 'number' && typeof c.aggregates?.score === 'number') { row.paired.push(c.aggregates.score); row.bare.push(bare); }
+    const bare = withoutScore(c), paired = typeof bare === 'number' ? withScore(c) : undefined;
+    if (typeof bare === 'number' && typeof paired === 'number') { row.paired.push(paired); row.bare.push(bare); }
     for (const run of c.arms?.with ?? []) {
       row.runs += 1;
       if (runErrored(run)) row.errors += 1;
@@ -441,8 +452,8 @@ export function summarize(results, manifest) {
     // pass@1 is the share of runs that passed; with k runs per case, pass@k is the share of cases
     // with at least one passing run and pass^k the share whose every run passed.
     ...(k > 1 ? { k, passes, passAt1: sampled && !row.errors ? round(passes / row.runs) : null, passAtK: sampled && !row.errors ? round(anyPass / sampled) : null, passHatK: sampled && !row.errors ? round(allPass / sampled) : null } : {}),
-    // Lift compares the same cases with and without the skill under the same rubric.
-    ...(bare.length ? { withoutScore: row.errors ? null : round(mean(bare)), lift: row.errors ? null : round(mean(paired) - mean(bare)) } : {}),
+    // Lift compares the same cases with and without the skill on their judged graders alone.
+    ...(bare.length ? { withScore: row.errors ? null : round(mean(paired)), withoutScore: row.errors ? null : round(mean(bare)), lift: row.errors ? null : round(mean(paired) - mean(bare)) } : {}),
   }));
 }
 
@@ -454,8 +465,8 @@ const num = (x) => (typeof x === 'number' ? String(x) : '-');
 const signed = (x) => (typeof x === 'number' ? `${x > 0 ? '+' : ''}${x}` : '-');
 export function renderTable(rows) {
   const k = showK(rows), lift = showLift(rows);
-  const extra = (r) => `${k ? `${pad(num(r.passAt1), 7)} ${pad(num(r.passAtK), 7)} ${pad(num(r.passHatK), 7)} ` : ''}${lift ? `${pad(num(r.withoutScore), 8)} ${pad(signed(r.lift), 6)} ` : ''}`;
-  const lines = [`${pad('skill', 32)} ${pad('cases', 6)} ${pad('score', 6)} ${pad('fired', 8)} ${k ? `${pad('pass@1', 7)} ${pad('pass@k', 7)} ${pad('pass^k', 7)} ` : ''}${lift ? `${pad('without', 8)} ${pad('lift', 6)} ` : ''}failed graders`];
+  const extra = (r) => `${k ? `${pad(num(r.passAt1), 7)} ${pad(num(r.passAtK), 7)} ${pad(num(r.passHatK), 7)} ` : ''}${lift ? `${pad(num(r.withScore), 8)} ${pad(num(r.withoutScore), 8)} ${pad(signed(r.lift), 6)} ` : ''}`;
+  const lines = [`${pad('skill', 32)} ${pad('cases', 6)} ${pad('score', 6)} ${pad('fired', 8)} ${k ? `${pad('pass@1', 7)} ${pad('pass@k', 7)} ${pad('pass^k', 7)} ` : ''}${lift ? `${pad('with', 8)} ${pad('without', 8)} ${pad('lift', 6)} ` : ''}failed graders`];
   for (const r of rows) {
     const score = r.cases === 0 ? 'no evals' : r.score ?? '-';
     const fired = r.manualOnly ? 'manual' : r.runs ? `${r.fired}/${r.runs}` : '-';
@@ -551,12 +562,12 @@ export function renderReport({ roots, revision, runnerVersion, date, exit, resul
     lines.push(`- Duration: ${results.durationSeconds ?? '?'}s`, '');
   }
   const k = showK(rows), lift = showLift(rows);
-  const head = ['Skill', 'Cases', 'Carried', 'Score', 'Fired', ...(k ? ['pass@1', `pass@${Math.max(...rows.map((r) => r.k ?? 0))}`, `pass^${Math.max(...rows.map((r) => r.k ?? 0))}`] : []), ...(lift ? ['Without skill', 'Lift'] : []), 'Failed graders', 'Run errors'];
+  const head = ['Skill', 'Cases', 'Carried', 'Score', 'Fired', ...(k ? ['pass@1', `pass@${Math.max(...rows.map((r) => r.k ?? 0))}`, `pass^${Math.max(...rows.map((r) => r.k ?? 0))}`] : []), ...(lift ? ['With skill', 'Without skill', 'Lift'] : []), 'Failed graders', 'Run errors'];
   lines.push('## Results', '', `| ${head.join(' | ')} |`, `|${head.map(() => ' --- |').join('')}`);
-  for (const r of rows) lines.push(`| ${cell(r.skill)} | ${r.cases} | ${r.carried ?? 0} | ${fmtScore(r)} | ${fmtFired(r)} | ${k ? `${num(r.passAt1)} | ${num(r.passAtK)} | ${num(r.passHatK)} | ` : ''}${lift ? `${num(r.withoutScore)} | ${signed(r.lift)} | ` : ''}${cell(r.failed.join(', '))} | ${r.errors} |`);
+  for (const r of rows) lines.push(`| ${cell(r.skill)} | ${r.cases} | ${r.carried ?? 0} | ${fmtScore(r)} | ${fmtFired(r)} | ${k ? `${num(r.passAt1)} | ${num(r.passAtK)} | ${num(r.passHatK)} | ` : ''}${lift ? `${num(r.withScore)} | ${num(r.withoutScore)} | ${signed(r.lift)} | ` : ''}${cell(r.failed.join(', '))} | ${r.errors} |`);
   lines.push('');
   if (k) lines.push(`pass@1 is the share of runs that passed outright; pass@k counts a case passed when any of its runs passed, and pass^k only when every run passed.`, '');
-  if (lift) lines.push('Lift is the score with the skill minus the score of the same cases answered without it, judged by the same rubric; a lift near zero means the skill is not changing the answer.', '');
+  if (lift) lines.push('With skill and Without skill score the same cases on their judged graders only, leaving out whether the skill fired; Lift is their difference, so a lift near zero means the skill is not changing the answer.', '');
   const carried = records.filter((r) => r.carried);
   if (carried.length) {
     lines.push('## Carried results', '', 'Same experiment key as an earlier run, so not re-run; evidence is in that run\'s report.', '');

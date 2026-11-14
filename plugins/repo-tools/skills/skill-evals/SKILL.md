@@ -126,8 +126,10 @@ Cost and scope rules:
   is whether the skill helps at all, since it doubles the runs. Every
   built-in and native runner supports it: each case is answered again with no
   skill catalog, files or `Skill` tool and judged by the same rubric. The
-  report adds `Without skill` and `Lift` columns; a lift near zero means the
-  skill is not changing the answer. Adapter runners do not support it.
+  report adds `With skill`, `Without skill` and `Lift` columns, which score
+  both arms on the judged graders alone; whether the skill fired is left out,
+  since only one arm can load it. A lift near zero means the skill is not
+  changing the answer. Adapter runners do not support it.
 - Runs are sandboxed with a temporary home and no repository, MCP servers,
   hooks or `CLAUDE.md`. A prompt that needs live hosts, credentials or a
   checkout is testing the sandbox, not the skill: write prompts that ask for
