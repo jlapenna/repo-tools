@@ -31,7 +31,7 @@ export function parseOptions(args, env = process.env) {
     else if (a === '--threshold') out.threshold = Number(value());
     else if (a === '--case') out.case = value();
     else if (a === '-j' || a === '--concurrency') out.concurrency = Number(value());
-    else if (a === '--ablation') { if (value() !== 'none') throw Error('Native ACP evals support --ablation none only'); }
+    else if (a === '--ablation') { out.ablation = value(); if (!['none', 'with-without'].includes(out.ablation)) throw Error('Native ACP evals support --ablation none or with-without'); }
     else if (a !== '--keep-temp') throw Error(`Unsupported native eval option: ${a}`);
   }
   // Unattended callers (LCARS recipe profiles) select the model by environment.

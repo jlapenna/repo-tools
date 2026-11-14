@@ -123,13 +123,21 @@ Cost and scope rules:
   account. Start with `--trigger-only` (description check, three turns, no
   judge) and `--runs 1`; pass `-- --max-cost-usd <n>` for any run wider than
   a handful of cases. Add `-- --ablation with-without` only when the question
-  is whether the skill helps at all, since it doubles the runs.
+  is whether the skill helps at all, since it doubles the runs. Every
+  built-in and native runner supports it: each case is answered again with no
+  skill catalog, files or `Skill` tool and judged by the same rubric. The
+  report adds `Without skill` and `Lift` columns; a lift near zero means the
+  skill is not changing the answer. Adapter runners do not support it.
 - Runs are sandboxed with a temporary home and no repository, MCP servers,
   hooks or `CLAUDE.md`. A prompt that needs live hosts, credentials or a
   checkout is testing the sandbox, not the skill: write prompts that ask for
   the plan, the exact commands or a decision, and assert on those.
 - Single runs are noisy. Confirm a regression with `--runs 3` before editing
   a skill because of it, and compare before and after on the same cases.
+  With more than one run per case the report adds `pass@1` (share of runs
+  that passed outright), `pass@k` (cases with any passing run) and `pass^k`
+  (cases whose every run passed). A gap between pass@k and pass^k is a flaky
+  skill or rubric, not a consistent failure.
 - On Linux the runner needs `bubblewrap` and `socat`; it refuses to run
   without a sandbox backend. Nothing in a case may write outside its
   workspace.

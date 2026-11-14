@@ -11,7 +11,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { findRuns, readRun } from './eval-history.mjs';
-import { buildCase, markProviderLimit, canonicalJson, compareBaseline, defaultCacheDir, discoverSkills, findEvals, fixturePath, gatedTool, loadBaseline, loadEntries, main, modelOf, parseArgs, plan, planCases, renderTable, summarize, writeReport, writeWrapper } from './skill-evals.mjs';
+import { ablationOf, carriedResult, carryForward, caseRecord, experimentKey, withoutScore, buildCase, markProviderLimit, canonicalJson, compareBaseline, defaultCacheDir, discoverSkills, findEvals, fixturePath, gatedTool, loadBaseline, loadEntries, main, modelOf, parseArgs, plan, planCases, renderTable, summarize, writeReport, writeWrapper } from './skill-evals.mjs';
 
 const script = fileURLToPath(new URL('./skill-evals.mjs', import.meta.url));
 
@@ -162,7 +162,7 @@ test('summarizes runner results per skill', () => {
   assert.equal(rows[0].errors, 1);
   assert.deepEqual(rows[0].failed, ['oncall--memory-alert/skill-fired']);
   assert.equal(rows[1].cases, 0);
-  assert.match(renderTable(rows), /^oncall\s+2\s+-\s+2\/4\s+oncall--memory-alert\/skill-fired \(1 run error\)$/m);
+  assert.match(renderTable(rows), /^oncall\s+2\s+-\s+2\/4\s+-\s+-\s+-\s+oncall--memory-alert\/skill-fired \(1 run error\)$/m);
   assert.match(renderTable(rows), /^plain\s+0\s+no evals/m);
 });
 
@@ -360,10 +360,10 @@ test('writes a Markdown job report and result.json with the baseline comparison'
   assert.match(report, /- Cases passed: 1\/4/);
   assert.match(report, /list-price cost estimate \(not billed spend\): \$0\.50/);
   assert.doesNotMatch(report, /spent/i);
-  assert.match(report, /\| Skill \| Cases \| Carried \| Score \| Fired \| Failed graders \| Run errors \|/);
-  assert.match(report, /\| oncall \| 2 \| 0 \| - \| 2\/3 \| oncall--probe\/criteria \| 1 \|/);
-  assert.match(report, /\| plain \| 0 \| 0 \| no evals \| - \|  \| 0 \|/);
-  assert.match(report, /\| handoff \| 2 \| 0 \| 0\.75 \| manual \| handoff--eval-1\/criteria \| 0 \|/);
+  assert.match(report, /\| Skill \| Cases \| Carried \| Score \| Fired \| pass@1 \| pass@2 \| pass\^2 \| Failed graders \| Run errors \|/);
+  assert.match(report, /\| oncall \| 2 \| 0 \| - \| 2\/3 \| - \| - \| - \| oncall--probe\/criteria \| 1 \|/);
+  assert.match(report, /\| plain \| 0 \| 0 \| no evals \| - \| - \| - \| - \|  \| 0 \|/);
+  assert.match(report, /\| handoff \| 2 \| 0 \| 0\.75 \| manual \| - \| - \| - \| handoff--eval-1\/criteria \| 0 \|/);
   assert.match(report, /- Cases: 4 run \/ 0 carried \/ 4 total/);
   assert.match(report, /## Skills without evals\n\n- land-pr\n- plain\n/);
   assert.match(report, /## Runs that errored\n\n- oncall--probe \(run 2\): boom\n/);
@@ -796,4 +796,57 @@ test('a stock-runner quota stop becomes the provider-limit partial reason', () =
   assert.equal(markProviderLimit(run('Eval tool-call limit exceeded')).partialReason, 'runner error');
   const complete = { partial: false, cases: [{ name: 'a', arms: { with: [{ error: 'usage limit' }] } }] };
   assert.equal(markProviderLimit(complete), complete);
+});
+
+test('repeat runs report pass@1, pass@k and pass^k per skill, and records keep the pass count', () => {
+  const ok = { graders: [{ name: 'skill-fired', passed: true }, { name: 'criteria', passed: true }] };
+  const bad = { graders: [{ name: 'skill-fired', passed: true }, { name: 'criteria', passed: false }] };
+  const manifest = { skills: [{ name: 'triage', cases: 2 }], cases: [{ name: 'triage--a', skill: 'triage' }, { name: 'triage--b', skill: 'triage' }] };
+  const results = { cases: [
+    { name: 'triage--a', aggregates: { score: 1 / 3 + 0.5 }, arms: { with: [ok, bad, bad] } },
+    { name: 'triage--b', aggregates: { score: 1 }, arms: { with: [ok, ok, ok] } },
+  ] };
+  const [row] = summarize(results, manifest);
+  assert.equal(row.k, 3);
+  assert.equal(row.passes, 4);
+  assert.equal(row.passAt1, 0.67); // 4 of 6 runs
+  assert.equal(row.passAtK, 1); // both cases passed at least once
+  assert.equal(row.passHatK, 0.5); // only triage--b passed every run
+  assert.ok(!('lift' in row), 'lift is absent when no without-skill arm ran');
+  assert.match(renderTable([row]), /^triage\s+2\s+\S+\s+6\/6\s+0\.67\s+1\s+0\.5\s/m);
+  const record = caseRecord(results.cases[0], { skill: 'triage', slug: 'a', key: 'k1', manualOnly: false }, '2026-11-14T00:00:00Z');
+  assert.equal(record.runs, 3);
+  assert.equal(record.passes, 1);
+  // A carried record keeps its pass count, so pass@k survives carry-forward.
+  const carried = carryForward([{ skill: 'triage', slug: 'a', key: 'k1', manualOnly: false }], [[record]], new Date('2026-11-15T00:00:00Z'), 28).get('k1');
+  assert.equal(carried.passes, 1);
+  const [again] = summarize({ cases: [carriedResult(carried)] }, { skills: [{ name: 'triage' }], cases: [{ name: 'triage--a', skill: 'triage' }] });
+  assert.deepEqual([again.passes, again.passAtK, again.passHatK], [1, 1, 0]);
+});
+
+test('a with-without ablation reports the skill lift and its own experiment key', () => {
+  const fired = { name: 'skill-fired', passed: true };
+  const manifest = { skills: [{ name: 'triage', cases: 2 }], cases: [{ name: 'triage--a', skill: 'triage' }, { name: 'triage--b', skill: 'triage' }] };
+  const results = { cases: [
+    // Engine shape: the without arm has no skill-fired grader and a computed withoutScore.
+    { name: 'triage--a', aggregates: { score: 1, withoutScore: 0 }, arms: { with: [{ graders: [fired, { name: 'criteria', passed: true }] }], without: [{ graders: [{ name: 'criteria', passed: false }] }] } },
+    // claude plugin eval shape: the without arm still reports skill-fired, which is ignored.
+    { name: 'triage--b', aggregates: { score: 1 }, arms: { with: [{ graders: [fired, { name: 'criteria', passed: true }] }], without: [{ graders: [{ name: 'skill-fired', passed: false }, { name: 'criteria', passed: true }] }] } },
+  ] };
+  assert.equal(withoutScore(results.cases[1]), 1);
+  assert.equal(withoutScore({ aggregates: { score: 0, scoreWithout: 0.25 }, arms: { without: [{ graders: [{ name: 'criteria', passed: true }] }] } }), 0.25, 'the runner\'s own without-arm score wins');
+  const [row] = summarize(results, manifest);
+  assert.equal(row.withoutScore, 0.5);
+  assert.equal(row.lift, 0.5);
+  assert.match(renderTable([row]), /without\s+lift/);
+  const record = caseRecord(results.cases[0], { skill: 'triage', slug: 'a', key: 'k', manualOnly: false }, '2026-11-14T00:00:00Z');
+  assert.equal(record.withoutScore, 0);
+  // An errored without-skill run leaves the case unrecorded so it runs again.
+  assert.equal(caseRecord({ ...results.cases[1], aggregates: { score: 1 }, arms: { ...results.cases[1].arms, without: [{ error: 'boom', graders: [] }] } }, { skill: 'triage', slug: 'b', key: 'k', manualOnly: false }, '2026-11-14T00:00:00Z'), null);
+  assert.equal(ablationOf(['--model', 'm', '--ablation', 'with-without']), 'with-without');
+  assert.equal(ablationOf(['--ablation=none']), 'none');
+  assert.equal(ablationOf([]), 'none');
+  const base = { skill: [], spec: {}, fixtures: [], model: 'm', toolsVersion: '1' };
+  assert.equal(experimentKey({ ...base, ablation: 'none' }), experimentKey(base), 'existing keys stay valid');
+  assert.notEqual(experimentKey({ ...base, ablation: 'with-without' }), experimentKey(base), 'a with-only result cannot satisfy a lift request');
 });

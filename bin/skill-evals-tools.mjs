@@ -62,13 +62,18 @@ export function readTools(
   plugin,
   caseDir,
   allowed = ["Skill", "Read", "Glob", "Grep"],
+  { skills: withSkills = true } = {},
 ) {
   if (allowed.some((t) => !TOOLS.some((x) => x.name === t)))
     throw Error(
       "Skill evals support read-only Skill, Read, Glob and Grep tools only",
     );
+  // The without-skill arm of an ablation sees only the case fixtures: no skill
+  // catalog, files or Skill tool, so the same prompt measures the bare model.
+  if (!withSkills && allowed.includes("Skill"))
+    throw Error("The without-skill arm cannot offer the Skill tool");
   const available = [
-    ...filesBelow(path.join(plugin, "skills")),
+    ...(withSkills ? filesBelow(path.join(plugin, "skills")) : []),
     ...filesBelow(path.join(caseDir, "resources")),
   ];
   const permitted = new Set(available.map((p) => realpathSync(p)));

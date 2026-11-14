@@ -79,8 +79,9 @@ export function parseOptions(args) {
     else if (a === "--threshold") out.threshold = Number(v());
     else if (a === "--case") out.case = v();
     else if (a === "--ablation") {
-      if (v() !== "none")
-        throw Error("Codex evals currently support --ablation none only");
+      out.ablation = v();
+      if (!["none", "with-without"].includes(out.ablation))
+        throw Error("Codex evals support --ablation none or with-without");
     } else if (a === "--keep-temp") {
       /* all traces are retained by the shared history */
     } else throw Error(`Unsupported Codex eval option: ${a}`);

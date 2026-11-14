@@ -32,6 +32,10 @@
 // everything. --cache keeps one JSON record per key on the workstation.
 // Everything after `--` is passed to `claude plugin eval` (for example
 // `--ablation with-without`, `--max-cost-usd 5`, `--case 'oncall--*'`).
+// `--ablation with-without` (every built-in and native runner) answers each
+// case again without the skill under the same rubric and reports the lift;
+// it is part of the experiment key. With --runs above 1 the per-skill rows
+// add pass@1, pass@k and pass^k.
 // Exit status is the runner's (0 every case at threshold, 1 a case below
 // threshold or a load failure, 2 partial), or 1 for a usage error.
 // The wrapper is passed with --trust-plugin because it holds only copies of
@@ -266,8 +270,17 @@ export function fixtureFiles(evalsFile, files) {
   });
 }
 
-export function experimentKey({ skill, spec, fixtures, claudeVersion, model, toolsVersion, runner, judgeModel, adapter, native }) {
-  return sha256(canonicalJson({ skill, spec, fixtures, claudeVersion: claudeVersion ?? null, model, toolsVersion, ...(runner ? { runner, judgeModel } : {}), ...(adapter ? { adapter } : {}), ...(native ? { native } : {}) })).slice(0, 32);
+export function experimentKey({ skill, spec, fixtures, claudeVersion, model, toolsVersion, runner, judgeModel, adapter, native, ablation }) {
+  return sha256(canonicalJson({ skill, spec, fixtures, claudeVersion: claudeVersion ?? null, model, toolsVersion, ...(runner ? { runner, judgeModel } : {}), ...(adapter ? { adapter } : {}), ...(native ? { native } : {}), ...(ablation && ablation !== 'none' ? { ablation } : {}) })).slice(0, 32);
+}
+
+// The runner option that adds a without-skill arm; a with-only result cannot stand in for one.
+export function ablationOf(passthrough) {
+  for (let i = 0; i < passthrough.length; i += 1) {
+    if (passthrough[i] === '--ablation' && i + 1 < passthrough.length) return passthrough[i + 1];
+    if (passthrough[i].startsWith('--ablation=')) return passthrough[i].slice('--ablation='.length);
+  }
+  return 'none';
 }
 
 export function modelOf(passthrough) {
@@ -307,10 +320,26 @@ export function planCases(skills, options, context) {
 const PROVIDER_LIMIT_ERROR = /\b(?:usage limit|rate limit|quota|spend limit)\b|hit your (?:weekly |monthly |usage )?limit|credit balance is too low|RESOURCE_EXHAUSTED|ResourceExhausted|usage_limit_reached|insufficient_quota/i;
 export function markProviderLimit(results) {
   if (!results?.partial || results.partialReason === 'provider-limit') return results;
-  const limited = (results.cases ?? []).some((c) => (c.arms?.with ?? []).some((run) => typeof run.error === 'string' && PROVIDER_LIMIT_ERROR.test(run.error)));
+  const limited = (results.cases ?? []).some((c) => Object.values(c.arms ?? {}).flat().some((run) => typeof run.error === 'string' && PROVIDER_LIMIT_ERROR.test(run.error)));
   return limited ? { ...results, partialReason: 'provider-limit' } : results;
 }
 const runErrored = (run) => Boolean((run.error && !/maximum number of turns/i.test(run.error)) || run.aborted);
+// A run passes when it did not error and every grader in it passed, the skill firing included.
+const runPassed = (run) => !runErrored(run) && (run.graders ?? []).length > 0 && run.graders.every((g) => g.passed !== false);
+// The without-skill arm's score: the share of judged graders passed, averaged over its runs. The
+// skill-fired grader means nothing without the skill, so a runner that still reports it is ignored.
+export function withoutScore(result) {
+  if (typeof result.withoutScore === 'number') return result.withoutScore;
+  if (typeof result.aggregates?.withoutScore === 'number') return result.aggregates.withoutScore;
+  // claude plugin eval scores its own without arm; using it keeps both arms under one scorer.
+  if (typeof result.aggregates?.scoreWithout === 'number') return result.aggregates.scoreWithout;
+  const runs = result.arms?.without ?? [];
+  if (!runs.length || runs.some(runErrored)) return null;
+  const shares = runs.map((run) => { const judged = (run.graders ?? []).filter((g) => g.name !== 'skill-fired'); return judged.length ? judged.filter((g) => g.passed !== false).length / judged.length : null; });
+  return shares.some((x) => x === null) ? null : shares.reduce((a, b) => a + b, 0) / shares.length;
+}
+// Runs of the case that passed outright; a carried record keeps its count.
+const passesOf = (result) => (Number.isInteger(result.passes) ? result.passes : (result.arms?.with ?? []).filter(runPassed).length);
 
 // The compact per-case record kept in result.json data and the cache. It holds no evidence text, `fired`
 // stands in for the skill-fired grader, and `runs` appears only above 1, so ~200 cases stay under 48 KiB.
@@ -318,11 +347,15 @@ const runErrored = (run) => Boolean((run.error && !/maximum number of turns/i.te
 export function caseRecord(result, planned, runAt) {
   const runs = result.arms?.with ?? [];
   if (typeof result.aggregates?.score !== 'number' || !runs.length || runs.some(runErrored)) return null;
+  // An incomplete without-skill arm leaves the case to run again rather than recording a lift it did not measure.
+  const bare = result.arms?.without ? withoutScore(result) : undefined;
+  if (bare === null) return null;
   const graders = new Map();
   for (const run of runs) for (const g of run.graders ?? []) if (g.name !== 'skill-fired') graders.set(g.name, (graders.get(g.name) ?? true) && g.passed !== false);
   const fired = planned.manualOnly ? null : runs.every((run) => (run.graders ?? []).some((g) => g.name === 'skill-fired' && g.passed === true));
   const record = { skill: planned.skill, case: planned.slug, key: planned.key, score: Number(result.aggregates.score.toFixed(2)), fired, graders: [...graders].map(([name, passed]) => ({ name, passed })), runAt, carried: false };
-  if (runs.length > 1) record.runs = runs.length;
+  if (runs.length > 1) { record.runs = runs.length; record.passes = passesOf(result); }
+  if (typeof bare === 'number') record.withoutScore = Number(bare.toFixed(2));
   return record;
 }
 
@@ -342,7 +375,8 @@ export function carryForward(planned, sources, now, maxAgeDays) {
     const record = newest.get(p.key);
     if (!record) continue;
     const copy = { skill: p.skill, case: p.slug, key: p.key, score: record.score, fired: p.manualOnly ? null : record.fired === true, graders: record.graders.filter((g) => g?.name !== 'skill-fired').map((g) => ({ name: String(g.name), passed: g.passed !== false })), runAt: record.runAt, carried: true };
-    if (Number.isInteger(record.runs) && record.runs > 1) copy.runs = record.runs;
+    if (Number.isInteger(record.runs) && record.runs > 1) { copy.runs = record.runs; if (Number.isInteger(record.passes) && record.passes >= 0 && record.passes <= record.runs) copy.passes = record.passes; }
+    if (typeof record.withoutScore === 'number') copy.withoutScore = record.withoutScore;
     carried.set(p.key, copy);
   }
   return carried;
@@ -351,7 +385,7 @@ export function carryForward(planned, sources, now, maxAgeDays) {
 // A carried record rendered as a runner case so per-skill rows and the report treat it like a fresh one.
 export function carriedResult(record) {
   const graders = [...(record.fired === null ? [] : [{ name: 'skill-fired', passed: record.fired }]), ...record.graders];
-  return { name: `${record.skill}--${record.case}`, carried: true, runAt: record.runAt, aggregates: { score: record.score, passRate: graders.every((g) => g.passed) ? 1 : 0 }, arms: { with: Array.from({ length: record.runs ?? 1 }, () => ({ graders })) } };
+  return { name: `${record.skill}--${record.case}`, carried: true, runAt: record.runAt, aggregates: { score: record.score, passRate: graders.every((g) => g.passed) ? 1 : 0 }, arms: { with: Array.from({ length: record.runs ?? 1 }, () => ({ graders })) }, ...(Number.isInteger(record.passes) ? { passes: record.passes } : {}), ...(typeof record.withoutScore === 'number' ? { withoutScore: record.withoutScore } : {}) };
 }
 
 export function defaultCacheDir(env = process.env) {
@@ -372,7 +406,7 @@ export function writeCache(dir, records) {
 }
 
 export function summarize(results, manifest) {
-  const bySkill = new Map(manifest.skills.map((s) => [s.name, { skill: s.name, evals: s.evals, manualOnly: s.manualOnly ?? false, cases: 0, carried: 0, runs: 0, fired: 0, scores: [], failed: [], errors: 0 }]));
+  const bySkill = new Map(manifest.skills.map((s) => [s.name, { skill: s.name, evals: s.evals, manualOnly: s.manualOnly ?? false, cases: 0, carried: 0, runs: 0, fired: 0, scores: [], failed: [], errors: 0, passes: 0, k: 0, anyPass: 0, allPass: 0, sampled: 0, paired: [], bare: [] }]));
   for (const c of results.cases ?? []) {
     const owner = manifest.cases.find((m) => m.name === c.name)?.skill;
     const row = bySkill.get(owner);
@@ -380,6 +414,15 @@ export function summarize(results, manifest) {
     row.cases += 1;
     if (c.carried) row.carried += 1;
     if (typeof c.aggregates?.score === 'number') row.scores.push(c.aggregates.score);
+    const runs = (c.arms?.with ?? []).length;
+    if (runs) {
+      const passes = passesOf(c);
+      row.passes += passes; row.k = Math.max(row.k, runs); row.sampled += 1;
+      if (passes > 0) row.anyPass += 1;
+      if (passes === runs) row.allPass += 1;
+    }
+    const bare = withoutScore(c);
+    if (typeof bare === 'number' && typeof c.aggregates?.score === 'number') { row.paired.push(c.aggregates.score); row.bare.push(bare); }
     for (const run of c.arms?.with ?? []) {
       row.runs += 1;
       if (runErrored(run)) row.errors += 1;
@@ -389,19 +432,34 @@ export function summarize(results, manifest) {
       }
     }
   }
-  return [...bySkill.values()].map((row) => ({
+  const mean = (xs) => xs.reduce((a, b) => a + b, 0) / xs.length;
+  const round = (x) => Number(x.toFixed(2));
+  // Repeat and ablation fields are present only when measured, keeping result.json data within its bound.
+  return [...bySkill.values()].map(({ anyPass, allPass, sampled, paired, bare, passes, k, ...row }) => ({
     ...row,
-    score: row.scores.length && !row.errors ? Number((row.scores.reduce((a, b) => a + b, 0) / row.scores.length).toFixed(2)) : null,
+    score: row.scores.length && !row.errors ? round(mean(row.scores)) : null,
+    // pass@1 is the share of runs that passed; with k runs per case, pass@k is the share of cases
+    // with at least one passing run and pass^k the share whose every run passed.
+    ...(k > 1 ? { k, passes, passAt1: sampled && !row.errors ? round(passes / row.runs) : null, passAtK: sampled && !row.errors ? round(anyPass / sampled) : null, passHatK: sampled && !row.errors ? round(allPass / sampled) : null } : {}),
+    // Lift compares the same cases with and without the skill under the same rubric.
+    ...(bare.length ? { withoutScore: row.errors ? null : round(mean(bare)), lift: row.errors ? null : round(mean(paired) - mean(bare)) } : {}),
   }));
 }
 
 const pad = (value, width) => String(value).padEnd(width);
+// Repeat and ablation columns appear only when a run measured them, so ordinary output is unchanged.
+const showK = (rows) => rows.some((r) => r.k > 1);
+const showLift = (rows) => rows.some((r) => 'lift' in r);
+const num = (x) => (typeof x === 'number' ? String(x) : '-');
+const signed = (x) => (typeof x === 'number' ? `${x > 0 ? '+' : ''}${x}` : '-');
 export function renderTable(rows) {
-  const lines = [`${pad('skill', 32)} ${pad('cases', 6)} ${pad('score', 6)} ${pad('fired', 8)} failed graders`];
+  const k = showK(rows), lift = showLift(rows);
+  const extra = (r) => `${k ? `${pad(num(r.passAt1), 7)} ${pad(num(r.passAtK), 7)} ${pad(num(r.passHatK), 7)} ` : ''}${lift ? `${pad(num(r.withoutScore), 8)} ${pad(signed(r.lift), 6)} ` : ''}`;
+  const lines = [`${pad('skill', 32)} ${pad('cases', 6)} ${pad('score', 6)} ${pad('fired', 8)} ${k ? `${pad('pass@1', 7)} ${pad('pass@k', 7)} ${pad('pass^k', 7)} ` : ''}${lift ? `${pad('without', 8)} ${pad('lift', 6)} ` : ''}failed graders`];
   for (const r of rows) {
     const score = r.cases === 0 ? 'no evals' : r.score ?? '-';
     const fired = r.manualOnly ? 'manual' : r.runs ? `${r.fired}/${r.runs}` : '-';
-    lines.push(`${pad(r.skill, 32)} ${pad(r.cases, 6)} ${pad(score, 6)} ${pad(fired, 8)} ${r.failed.join(', ')}${r.errors ? ` (${r.errors} run error${r.errors > 1 ? 's' : ''})` : ''}`);
+    lines.push(`${pad(r.skill, 32)} ${pad(r.cases, 6)} ${pad(score, 6)} ${pad(fired, 8)} ${extra(r)}${r.failed.join(', ')}${r.errors ? ` (${r.errors} run error${r.errors > 1 ? 's' : ''})` : ''}`);
   }
   return lines.join('\n');
 }
@@ -492,9 +550,13 @@ export function renderReport({ roots, revision, runnerVersion, date, exit, resul
     lines.push(`- Runner list-price cost estimate (not billed spend): ${results.costUsd == null ? 'unknown' : '$'+Number(results.costUsd).toFixed(2)}`);
     lines.push(`- Duration: ${results.durationSeconds ?? '?'}s`, '');
   }
-  lines.push('## Results', '', '| Skill | Cases | Carried | Score | Fired | Failed graders | Run errors |', '| --- | --- | --- | --- | --- | --- | --- |');
-  for (const r of rows) lines.push(`| ${cell(r.skill)} | ${r.cases} | ${r.carried ?? 0} | ${fmtScore(r)} | ${fmtFired(r)} | ${cell(r.failed.join(', '))} | ${r.errors} |`);
+  const k = showK(rows), lift = showLift(rows);
+  const head = ['Skill', 'Cases', 'Carried', 'Score', 'Fired', ...(k ? ['pass@1', `pass@${Math.max(...rows.map((r) => r.k ?? 0))}`, `pass^${Math.max(...rows.map((r) => r.k ?? 0))}`] : []), ...(lift ? ['Without skill', 'Lift'] : []), 'Failed graders', 'Run errors'];
+  lines.push('## Results', '', `| ${head.join(' | ')} |`, `|${head.map(() => ' --- |').join('')}`);
+  for (const r of rows) lines.push(`| ${cell(r.skill)} | ${r.cases} | ${r.carried ?? 0} | ${fmtScore(r)} | ${fmtFired(r)} | ${k ? `${num(r.passAt1)} | ${num(r.passAtK)} | ${num(r.passHatK)} | ` : ''}${lift ? `${num(r.withoutScore)} | ${signed(r.lift)} | ` : ''}${cell(r.failed.join(', '))} | ${r.errors} |`);
   lines.push('');
+  if (k) lines.push(`pass@1 is the share of runs that passed outright; pass@k counts a case passed when any of its runs passed, and pass^k only when every run passed.`, '');
+  if (lift) lines.push('Lift is the score with the skill minus the score of the same cases answered without it, judged by the same rubric; a lift near zero means the skill is not changing the answer.', '');
   const carried = records.filter((r) => r.carried);
   if (carried.length) {
     lines.push('## Carried results', '', 'Same experiment key as an earlier run, so not re-run; evidence is in that run\'s report.', '');
@@ -509,8 +571,8 @@ export function renderReport({ roots, revision, runnerVersion, date, exit, resul
   const owner = (name) => manifest.cases.find((m) => m.name === name);
   const errored = [];
   for (const c of results.cases ?? []) {
-    (c.arms?.with ?? []).forEach((run, i) => {
-      if (runErrored(run)) errored.push(`- ${c.name} (run ${i + 1}): ${clip(run.error ?? 'aborted', 300)}`);
+    for (const [arm, runs] of Object.entries(c.arms ?? {})) runs.forEach((run, i) => {
+      if (runErrored(run)) errored.push(`- ${c.name} (${arm === 'with' ? '' : `${arm} skill, `}run ${i + 1}): ${clip(run.error ?? 'aborted', 300)}`);
     });
   }
   lines.push('## Runs that errored', '', ...(errored.length ? errored : ['- none']), '');
@@ -632,7 +694,7 @@ export function main(argv, { log = console.log, warn = console.error, spawn = sp
   const adapter = options.adapter ? describeAdapter(options.adapter, options.runner, exec, options.passthrough) : null;
   const runnerOptions = !adapter && options.runner === 'codex' ? codexOptions(options.passthrough) : !adapter && HARNESSES.includes(options.runner) ? acpOptions(options.passthrough) : null;
   const claudeVersion = adapter ? `${options.runner} ${adapter.descriptor.version}` : probe(exec, HARNESSES.includes(options.runner) ? nativeBinary(options.runner) : options.runner, ['--version'], undefined);
-  const planned = planCases(withEvals, options, { claudeVersion, model: adapter?.identity.model ?? runnerOptions?.model ?? modelOf(options.passthrough), toolsVersion: toolsVersion(), ...(adapter ? { runner: options.runner, judgeModel: adapter.identity.judgeModel, adapter: adapter.identity } : runnerOptions ? {runner: options.runner, judgeModel: runnerOptions.judgeModel, ...(HARNESSES.includes(options.runner) ? { native: nativeConfiguration(options.runner) } : {})} : {}) });
+  const planned = planCases(withEvals, options, { claudeVersion, model: adapter?.identity.model ?? runnerOptions?.model ?? modelOf(options.passthrough), toolsVersion: toolsVersion(), ablation: ablationOf(options.passthrough), ...(adapter ? { runner: options.runner, judgeModel: adapter.identity.judgeModel, adapter: adapter.identity } : runnerOptions ? {runner: options.runner, judgeModel: runnerOptions.judgeModel, ...(HARNESSES.includes(options.runner) ? { native: nativeConfiguration(options.runner) } : {})} : {}) });
   const startedAt = now();
   const sources = [baseline?.cases ?? [], options.cache ? readCache(options.cache, planned) : []];
   const carried = options.carry ? carryForward(planned, sources, startedAt, options.maxAgeDays) : new Map();
