@@ -1,0 +1,11 @@
+{
+  "autonomous-work-monitor": {
+    "Stop": [
+      {
+        "type": "command",
+        "command": "node \"./scripts/repo-autonomous-work-hook.mjs\" --harness antigravity",
+        "timeout": 15
+      }
+    ]
+  }
+}

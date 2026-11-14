@@ -24,6 +24,7 @@
     "skill-evals"
   ],
   "skills": "./skills/",
+  "hooks": "./.claude-plugin/hooks.json",
   "interface": {
     "displayName": "Repo Tools",
     "shortDescription": "Repository & harness workflows",

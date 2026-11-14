@@ -160,6 +160,15 @@ health checks.
 - `repo-set-tmux-task-title [--force <title>]` — set an empty tmux window task
   title from a Codex `UserPromptSubmit` hook payload, without overwriting a
   pinned title; `--force` explicitly pins or replaces a title for manual use.
+- `repo-autonomous-work-hook [--harness auto|claude|codex|antigravity]` —
+  evaluate a harness `Stop` hook payload from stdin and emit a `"continue"`
+  decision only when the current session loaded `autonomous-work` and stalled
+  prematurely (empty or code-only turn, announced next step, optional question
+  or `"your call"` handoff, or unfinished step progress). Clean completion,
+  Section-6 blockers, live watchers, provider quota/rate limits, subagents,
+  user stop/pause revocations, and turns reaching
+  `REPO_AUTONOMOUS_MAX_CONTINUATIONS` (default `3`, reset on each real user
+  prompt) pass through untouched. Set `REPO_AUTONOMOUS_WORK_HOOK=0` to disable.
 - `repo-safe-remove-worktree` — validate and safely remove a completed
   feature worktree, including clean worktrees with initialized submodules.
 - `repo-sweep-worktrees [--repo <checkout>] [--base <ref>] [--delete]` —
@@ -327,10 +336,11 @@ fi
 
 ## Releasing
 
-`pnpm release <version>` bumps the plugin version across every published
-manifest — `.claude-plugin/marketplace.json`, `plugins/repo-tools/.claude-plugin/plugin.json`,
+`pnpm release <version>` bumps the version across every published
+manifest — `package.json`, `.claude-plugin/marketplace.json`,
+`plugins/repo-tools/plugin.json`, `plugins/repo-tools/.claude-plugin/plugin.json`,
 and `plugins/repo-tools/.codex-plugin/plugin.json` — in one atomic step and
-commits the result. It validates all three files before writing any of
+commits the result. It validates all five files before writing any of
 them, so a missing file or malformed version leaves the release untouched
 rather than half-applied. It refuses a version that is not strictly greater
 (by semver precedence) than the current one, and refuses manifests that
@@ -404,11 +414,14 @@ skills into `complexity-sweep`; update explicit invocations and links to the
 single entry point. Their retirement and diagnostic evidence rules remain in
 its references.
 
-The plugin bundles the auto-merge watcher under `scripts/`, so
-`github-ci-monitor` and `land-pr` work in a plugin-only installation. The npm
-package exposes the same implementation through `repo-watch-prs` on `PATH`.
-Workflow runs use `gh run list --commit <sha>` and `gh run watch <run-id>`;
-PR checks use `gh pr checks`. See the skill for run selection and exit status.
+The plugin bundles the auto-merge watcher and the `autonomous-work` stall
+monitor under `scripts/` (plus the OpenCode `session.idle` plugin under
+`opencode/`), so `github-ci-monitor`, `land-pr`, and `autonomous-work`
+continuation work in a plugin-only installation. The npm package exposes the
+same CLI implementations through `repo-watch-prs` and
+`repo-autonomous-work-hook` on `PATH`. Workflow runs use
+`gh run list --commit <sha>` and `gh run watch <run-id>`; PR checks use
+`gh pr checks`. See the skill for run selection and exit status.
 
 ## Provider compatibility
 
@@ -417,15 +430,18 @@ CLI commands remain available from that checkout's package installation; do
 not copy skills into consumer repositories or install global plugins from their
 setup scripts.
 
-| Runtime     | Supported integration from a shared checkout                                                        |
-| ----------- | --------------------------------------------------------------------------------------------------- |
-| Codex       | `codex plugin marketplace add /opt/repo-tools`, then `codex plugin add repo-tools@repo-tools`       |
-| Claude Code | `claude plugin marketplace add /opt/repo-tools`, then `claude plugin install repo-tools@repo-tools` |
-| OpenCode    | Add `"/opt/repo-tools/plugins/repo-tools/skills"` to the global `opencode.json` `skills` array.     |
+| Runtime     | Supported integration from a shared checkout                                                                                                                               |
+| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Codex       | `codex plugin marketplace add /opt/repo-tools`, then `codex plugin add repo-tools@repo-tools`                                                                              |
+| Claude Code | `claude plugin marketplace add /opt/repo-tools`, then `claude plugin install repo-tools@repo-tools`                                                                        |
+| Antigravity | `agy plugin install /opt/repo-tools/plugins/repo-tools`                                                                                                                    |
+| OpenCode    | Add `"/opt/repo-tools/plugins/repo-tools/skills"` to `skills` (or `skills.paths`) and `"file:///opt/repo-tools/plugins/repo-tools/opencode/autonomous-work.mjs"` to `plugin` in `opencode.json`. |
 
-Codex and Claude Code maintain their own required plugin snapshots; OpenCode
-uses its documented configured skill-directory discovery. The provider matrix
-in `plugins/manifests.test.mjs` protects this shared source layout.
+Codex, Claude Code, and Antigravity load both skills and the `autonomous-work`
+`Stop` hook from their respective plugin manifests; OpenCode loads skills from
+its configured skill paths and runs `opencode/autonomous-work.mjs` on
+`session.idle`. The provider matrix in `plugins/manifests.test.mjs` protects
+this shared source layout.
 
 Repository-local documentation may retain its own protection policy and check
 names, but should link to these skills rather than mirror their bodies.

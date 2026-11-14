@@ -22,5 +22,6 @@
     "autonomous-work",
     "complexity-sweep",
     "skill-evals"
-  ]
+  ],
+  "hooks": "./.claude-plugin/hooks.json"
 }

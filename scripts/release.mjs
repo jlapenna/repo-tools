@@ -41,6 +41,13 @@ const TARGETS = [
     },
   },
   {
+    path: 'plugins/repo-tools/plugin.json',
+    get: (manifest) => manifest.version,
+    set: (manifest, version) => {
+      manifest.version = version;
+    },
+  },
+  {
     path: 'plugins/repo-tools/.claude-plugin/plugin.json',
     get: (manifest) => manifest.version,
     set: (manifest, version) => {
@@ -177,21 +184,43 @@ function readWorkingTree(path) {
   return existsSync(path) ? readFileSync(path, 'utf8') : undefined;
 }
 
-function readAtRef(ref) {
+function resolveCommit(ref) {
+  try {
+    return execFileSync('git', ['rev-parse', '--verify', `${ref}^{commit}`], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }).trim();
+  } catch (error) {
+    throw new ReleaseError(`cannot resolve ${ref}: ${String(error.stderr ?? error.message).trim()}`);
+  }
+}
+
+function readAtCommit(commit) {
   return (path) => {
     try {
-      return execFileSync('git', ['show', `${ref}:${path}`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-    } catch (error) {
-      throw new ReleaseError(`cannot read ${path} at ${ref}: ${String(error.stderr ?? error.message).trim()}`);
+      return execFileSync('git', ['show', `${commit}:${path}`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    } catch {
+      return undefined;
     }
   };
 }
 
 // Refuses a working tree whose manifests disagree or whose version is lower
 // than the version at `baseRef`. Equal is allowed: most changes do not release.
+// A manifest newly added in the working tree is absent at `baseRef`; every
+// manifest already present at `baseRef` must still parse and agree.
 export function checkAgainstBase(baseRef) {
   const head = agreedVersion(TARGETS.map((target) => loadTarget(target, readWorkingTree)), 'working-tree');
-  const base = agreedVersion(TARGETS.map((target) => loadTarget(target, readAtRef(baseRef))), `base (${baseRef})`);
+  const baseCommit = resolveCommit(baseRef);
+  const readBase = readAtCommit(baseCommit);
+  const baseTargets = TARGETS.filter((target) => readBase(target.path) !== undefined);
+  if (baseTargets.length === 0) {
+    throw new ReleaseError(`no release manifests exist at ${baseRef}`);
+  }
+  const base = agreedVersion(
+    baseTargets.map((target) => loadTarget(target, readBase)),
+    `base (${baseRef})`,
+  );
   if (compareVersions(head, base) < 0) {
     throw new ReleaseError(
       `working-tree version ${head} is lower than the base version ${base} at ${baseRef}; rerun pnpm release with a version above ${base}`,
