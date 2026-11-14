@@ -10,6 +10,7 @@ import { checkAgainstBase, compareVersions, release } from './release.mjs';
 const FIXTURES = {
   'package.json': { name: '@jlapenna/repo-tools', version: '1.0.0' },
   '.claude-plugin/marketplace.json': { metadata: { version: '1.0.0' } },
+  'plugins/repo-tools/plugin.json': { name: 'repo-tools', version: '1.0.0' },
   'plugins/repo-tools/.claude-plugin/plugin.json': { name: 'repo-tools', version: '1.0.0' },
   'plugins/repo-tools/.codex-plugin/plugin.json': { name: 'repo-tools', version: '1.0.0' },
 };
@@ -55,7 +56,7 @@ test('bumps every manifest to the same version and commits atomically', () => {
     const results = release('1.2.3');
     assert.deepEqual(
       results.map((r) => r.to),
-      ['1.2.3', '1.2.3', '1.2.3', '1.2.3'],
+      ['1.2.3', '1.2.3', '1.2.3', '1.2.3', '1.2.3'],
     );
     const versions = readVersions(dir);
     for (const version of Object.values(versions)) {
@@ -92,7 +93,7 @@ test('refuses manifests that disagree and names each version', () => {
     writeFileSync(join(dir, path), `${JSON.stringify({ name: 'repo-tools', version: '0.9.9-drifted' }, null, 2)}\n`);
     execFileSync('git', ['commit', '-qam', 'drift'], { cwd: dir });
     assert.throws(() => release('2.0.0'), /disagree.*\.codex-plugin\/plugin\.json=0\.9\.9-drifted/);
-    assert.deepEqual(Object.values(readVersions(dir)), ['1.0.0', '1.0.0', '1.0.0', '0.9.9-drifted']);
+    assert.deepEqual(Object.values(readVersions(dir)), ['1.0.0', '1.0.0', '1.0.0', '1.0.0', '0.9.9-drifted']);
   });
 });
 
@@ -161,6 +162,19 @@ test('base check refuses a working tree that decreases the base version', () => 
       `${JSON.stringify({ name: 'repo-tools', version: '1.1.0' }, null, 2)}\n`,
     );
     assert.throws(() => checkAgainstBase('base'), /working-tree manifests disagree/);
+
+    // Introducing a newly synced manifest target passes when the working tree
+    // agrees on a non-decreasing version relative to the manifests already in base.
+    execFileSync('git', ['checkout', '-q', '--', '.'], { cwd: dir });
+    execFileSync('git', ['rm', '-q', 'plugins/repo-tools/plugin.json'], { cwd: dir });
+    execFileSync('git', ['commit', '-qm', 'base without root plugin.json'], { cwd: dir });
+    execFileSync('git', ['tag', '-f', 'base-before-agy'], { cwd: dir });
+    writeFileSync(
+      join(dir, 'plugins/repo-tools/plugin.json'),
+      `${JSON.stringify({ name: 'repo-tools', version: '1.0.0' }, null, 2)}\n`,
+    );
+    assert.deepEqual(checkAgainstBase('base-before-agy'), { base: '1.0.0', head: '1.0.0' });
+    assert.throws(() => checkAgainstBase('nonexistent-ref'), /cannot resolve nonexistent-ref/);
   });
 });
 

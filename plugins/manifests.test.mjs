@@ -1,8 +1,9 @@
-// Protected contract: repo-tools has one source layout consumed by three agent
-// runtimes — Codex and Claude Code install its marketplace plugin, while
-// OpenCode discovers its configured skill directory. A broken manifest, path,
-// or mismatched skill set fails provider setup fleet-wide without any other
-// check noticing. Consumer: `pnpm test` in ci.yml.
+// Protected contract: repo-tools has one source layout consumed by four agent
+// runtimes — Codex, Claude Code, and Antigravity install its plugin manifests
+// and Stop hooks, while OpenCode loads its configured skill directory and
+// server plugin. A broken manifest, hook path, or mismatched skill set fails
+// provider setup fleet-wide without any other check noticing. Consumer:
+// `pnpm test` in ci.yml.
 import assert from 'node:assert/strict';
 import {
   accessSync,
@@ -122,4 +123,52 @@ test('repo-tools plugin bundles the executable auto-merge watcher referenced by 
   });
   assert.equal(prsUsage.status, 1);
   assert.match(prsUsage.stderr, /^usage: watch-prs\.sh/m);
+});
+
+test('repo-tools plugin wires the autonomous-work stall hook across Claude Code, Codex, Antigravity, and OpenCode', async () => {
+  const pluginRoot = join(root, 'plugins/repo-tools');
+  const hookScript = join(pluginRoot, 'scripts/repo-autonomous-work-hook.mjs');
+  const opencodePlugin = join(pluginRoot, 'opencode/autonomous-work.mjs');
+
+  assert.ok(existsSync(hookScript), `${hookScript} must be bundled with the plugin`);
+  assert.doesNotThrow(() => accessSync(hookScript, constants.X_OK), `${hookScript} must be executable`);
+  assert.ok(existsSync(opencodePlugin), `${opencodePlugin} must be bundled for OpenCode`);
+
+  for (const manifestRel of ['plugins/repo-tools/.claude-plugin/plugin.json', 'plugins/repo-tools/.codex-plugin/plugin.json']) {
+    const manifest = readJson(manifestRel);
+    assert.equal(typeof manifest.hooks, 'string', `${manifestRel} must declare hooks path`);
+    const hooksFile = resolve(pluginRoot, manifest.hooks);
+    assert.ok(existsSync(hooksFile), `${manifestRel} hooks file ${hooksFile} must exist`);
+    const hooksSpec = JSON.parse(readFileSync(hooksFile, 'utf8'));
+    const stopHooks = hooksSpec.hooks?.Stop?.flatMap((group) => group.hooks ?? []) ?? [];
+    assert.ok(stopHooks.length > 0, `${manifestRel} must register a Stop hook`);
+    for (const handler of stopHooks) {
+      const resolvedCmd = handler.command.replaceAll('${CLAUDE_PLUGIN_ROOT}', pluginRoot);
+      const run = spawnSync('sh', ['-c', resolvedCmd], {
+        cwd: pluginRoot,
+        input: '{}',
+        encoding: 'utf8',
+      });
+      assert.equal(run.status, 0, run.stderr);
+      assert.deepEqual(JSON.parse(run.stdout), {});
+    }
+  }
+
+  const agyManifest = readJson('plugins/repo-tools/plugin.json');
+  assert.equal(agyManifest.name, 'repo-tools');
+  const agyHooks = readJson('plugins/repo-tools/hooks.json');
+  const agyStopHandlers = Object.values(agyHooks).flatMap((spec) => spec.Stop ?? []);
+  assert.ok(agyStopHandlers.length > 0, 'Antigravity hooks.json must register a Stop hook');
+  for (const handler of agyStopHandlers) {
+    const run = spawnSync('sh', ['-c', handler.command], {
+      cwd: pluginRoot,
+      input: '{}',
+      encoding: 'utf8',
+    });
+    assert.equal(run.status, 0, run.stderr);
+    assert.deepEqual(JSON.parse(run.stdout), {});
+  }
+
+  const mod = await import(opencodePlugin);
+  assert.equal(typeof mod.default, 'function', 'OpenCode plugin must export a default plugin factory');
 });

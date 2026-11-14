@@ -1,6 +1,6 @@
 {
   "name": "repo-tools",
-  "version": "4.7.3",
+  "version": "4.8.0",
   "description": "General repository-management commands and skills for safe worktrees, CI monitoring, testing policy, PR delivery, harness maintenance, autonomous work, complexity sweeps with optional legacy and diagnostic analyses, Renovate maintenance, and skill evals.",
   "author": {
     "name": "Joe LaPenna",
@@ -22,5 +22,6 @@
     "autonomous-work",
     "complexity-sweep",
     "skill-evals"
-  ]
+  ],
+  "hooks": "./.claude-plugin/hooks.json"
 }

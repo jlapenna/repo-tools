@@ -10,9 +10,10 @@ repositories, but it does not own an agent runtime.
 source modules
   |-- bin/ command implementations
   |-- plugins/repo-tools/skills/ workflow guidance
+  |-- plugins/repo-tools/scripts/ & opencode/ portable plugin hooks
   |-- eslint/ shared lint rules
   v
-package + Codex/Claude plugin manifests
+package + Codex/Claude/Antigravity/OpenCode plugin surfaces
   v
 consumer repositories and agent runtimes
 ```
@@ -30,11 +31,11 @@ repository policy, check names, deployment rules, and product behavior.
 | PR delivery workflow | `land-pr` skill | skill validation and real protected consumers |
 | Testing policy | `testing-policy` skill and reference | documented examples |
 | Harness context and skill maintenance | `harness-maintenance` skill | native documentation checks and outcome evidence from consumers |
-| Autonomous execution within granted scope | `autonomous-work` skill | task-native verification and observed agent use |
+| Autonomous execution within granted scope | `autonomous-work` skill, `repo-autonomous-work-hook`, and `opencode/autonomous-work.mjs` | `bin/autonomous-work-hook.test.mjs`, task-native verification, and observed agent use |
 | Complexity, legacy and diagnostic sweeps | `complexity-sweep` skill with optional lens references | current-source findings, consumer retirement and live-route evidence, preserved contracts and maintenance reduction |
 | Skill eval coverage and scoring | `skill-evals` skill and `repo-skill-evals` | wrapper and case generation tests, runner results per skill |
 | Durable evaluation provenance | `repo-eval-history` and `docs/evaluation-history.md` | artifact retention, lookup and runner integration tests |
-| Plugin topology | `.claude-plugin/`, `.agents/`, `plugins/` manifests | `plugins/manifests.test.mjs` |
+| Plugin topology | `.claude-plugin/`, `.agents/`, `plugins/` manifests and hooks | `plugins/manifests.test.mjs` |
 | ESLint rules | `eslint/` | build, consumer contract, Vitest rules |
 | Shared Renovate preset | `renovate-preset.json` (`github>jlapenna/repo-tools//renovate-preset`) | `renovate-preset.test.mjs` and Renovate config validation in consumers |
 | Public interface inventory | package and skill manifests | generated `docs/interfaces.md` check |

@@ -11,6 +11,7 @@ Nx-inferred targets are intentionally not listed. Runtime status is not inferred
 | repo-adopt | [bin/adopt.mjs](../bin/adopt.mjs) |
 | repo-adopt-agent-identity | [bin/adopt-agent-identity.sh](../bin/adopt-agent-identity.sh) |
 | repo-audit-branches | [bin/audit-branches.sh](../bin/audit-branches.sh) |
+| repo-autonomous-work-hook | [bin/autonomous-work-hook.mjs](../bin/autonomous-work-hook.mjs) |
 | repo-check-dependencies | [bin/check-dependencies.sh](../bin/check-dependencies.sh) |
 | repo-check-runner-labels | [bin/check-runner-labels.mjs](../bin/check-runner-labels.mjs) |
 | repo-check-schedules | [bin/check-schedules.mjs](../bin/check-schedules.mjs) |

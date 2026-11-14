@@ -1,0 +1,16 @@
+{
+  "description": "Monitor autonomous-work sessions for premature stalls and inject a bounded continue prompt",
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/repo-autonomous-work-hook.mjs\"",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}
