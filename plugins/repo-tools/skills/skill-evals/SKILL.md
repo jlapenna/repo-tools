@@ -110,10 +110,12 @@ repo-skill-evals [--skill <name>]... [--runs N] [--trigger-only] [--out <dir>] \
 
 The command copies the selected skills into a temporary wrapper plugin,
 writes one case per eval entry (prompt, a `tool_used` grader proving the
-skill fired, an `llm` grader built from the entry's assertions or
-expected_output, fixture files under `resources/`), runs
+skill fired, one `llm` grader per assertion or one from expected_output,
+fixture files under `resources/` named in the prompt), runs
 `claude plugin eval` there, and prints one row per skill: cases, mean score,
-how many runs fired the skill, and the graders that failed. `--json` prints
+how many runs fired the skill, and the graders that failed. Sibling skills a
+selected skill names are copied in too. The default judge is Haiku; pass
+`-- --judge-model sonnet` when single-run verdicts look noisy. `--json` prints
 the same as one object. Results, the wrapper and `results.json` stay under
 `--out` (default: a private directory under the durable evaluation history).
 

@@ -9,9 +9,10 @@
 // skill directory, `<evals-root>/<name>/evals.json` or
 // `<evals-root>/*/<name>/evals.json`. A case is generated per eval entry in a
 // temporary wrapper plugin: the prompt, a `tool_used` grader proving the
-// skill fired, and an `llm` grader built from the entry's assertions
-// (or its expected_output). Fixture files listed in `files` are copied into
-// the case and granted read-only through `context.add_dirs`.
+// skill fired, and one `llm` grader per assertion (or one from its
+// expected_output). Fixture files listed in `files` are copied into the case,
+// granted read-only through `context.add_dirs` and named in the prompt. Other
+// skills under the roots that a selected skill names are copied without cases.
 //
 // Usage: repo-skill-evals [--runner NAME] [--adapter EXECUTABLE] [--root DIR]... [--evals-root DIR]... [--skill NAME]...
 //                         [--list | --dry-run] [--out DIR] [--runs N]
@@ -155,13 +156,32 @@ function runnerOptions(raw, where) {
 
 const slug = (value) => String(value).toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^[^a-z0-9]+|[^a-z0-9._-]+$/g, '') || 'eval';
 
+// Shared cases are read-only (no Bash, Write or Edit), so a check can only be met by what the answer
+// proposes or explains; the judge must not fail a plan for not having executed it.
+export const PLAN_NOTE = 'The agent had read-only tools, so a check about running, changing or verifying something holds when the response proposes or explains that step clearly enough to act on; it need not have executed it.';
+const CHECK_PREFIX = 'PASS only if this holds for the response and its trace:\n';
+
+// One rubric for the whole entry, for adapters whose protocol returns a single judgment.
 export function criteria(entry) {
   if (entry.checks.length) {
-    return `PASS only if every one of the following holds for the response and its trace:\n${entry.checks.map((c) => `- ${c}`).join('\n')}\nFAIL if any of them does not hold.`;
+    return `PASS only if every one of the following holds for the response and its trace:\n${entry.checks.map((c) => `- ${c}`).join('\n')}\n${PLAN_NOTE}\nFAIL if any of them does not hold.`;
   }
-  if (entry.expected) return `PASS if the response does what this expected behavior describes:\n${entry.expected}\nFAIL if it does not, or if it only talks about doing it.`;
+  if (entry.expected) return `PASS if the response does what this expected behavior describes:\n${entry.expected}\n${PLAN_NOTE}\nFAIL if it does not, or if it only talks about doing it without enough detail to act on.`;
   return undefined;
 }
+
+// One llm grader per assertion: a case scores the share of its checks that hold, and a failure names
+// the check that failed instead of one all-or-nothing verdict over several claims.
+export function rubrics(entry) {
+  if (entry.checks.length) {
+    return entry.checks.map((check, i) => ({ name: entry.checks.length === 1 ? 'criteria' : `criteria-${i + 1}`, criteria: `${CHECK_PREFIX}${check}\n${PLAN_NOTE}\nFAIL if it does not hold.` }));
+  }
+  const rubric = criteria(entry);
+  return rubric ? [{ name: 'criteria', criteria: rubric }] : [];
+}
+
+// The assertion a per-check grader judges, for reports.
+export const checkOf = (rubric) => (typeof rubric === 'string' && rubric.startsWith(CHECK_PREFIX) ? rubric.slice(CHECK_PREFIX.length).split('\n')[0] : null);
 
 // `Bash(git status)` names Bash; `mcp__server__tool` names an MCP tool.
 export const gatedTool = (tools) => tools.find((t) => { const base = t.replace(/\(.*$/, ''); return GATED_TOOLS.has(base) || base.startsWith('mcp__'); });
@@ -177,8 +197,7 @@ export function buildCase(skill, entry, options) {
   if (!skill.manualOnly) {
     graders.push({ name: 'skill-fired', type: 'tool_used', tool: 'Skill', input_match: `"skill"\\s*:\\s*"(?:[\\w-]+:)?${skill.name.replaceAll('-', '\\-')}"` });
   }
-  const rubric = criteria(entry);
-  if (rubric && !options.triggerOnly) graders.push({ name: 'criteria', type: 'llm', criteria: rubric });
+  if (!options.triggerOnly) for (const r of rubrics(entry)) graders.push({ name: r.name, type: 'llm', criteria: r.criteria });
   if (!graders.length) throw new Error(`${skill.name}: ${entry.slug} has nothing to grade (manual-only skill without assertions or expected_output)`);
   // Claude never loads a manual-only skill on its own, so its behavior cases invoke it the way a user does.
   const execution = {
@@ -204,7 +223,10 @@ export function fixturePath(evalsFile, file) {
   return { source: realpathSync(source), inside };
 }
 
-export function writeWrapper(outDir, skills, options) {
+// Companions are the other skills under the same roots. One that a selected skill names is copied
+// without cases, so a skill that sends the agent to a sibling (for example a request guide) still
+// finds it in a --skill run; unrelated skills stay out of the wrapper.
+export function writeWrapper(outDir, skills, options, companions = []) {
   const plugin = path.join(outDir, 'plugin');
   mkdirSync(path.join(plugin, '.claude-plugin'), { recursive: true });
   writeFileSync(path.join(plugin, '.claude-plugin', 'plugin.json'), JSON.stringify({ name: options.pluginName ?? 'skill-evals', description: 'Temporary wrapper generated by repo-skill-evals; skills are copies of their source directories.' }, null, 2) + '\n');
@@ -222,9 +244,18 @@ export function writeWrapper(outDir, skills, options) {
         cpSync(source, path.join(caseDir, 'resources', path.basename(file)), { recursive: true, dereference: true, filter: (src) => { if (!inside(src)) throw new Error(`${skill.evals}: fixture ${file} links outside the evals directory (${path.relative(source, src) || '.'})`); return true; } });
       }
       // YAML is a superset of JSON, so the case file needs no YAML writer.
+      // add_dirs grants read access but the agent is not told where the directory is, so the prompt
+      // names each fixture's absolute path. planCases keys the spec without it, so the key stays stable.
+      if (entry.files.length) spec.execution.prompt += `\n\nAttached files (read-only):\n${entry.files.map((f) => `- ${path.join(caseDir, 'resources', path.basename(f))}`).join('\n')}`;
       writeFileSync(path.join(caseDir, 'case.yaml'), JSON.stringify(spec, null, 2) + '\n');
       manifest.cases.push({ name: spec.name, skill: skill.name, prompt: spec.execution.prompt });
     }
+  }
+  const text = skills.map((skill) => hashTree(skill.dir, { skip: (rel, name) => name === 'node_modules' || rel === 'evals' }).filter((f) => f.path.endsWith('.md')).map((f) => readFileSync(path.join(skill.dir, f.path), 'utf8')).join('\n')).join('\n');
+  for (const other of companions) {
+    const dest = path.join(plugin, 'skills', other.name);
+    const named = new RegExp(`(^|[^\\w-])${other.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[^\\w-])`).test(text);
+    if (named && !existsSync(dest)) cpSync(other.dir, dest, { recursive: true, filter: (src) => !SKIP_DIRS.has(path.basename(src)) || src === other.dir });
   }
   writeFileSync(path.join(outDir, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
   return { plugin, manifest };
@@ -605,7 +636,9 @@ export function renderReport({ roots, revision, runnerVersion, date, exit, resul
         if (!failures.length) continue;
         lines.push(`#### ${c.name}${c.carried ? ` (carried, ${ageDays(c.runAt, now)} days old)` : ''}`, '', 'Prompt:', fence(clip(c.promptMarkdown ?? owner(c.name)?.prompt ?? '', 300)));
         for (const { run, grader } of failures) {
-          lines.push(`- \`${grader.name}\` failed in run ${run}${grader.explanation ? `: ${clip(grader.explanation, 300)}` : ''}`);
+          const spec = (c.graders ?? []).find((g) => g.name === grader.name);
+          const check = checkOf(spec?.criteria ?? spec?.config?.criteria ?? spec?.graderMarkdown);
+          lines.push(`- \`${grader.name}\` failed in run ${run}${check ? ` (${clip(check, 200)})` : ''}${grader.explanation ? `: ${clip(grader.explanation, 300)}` : ''}`);
           if (grader.evidence) lines.push(fence(clip(grader.evidence, 600)));
         }
         lines.push('');
@@ -756,7 +789,7 @@ export function main(argv, { log = console.log, warn = console.error, spawn = sp
   const outDir = options.out ?? mkdtempSync(path.join(options.dryRun ? tmpdir() : path.join(store, 'work'), 'repo-skill-evals-'));
   if (!options.dryRun && (outDir === store || store.startsWith(outDir + path.sep))) throw Error('--out must not contain the evaluation history store');
   mkdirSync(outDir, { recursive: true });
-  const { plugin, manifest } = writeWrapper(outDir, toRun, options);
+  const { plugin, manifest } = writeWrapper(outDir, toRun, options, discoverSkills(options.roots));
   const resultsFile = path.join(outDir, 'results.json');
   // The stock runner otherwise deletes trace.jsonl before this process can archive it.
   const ownsRunnerTemp = !adapter && options.runner === 'claude' && !options.passthrough.includes('--keep-temp');
@@ -769,7 +802,9 @@ export function main(argv, { log = console.log, warn = console.error, spawn = sp
   }
   const filesBelow = (dir) => readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name)).flatMap(e => e.isDirectory() ? filesBelow(path.join(dir, e.name)) : e.isFile() ? [path.join(dir, e.name)] : []);
   const inputFiles = filesBelow(plugin);
-  const inputs = { files: Object.fromEntries(inputFiles.map(file => [path.relative(plugin, file), createHash('sha256').update(readFileSync(file)).digest('hex')])),
+  // A case prompt names its fixtures by absolute path below this run's directory; hash it run-independently.
+  const inputBytes = (file) => (path.basename(file) === 'case.yaml' ? readFileSync(file, 'utf8').replaceAll(plugin, '<plugin>') : readFileSync(file));
+  const inputs = { files: Object.fromEntries(inputFiles.map(file => [path.relative(plugin, file), createHash('sha256').update(inputBytes(file)).digest('hex')])),
     arguments: options.passthrough, runner: options.runner, modelAlias: adapter?.identity.model ?? runnerOptions?.model ?? process.env.ANTHROPIC_MODEL ?? 'client default', ...(adapter ? { adapter: adapter.identity } : {}) };
   const subject = manifest.skills.map(s => s.name).sort().join(',');
   const localPrevious = findRuns({ root: store, kind: 'skill', subject, inputs });
