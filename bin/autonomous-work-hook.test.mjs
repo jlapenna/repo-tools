@@ -1011,3 +1011,69 @@ test('run-autonomous-work-hook.sh discovers fnm node off PATH and fails open whe
     assert.equal(JSON.parse(fallbackRecovered.stdout).decision, 'block');
   });
 });
+
+test('a turn that only acknowledges loading autonomous-work is a stall, not a completion', async () => {
+  await withTempDir((dir) => {
+    const stateDir = join(dir, 'state');
+    const rollout = join(dir, 'rollout.jsonl');
+    const userMessage = (text) => ({
+      type: 'event_msg',
+      payload: { type: 'item_completed', item: { type: 'UserMessage', content: [{ text }] } },
+    });
+    const skillRead = {
+      type: 'event_msg',
+      payload: {
+        type: 'item_completed',
+        item: { type: 'CommandExecution', command: ['/bin/bash', '-lc', 'cat ~/.codex/skills/autonomous-work/SKILL.md'] },
+      },
+    };
+    const assistantMessage = (text) => ({
+      type: 'response_item',
+      payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] },
+    });
+    const stop = (lastAssistantMessage, sessionId) => invokeCli(
+      {
+        cwd: dir,
+        hook_event_name: 'Stop',
+        last_assistant_message: lastAssistantMessage,
+        session_id: sessionId,
+        stop_hook_active: false,
+        transcript_path: rollout,
+        turn_id: 'turn-2',
+      },
+      ['--harness', 'codex'],
+      { REPO_AUTONOMOUS_STATE_DIR: stateDir },
+    );
+
+    // Observed verbatim in three Codex sessions that stopped after an audit.
+    const acknowledgements = [
+      'Loaded [repo-tools:autonomous-work](/x/skills/autonomous-work/SKILL.md).',
+      'Loaded `repo-tools:autonomous-work`. It governs follow-through within the task’s existing authorization; loading it does not expand the sweep into implementation or publication.',
+      'Loaded `repo-tools:autonomous-work`. It now applies within the task’s existing authorization.',
+    ];
+    for (const [idx, ack] of acknowledgements.entries()) {
+      writeJsonl(rollout, [
+        userMessage('Run a repo tools complexity check against this codebase.'),
+        assistantMessage('Complexity check complete: 3 findings, ranked below.'),
+        userMessage('Load the autonomous-work repo tools skill.'),
+        skillRead,
+        assistantMessage(ack),
+      ]);
+      const out = stop(ack, `ack-${idx}`);
+      assert.equal(out.decision, 'block', `acknowledgement ${idx} should continue: ${JSON.stringify(out)}`);
+      assert.match(out.reason, /skill-load-acknowledged/);
+      assert.match(out.reason, /carry them out/);
+    }
+
+    // A completion report in a later turn is not mistaken for a load acknowledgement.
+    const done = 'All three findings are fixed in PR #42; CI passed and it merged. The autonomous-work run is complete.';
+    writeJsonl(rollout, [
+      userMessage('Load the autonomous-work repo tools skill.'),
+      skillRead,
+      assistantMessage('Fixing the findings now.'),
+      userMessage('Status?'),
+      assistantMessage(done),
+    ]);
+    assert.deepEqual(stop(done, 'done-1'), {});
+  });
+});

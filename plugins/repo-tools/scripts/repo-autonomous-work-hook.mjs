@@ -86,6 +86,12 @@ const OPTIONAL_HANDOFF_RE = new RegExp(
   'i',
 );
 
+// A turn that loads the skill and only acknowledges the load ("Loaded
+// autonomous-work.", "It now applies ...") has done none of the work the load
+// asked for. Loading the skill is an instruction to act, not to confirm.
+const SKILL_LOAD_ACK_RE = /\b(?:loaded|loading|now\s+(?:applies|active|in\s+effect)|is\s+(?:now\s+)?(?:active|in\s+effect)|governs|will\s+apply)\b/i;
+const SKILL_LOAD_ACK_MAX_CHARS = 600;
+
 const UNFINISHED_SECTION_RE = /(?:^|\n)\s*(?:#{1,4}\s*|\*{1,2})(?:in\s+progress|remaining(?:\s+(?:work|steps|items|tasks))?|still\s+to\s+do|pending\s+(?:work|steps|actions)|todo)(?:\*{1,2})?\s*:?\s*\n+\s*(?:[-*\d.)]+\s+)(?!none\b|nothing\b|n\/a\b)/i;
 const UNCHECKED_BOX_RE = /(?:^|\n)\s*[-*]\s+\[\s\]\s+\S/;
 const STEP_PROGRESS_RE = /\bsteps?\s+(?:\d+\s*[-–—]\s*)?(\d+)\s+of\s+(\d+)\b/gi;
@@ -555,6 +561,14 @@ function stripCodeBlocks(text) {
   return text.replace(/```[\s\S]*?```/g, '').replace(/~~~[\s\S]*?~~~/g, '');
 }
 
+export function isSkillLoadAcknowledgement(assistantText) {
+  const prose = stripCodeBlocks(String(assistantText ?? '')).trim();
+  return prose.length > 0
+    && prose.length <= SKILL_LOAD_ACK_MAX_CHARS
+    && /\bautonomous[-\s]work\b/i.test(prose)
+    && SKILL_LOAD_ACK_RE.test(prose);
+}
+
 export function classifyAssistantStop(assistantText) {
   const raw = String(assistantText ?? '').trim();
   if (!raw) {
@@ -650,6 +664,9 @@ export function buildContinuationMessage(reason, continuationNumber, maxContinua
     '',
     `${HOOK_MARKER} Stalled turn detected (${reason}; continuation ${continuationNumber}/${maxContinuations}). ` +
       'Autonomy was granted via autonomous-work: execute the next authorized in-scope step now instead of stopping on an announced action, partial status update, or optional question. ' +
+      (reason === 'skill-load-acknowledged'
+        ? 'Loading the skill was the instruction to act, not to confirm the load: resume the conversation\'s task now, and if it ended in findings or recommendations, carry them out through the repository\'s delivery workflow. '
+        : '') +
       'Stop only when the requested outcome is verified complete, a live watcher will wake this session, or every remaining action has an exact blocker and unblock condition.',
   ].join('\n');
 }
@@ -736,7 +753,15 @@ export function evaluateConversation({
     effectiveAssistantText = assistantChunks.join('\n').trim();
   }
 
-  const classification = classifyAssistantStop(effectiveAssistantText);
+  let classification = classifyAssistantStop(effectiveAssistantText);
+  if (
+    !classification.stalled
+    && classification.reason === 'completed'
+    && skillIndex > lastRealUserIndex
+    && isSkillLoadAcknowledgement(effectiveAssistantText)
+  ) {
+    classification = { stalled: true, reason: 'skill-load-acknowledged' };
+  }
   if (!classification.stalled) {
     return { shouldContinue: false, reason: classification.reason, continuations: priorContinuations };
   }

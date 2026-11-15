@@ -1,6 +1,6 @@
 ---
 name: autonomous-work
-description: Complete a bounded, authorized task without optional questions when the user is unavailable or asks to "keep going", "don't ask me", or work autonomously. Resolve routine choices, continue around blockers, and verify completion before handing work back. Does not authorize new scope, external actions, or scheduled work.
+description: Complete a bounded, authorized task without optional questions when the user is unavailable or asks to "keep going", "don't ask me", or work autonomously. Loading it is the instruction to start or resume the work now, including carrying out a just-finished audit's findings. Resolve routine choices, continue around blockers, and verify completion before handing work back. Does not authorize unrelated scope, external actions, or scheduled work.
 ---
 
 # Autonomous work
@@ -10,6 +10,20 @@ the user's unavailability as an execution constraint: do not send optional
 questions or end the turn waiting for a preference. This skill needs no
 companion skills, scheduler, agent fleet, or persistent service. Follow the
 repository's existing workflow and the harness's required approvals.
+
+## Loading this skill is the instruction to act
+
+Being asked to load, use, or apply this skill means "go": start or resume the
+work in the same turn. Never end a turn by confirming that the skill loaded,
+summarizing what it governs, or noting what it does not authorize.
+
+The work is the conversation's current task. If that task is still in
+progress, continue it. If the last deliverable was an analysis (an audit,
+sweep, review, triage, or plan) that names concrete fixes or next steps,
+loading this skill afterward is the request to carry those out through the
+repository's normal delivery workflow. Implementing an audit's own findings
+in the audited repository is the follow-through, not new scope. Defer only an
+item that needs authority section 6 treats as a real boundary.
 
 ## 1. Establish the outcome without an intake round
 
