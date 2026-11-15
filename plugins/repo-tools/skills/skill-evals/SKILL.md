@@ -191,6 +191,11 @@ without a baseline file.
   be judged on its proposed workflow, not on forbidden real execution. Keep
   intermediate-action claims with a trace-aware check and record any proposed
   grading-contract change as a new comparison, never a silent score fix.
+- When both arms score zero on answers that read as correct, audit the rubric
+  before the skill: execution verbs on a plan-only prompt, tool-use claims,
+  packed bullets and unasked or stale requirements fail every arm. See the
+  rubric shapes in [evals format](references/evals-format.md); a rewritten
+  rubric is a new comparison, so rerun both arms on it.
 - Exit status is the runner's: 0 when every case met the threshold (default
   1.0, override with `-- --threshold 0.67` for noisy cases), 1 for a case
   below threshold or a load error, 2 for a partial run stopped by the cost

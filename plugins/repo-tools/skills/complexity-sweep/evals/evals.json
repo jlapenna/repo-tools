@@ -8,23 +8,22 @@
       "expected_output": "Selects the complexity lens for a report-only sweep, pins the inspected revision, traces consumers before calling anything unused, and ranks findings by drift and maintenance saved against migration cost.",
       "files": [],
       "assertions": [
-        "States that the request is analysis only and no edits or PRs will be made",
-        "Says the inspected revision is recorded and consumers or callers are traced before a path is called unused",
-        "Ranks findings by repeated drift, change frequency or maintenance saved against migration effort and blast radius",
-        "Says age, naming or line count alone are never reasons to remove something"
+        "Keeps the pass report-only: it makes no edits, commits or PRs itself. Recommending simplifications as findings for later approval is expected and does not count as planning edits.",
+        "Before calling a path unused, traces its callers and consumers, including dynamic, deployed or other-repository consumers, and says an empty local search is not proof.",
+        "Ranks findings by repeated drift, change frequency or maintenance saved against migration effort, uncertainty or blast radius.",
+        "Says age or naming alone never justify removing something."
       ]
     },
     {
       "id": 2,
       "name": "legacy-and-diagnostics-cleanup",
       "prompt": "We finished the storage migration months ago but the old format readers, a compatibility shim and a pile of one-off debug probes are still in the tree. Clean those up for real, but tell me first how you'd prove each one is safe to delete and what you'd keep.",
-      "expected_output": "Selects the legacy and diagnostics lenses with implementation authorized, requires retirement evidence such as consumer searches or census before deleting, keeps live production diagnostics with a current purpose, and delivers through a dedicated worktree and normal PR path.",
+      "expected_output": "Selects the legacy and diagnostics lenses with implementation authorized, requires retirement evidence such as consumer searches or census before deleting, keeps live production diagnostics with a current purpose, and takes no production action to manufacture proof.",
       "files": [],
       "assertions": [
-        "Names the legacy and diagnostics lenses (or retired formats/shims and probes) as the scope and does not run an unrelated analysis",
-        "Requires concrete retirement evidence such as a consumer search, census or migration record before deleting a reader or shim",
-        "Keeps diagnostics that still have a live production purpose",
-        "Makes the edits in a dedicated worktree and delivers through the normal PR path"
+        "Before deleting an old-format reader or the shim, requires concrete retirement evidence: a read-only census or migration verification showing no old-format data remains, plus traced consumers including restore or rollback paths. The migration's age alone is not proof.",
+        "Keeps any probe or diagnostic that still has a live production purpose and removes only leftovers with no current consumer.",
+        "Does not propose a production action, such as running a migration or deleting stored data, just to manufacture proof for the source cleanup."
       ]
     }
   ]
