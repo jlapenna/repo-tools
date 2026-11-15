@@ -3,7 +3,7 @@
     "Stop": [
       {
         "type": "command",
-        "command": "node \"./scripts/repo-autonomous-work-hook.mjs\" --harness antigravity",
+        "command": "if [ -f \"./scripts/run-autonomous-work-hook.sh\" ]; then sh \"./scripts/run-autonomous-work-hook.sh\" --harness antigravity; elif [ -f \"${GEMINI_CONFIG_DIR:-$HOME/.gemini}/config/plugins/repo-tools/scripts/run-autonomous-work-hook.sh\" ]; then sh \"${GEMINI_CONFIG_DIR:-$HOME/.gemini}/config/plugins/repo-tools/scripts/run-autonomous-work-hook.sh\" --harness antigravity; else printf '{}\\n'; fi",
         "timeout": 15
       }
     ]

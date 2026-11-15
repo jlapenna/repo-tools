@@ -55,11 +55,20 @@ const CONCRETE_BLOCKER_RE = new RegExp(
   'i',
 );
 
-const LIVE_WATCHER_RE = /\b(?:live\s+watcher|background\s+(?:watcher|task|job|monitor)|armed\s+watcher|will\s+wake\s+this\s+(?:session|turn)|watching\s+[^\n]{0,80}\b(?:pid|task[_\s-]?id|run[_\s-]?id)\b)/i;
+const LIVE_WATCHER_RE = new RegExp(
+  [
+    String.raw`\b(?:live\s+watcher|background\s+(?:watcher|task|job|monitor|command|process|shell)|armed\s+watcher|repo-watch-(?:prs|runs))\b`,
+    String.raw`\bwatcher\b[^\n]{0,80}\b(?:running|active|armed|wake|wakes|monitoring)\b`,
+    String.raw`\bwill\s+wake\s+(?:me|this\s+(?:session|turn))\b`,
+    String.raw`\bwatching\s+[^\n]{0,80}\b(?:pid|task[_\s-]?id|task-\d+|run[_\s-]?id)\b`,
+    String.raw`\bwaiting\s+(?:on|for)\s+[^\n]{0,80}\b(?:watcher|task[_\s-]?\d+|task_id|background\s+(?:task|job|command)|subagent|ci|checks?|auto-merge)\b`,
+  ].join('|'),
+  'i',
+);
 
 const ANNOUNCED_NEXT_STEP_RE = new RegExp(
   [
-    String.raw`(?:^|\n)\s*(?:[-*\d.)]+\s*)?\*{0,2}next(?:\s+(?:step|action|up))?\*{0,2}\s*:\s*(?:i\s+will|i'll|we\s+will|run|check|verify|update|fix|test|commit|push|open|merge|clean|inspect|implement|deploy|retry|address|resolve)\b`,
+    String.raw`(?:^|\n)\s*(?:[-*\d.)]+\s*)?\*{0,2}next(?:\s+(?:step|action|up))?\*{0,2}\s*:\s*(?!(?:when|once|after)\b)(?:i\s+will|i'll|we\s+will|run|check|verify|update|fix|test|commit|push|open|merge|clean|inspect|implement|deploy|retry|address|resolve)\b`,
     String.raw`\b(?:next,?\s+i\s+(?:will|am\s+going\s+to)|next\s+i'll|now\s+i\s+(?:will|am\s+going\s+to)|now\s+i'll|i\s+will\s+now|i'll\s+now|let\s+me\s+now|now\s+let's|proceeding\s+to|moving\s+on\s+to)\s+[a-z]`,
   ].join('|'),
   'i',
@@ -79,7 +88,8 @@ const OPTIONAL_HANDOFF_RE = new RegExp(
 
 const UNFINISHED_SECTION_RE = /(?:^|\n)\s*(?:#{1,4}\s*|\*{1,2})(?:in\s+progress|remaining(?:\s+(?:work|steps|items|tasks))?|still\s+to\s+do|pending\s+(?:work|steps|actions)|todo)(?:\*{1,2})?\s*:?\s*\n+\s*(?:[-*\d.)]+\s+)(?!none\b|nothing\b|n\/a\b)/i;
 const UNCHECKED_BOX_RE = /(?:^|\n)\s*[-*]\s+\[\s\]\s+\S/;
-const STEP_PROGRESS_RE = /\bstep\s+(\d+)\s+of\s+(\d+)\b/gi;
+const STEP_PROGRESS_RE = /\bsteps?\s+(?:\d+\s*[-–—]\s*)?(\d+)\s+of\s+(\d+)\b/gi;
+const ALL_STEPS_COMPLETE_RE = /\b(?:all\s+(\d+)\s+steps?|steps?\s+1\s*[-–—]\s*(\d+)(?:\s+of\s+\2)?)\s+(?:are\s+)?(?:complete|completed|done|finished|verified)\b/i;
 
 function readJsonlLines(filePath) {
   if (!filePath || !existsSync(filePath)) return [];
@@ -175,6 +185,7 @@ export function parseClaudeTranscript(transcriptPath) {
       }
 
       const texts = [];
+      let sawToolResult = false;
       if (typeof content === 'string') {
         texts.push(content);
       } else if (Array.isArray(content)) {
@@ -183,6 +194,7 @@ export function parseClaudeTranscript(transcriptPath) {
           if (block.type === 'text' && typeof block.text === 'string') {
             texts.push(block.text);
           } else if (block.type === 'tool_result') {
+            sawToolResult = true;
             const resultText = typeof block.content === 'string'
               ? block.content
               : Array.isArray(block.content)
@@ -193,6 +205,9 @@ export function parseClaudeTranscript(transcriptPath) {
             }
           }
         }
+      }
+      if (sawToolResult) {
+        events.push({ kind: 'activity' });
       }
 
       const classified = classifyUserText(texts.join('\n'));
@@ -206,8 +221,15 @@ export function parseClaudeTranscript(transcriptPath) {
         if (!block || typeof block !== 'object') continue;
         if (block.type === 'text' && typeof block.text === 'string' && block.text.trim()) {
           texts.push(block.text.trim());
-        } else if (block.type === 'tool_use' && isSkillReadCall(block.name, block.input)) {
-          events.push({ kind: 'skill', name: 'autonomous-work' });
+        } else if (block.type === 'tool_use') {
+          if (texts.length > 0) {
+            events.push({ kind: 'assistant', text: texts.join('\n') });
+            texts.length = 0;
+          }
+          if (isSkillReadCall(block.name, block.input)) {
+            events.push({ kind: 'skill', name: 'autonomous-work' });
+          }
+          events.push({ kind: 'activity' });
         }
       }
       if (texts.length > 0) {
@@ -296,10 +318,14 @@ export function parseCodexTranscript(transcriptPath) {
         if (isSkillReadCall(item.tool, args)) {
           events.push({ kind: 'skill', name: 'autonomous-work' });
         }
+        if (hasAssistantEvents) events.push({ kind: 'activity' });
       } else if (item.type === 'CommandExecution') {
         if (isSkillReadCall('exec_command', { command: item.command })) {
           events.push({ kind: 'skill', name: 'autonomous-work' });
         }
+        if (hasAssistantEvents) events.push({ kind: 'activity' });
+      } else if (item.type === 'FileChange' || item.type === 'WebSearch') {
+        if (hasAssistantEvents) events.push({ kind: 'activity' });
       } else if (item.type === 'AgentMessage') {
         const agentText = (typeof item.text === 'string' ? item.text : extractCodexContentText(item.content)).trim();
         if (agentText) events.push({ kind: 'assistant', text: agentText });
@@ -336,10 +362,12 @@ export function parseCodexTranscript(transcriptPath) {
       if (isSkillReadCall(p.name, parsedInput)) {
         events.push({ kind: 'skill', name: 'autonomous-work' });
       }
+      if (!hasAssistantEvents) events.push({ kind: 'activity' });
     } else if ((p.type === 'function_call_output' || p.type === 'custom_tool_call_output') && typeof p.output === 'string') {
       if (SKILL_BODY_SIGNATURE_RE.test(p.output)) {
         events.push({ kind: 'skill', name: 'autonomous-work' });
       }
+      if (!hasAssistantEvents) events.push({ kind: 'activity' });
     }
   }
   return events;
@@ -407,6 +435,9 @@ export function parseAntigravityTranscript(transcriptPath) {
           events.push({ kind: 'skill', name: 'autonomous-work' });
         }
       }
+      if (toolCalls.length > 0) {
+        events.push({ kind: 'activity' });
+      }
       if (rawContent.trim()) {
         events.push({ kind: 'assistant', text: rawContent.trim() });
       }
@@ -415,6 +446,11 @@ export function parseAntigravityTranscript(transcriptPath) {
 
     if (AGY_INJECTED_CONTINUATION_RE.test(rawContent.trim())) {
       events.push({ kind: 'continuation', text: rawContent.trim() });
+      continue;
+    }
+
+    if (kind === 'GENERIC' || kind === 'TOOL_RESPONSE' || kind === 'SYSTEM_MESSAGE') {
+      events.push({ kind: 'activity' });
     }
   }
   return events;
@@ -465,12 +501,17 @@ export function parseOpenCodeMessages(messages) {
         if (part.type === 'text' && typeof part.text === 'string' && part.text.trim()) {
           texts.push(part.text.trim());
         } else if (part.type === 'tool') {
+          if (texts.length > 0) {
+            events.push({ kind: 'assistant', text: texts.join('\n') });
+            texts.length = 0;
+          }
           const toolName = part.tool ?? part.name;
           const toolInput = part.state?.input ?? part.input ?? part.args;
           const toolOutput = part.state?.output ?? part.output ?? '';
           if (isSkillReadCall(toolName, toolInput) || SKILL_BODY_SIGNATURE_RE.test(String(toolOutput))) {
             events.push({ kind: 'skill', name: 'autonomous-work' });
           }
+          events.push({ kind: 'activity' });
         }
       }
       if (texts.length > 0) {
@@ -491,14 +532,23 @@ function hasIncompleteStepRatio(text) {
   STEP_PROGRESS_RE.lastIndex = 0;
   let match;
   let latest = null;
+  let maxCompleted = 0;
   while ((match = STEP_PROGRESS_RE.exec(text)) !== null) {
     const current = Number.parseInt(match[1], 10);
     const total = Number.parseInt(match[2], 10);
     if (Number.isFinite(current) && Number.isFinite(total) && total > 0) {
       latest = { current, total };
+      if (current >= total) maxCompleted = Math.max(maxCompleted, total);
     }
   }
-  return latest !== null && latest.current < latest.total;
+  if (!latest) return false;
+  if (latest.current >= latest.total || maxCompleted >= latest.total) return false;
+  const allMatch = ALL_STEPS_COMPLETE_RE.exec(text);
+  if (allMatch) {
+    const completedTotal = Number.parseInt(allMatch[1] ?? allMatch[2], 10);
+    if (completedTotal >= latest.total) return false;
+  }
+  return true;
 }
 
 function stripCodeBlocks(text) {
@@ -522,22 +572,22 @@ export function classifyAssistantStop(assistantText) {
 
   const closing = tailWindow(prose);
   const hasConcreteBlocker = CONCRETE_BLOCKER_RE.test(prose);
-  const hasLiveWatcher = LIVE_WATCHER_RE.test(closing);
+  const hasLiveWatcher = LIVE_WATCHER_RE.test(prose);
+  const nonEmptyLines = prose.split('\n').map((line) => line.trim()).filter(Boolean);
+  const lastLine = nonEmptyLines.at(-1) ?? '';
+
+  if (hasLiveWatcher && !OPTIONAL_HANDOFF_RE.test(closing) && !lastLine.endsWith('?')) {
+    return { stalled: false, reason: 'waiting-on-live-watcher' };
+  }
 
   if (ANNOUNCED_NEXT_STEP_RE.test(closing)) {
     return { stalled: true, reason: 'announced-next-step' };
-  }
-
-  if (hasLiveWatcher && !OPTIONAL_HANDOFF_RE.test(closing)) {
-    return { stalled: false, reason: 'waiting-on-live-watcher' };
   }
 
   if (OPTIONAL_HANDOFF_RE.test(closing) && !hasConcreteBlocker) {
     return { stalled: true, reason: 'optional-question-or-handoff' };
   }
 
-  const nonEmptyLines = prose.split('\n').map((line) => line.trim()).filter(Boolean);
-  const lastLine = nonEmptyLines.at(-1) ?? '';
   if (lastLine.endsWith('?') && !hasConcreteBlocker) {
     return { stalled: true, reason: 'trailing-question' };
   }
@@ -673,8 +723,14 @@ export function evaluateConversation({
       lastRealUserIndex,
       events.findLastIndex((ev) => ev.kind === 'continuation'),
     );
-    const assistantChunks = [];
+    let stopBoundary = turnBoundary;
     for (let i = turnBoundary + 1; i < events.length; i += 1) {
+      if (events[i].kind === 'activity') {
+        stopBoundary = i;
+      }
+    }
+    const assistantChunks = [];
+    for (let i = stopBoundary + 1; i < events.length; i += 1) {
       if (events[i].kind === 'assistant') assistantChunks.push(events[i].text);
     }
     effectiveAssistantText = assistantChunks.join('\n').trim();
@@ -898,8 +954,12 @@ export function main(argv = process.argv.slice(2)) {
     return 0;
   }
 
-  const { output } = runStopHookPayload(payload, { harness: parsedArgs.harness });
-  process.stdout.write(`${JSON.stringify(output)}\n`);
+  try {
+    const { output } = runStopHookPayload(payload, { harness: parsedArgs.harness });
+    process.stdout.write(`${JSON.stringify(output)}\n`);
+  } catch {
+    process.stdout.write('{}\n');
+  }
   return 0;
 }
 

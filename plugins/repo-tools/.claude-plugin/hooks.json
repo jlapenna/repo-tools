@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/repo-autonomous-work-hook.mjs\"",
+            "command": "if [ -f \"${CLAUDE_PLUGIN_ROOT}/scripts/run-autonomous-work-hook.sh\" ]; then sh \"${CLAUDE_PLUGIN_ROOT}/scripts/run-autonomous-work-hook.sh\" --harness claude; elif [ -f \"$HOME/.claude/plugins/marketplaces/repo-tools/plugins/repo-tools/scripts/run-autonomous-work-hook.sh\" ]; then sh \"$HOME/.claude/plugins/marketplaces/repo-tools/plugins/repo-tools/scripts/run-autonomous-work-hook.sh\" --harness claude; else printf '{}\\n'; fi",
             "timeout": 15
           }
         ]

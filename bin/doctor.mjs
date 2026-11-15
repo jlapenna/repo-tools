@@ -119,6 +119,15 @@ function versions(dir) {
 const newest = (list) =>
   [...list].sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).at(-1) ?? null;
 
+function resolveClaudePluginCachePath(claudeHome, recordedPath) {
+  if (typeof recordedPath !== 'string' || !recordedPath) return null;
+  const marker = '/plugins/cache/';
+  const idx = recordedPath.indexOf(marker);
+  if (idx === -1) return null;
+  const remapped = path.join(claudeHome, 'plugins', 'cache', recordedPath.slice(idx + marker.length));
+  return existsSync(remapped) ? remapped : null;
+}
+
 // This package declares one stable major with an explicit patch floor.
 function nodeMeetsEngines(version, range) {
   const actual = /^(\d+)\.(\d+)\.(\d+)$/.exec(version);
@@ -205,8 +214,16 @@ export function diagnose({ env = process.env, cwd = process.cwd() } = {}) {
         if (!key.startsWith('repo-tools@')) continue;
         for (const entry of entries) {
           claudeVersions.push(entry.version);
-          if (existsSync(entry.installPath)) add(`plugin:claude:${key}`, 'ok', `${entry.version} at ${entry.installPath}`);
-          else add(`plugin:claude:${key}`, 'fail', `stale: ${entry.version} install path ${entry.installPath} is missing`);
+          if (existsSync(entry.installPath)) {
+            add(`plugin:claude:${key}`, 'ok', `${entry.version} at ${entry.installPath}`);
+          } else {
+            const remapped = resolveClaudePluginCachePath(claudeHome, entry.installPath);
+            if (remapped) {
+              add(`plugin:claude:${key}`, 'warn', `${entry.version} at ${remapped} (installed_plugins.json records foreign root ${entry.installPath})`);
+            } else {
+              add(`plugin:claude:${key}`, 'fail', `stale: ${entry.version} install path ${entry.installPath} is missing`);
+            }
+          }
         }
       }
     } catch {
@@ -241,7 +258,10 @@ export function diagnose({ env = process.env, cwd = process.cwd() } = {}) {
       add('plugin:antigravity', 'warn', `${agyManifest} is missing or not valid JSON`);
     } else {
       const agyHooks = path.join(agyPluginDir, 'hooks.json');
-      const scripts = existsSync(agyHooks) ? pluginScriptPaths(agyHooks) : [];
+      const rawScripts = existsSync(agyHooks) ? pluginScriptPaths(agyHooks) : [];
+      const scripts = Array.isArray(rawScripts) && rawScripts.includes('./scripts/run-autonomous-work-hook.sh')
+        ? [...new Set([...rawScripts, './scripts/repo-autonomous-work-hook.mjs'])]
+        : rawScripts;
       const missingScript = Array.isArray(scripts) ? scripts.find((rel) => !existsSync(path.join(agyPluginDir, rel))) : null;
       if (scripts === null) {
         add('plugin:antigravity', 'warn', `${agyHooks} is not valid JSON`);
