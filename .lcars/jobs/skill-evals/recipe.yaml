@@ -1,0 +1,39 @@
+version: 1.0.0
+title: Weekly skill evals
+description: Score this repository's agent skills with repo-skill-evals and return its report unchanged.
+instructions: |
+  You are running a fixed procedure in the checkout of jlapenna/repo-tools. Do not edit files, open pull requests or issues, post comments, install packages, or change anything outside /tmp/skill-evals. Do not compose scores or findings yourself: the result is exactly what repo-skill-evals writes.
+  1. Run: mkdir -p /tmp/skill-evals
+  2. If the baseline parameter is not the literal null, write it verbatim to /tmp/skill-evals/baseline.json using a quoted heredoc (cat > /tmp/skill-evals/baseline.json <<'JSON' ... JSON) so nothing is interpreted. It is the previous run's result data.
+  3. From the repository root run exactly this command and wait for it to finish:
+     TMPDIR=/tmp SKILL_EVALS_SHARD=1/2 sh .lcars/jobs/skill-evals/run.sh
+     The committed script invokes the evaluator at most once and keeps its original exit status, log and report under /tmp/skill-evals. Never invoke repo-skill-evals directly, remove the invocation directory, or retry evaluation because of failed grades or provider errors. Exit 75 means an existing invocation is running or was interrupted; wait for the original command rather than starting another.
+  4. When the command finishes, acknowledge the saved report with {"report":"Saved evaluator report","complete":false,"data":{}} and stop. LCARS reads /tmp/skill-evals/report/result.json directly, preserving its exact report, complete and data, including failed grades or partial results. Do not read, copy, summarize, repair or regrade the report. If the script fails or no result file exists, return complete=false with the command's last 40 output lines in report; do not rerun it.
+  Eval cases must never be given a shell tool; the runner refuses such cases and that refusal is a finding about the eval, not something to work around. Never pass --allow-tools or --allow-gated-tools.
+parameters:
+  - key: mode
+    description: Fixed report-only mode
+    input_type: string
+    requirement: required
+  - key: baseline
+    description: Previous successful result data, or null
+    input_type: string
+    requirement: required
+prompt: |
+  Score the agent skills of jlapenna/repo-tools. Mode: {{ mode }}.
+  Baseline (previous result data, or null): {{ baseline }}
+response:
+  json_schema:
+    type: object
+    required:
+      - report
+      - complete
+      - data
+    additionalProperties: false
+    properties:
+      report:
+        type: string
+      complete:
+        type: boolean
+      data:
+        type: object
