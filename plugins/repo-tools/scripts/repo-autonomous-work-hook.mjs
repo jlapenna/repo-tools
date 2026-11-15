@@ -19,12 +19,17 @@ import { fileURLToPath } from 'node:url';
 export const HOOK_MARKER = '[autonomous-work-hook]';
 export const DEFAULT_MAX_CONTINUATIONS = 3;
 
-const SKILL_PATH_RE = /(?:^|[\s"'`(=:/\\])autonomous-work[\\/]SKILL\.md(?=$|[\s"'`):])/i;
+const SKILL_PATH_RE = /(?:^|[\s"'`(=:/\\])autonomous-work[\\/](?:SKILL\.md|references[\\/][^\s"'`):]+\.md)(?=$|[\s"'`):])/i;
 const SKILL_WRITE_TOOL_RE = /^(?:write|edit|multiedit|write_file|edit_file|write_to_file|replace_file_content|multi_replace_file_content|apply_patch|notebookedit|notebook_edit)$/i;
 const SKILL_WRITE_CMD_RE = /\b(?:git\s+(?:add|diff|checkout|rm|mv)|rm|mv|cp|tee|sed\s+-i|perl\s+-[a-z]*i)\b/i;
-const SLASH_OR_DOLLAR_SKILL_RE = /(?:<command-name>\s*\/(?:repo-tools:)?autonomous-work\s*<\/command-name>|(?:^|\s)[/$](?:repo-tools:)?autonomous-work(?=$|\s|[.,:;!?)]))/i;
+const SLASH_OR_DOLLAR_SKILL_RE = /(?:<command-name>\s*\/(?:repo-tools:)?autonomous-work\s*<\/command-name>|@\[\/?(?:repo-tools:)?autonomous-work\]|(?:^|[\s"'`([<])[/$](?:repo-tools:)?autonomous-work(?=$|[\s"'`,.:;!?)>\]]))/i;
 const CODEX_SKILL_BLOCK_RE = /<skill>\s*<name>(?:repo-tools:)?autonomous-work<\/name>/i;
+const AGY_SKILL_INVOCATION_RE = /<SKILL>\s*The user has explicitly invoked the \((?:repo-tools:)?autonomous-work\) skill\./i;
+const OPENCODE_SKILL_CONTENT_RE = /<skill_content\b[^>]*\bname=["']?(?:repo-tools:)?autonomous-work["']?/i;
+const SYNTHETIC_PLUGIN_BLOCK_RE = /<(?:hindsight_pages|hindsight_page_refresh)>[\s\S]*?<\/(?:hindsight_pages|hindsight_page_refresh)>/gi;
 const SKILL_BODY_SIGNATURE_RE = /^#\s+Autonomous work\b[\s\S]{0,400}\bCarry the requested task as far as its existing authorization allows\./m;
+const INJECTED_CONTINUATION_RE = /^continue\s*\n+\[autonomous-work-hook\]\s+Stalled turn detected\b/;
+const AGY_INJECTED_CONTINUATION_RE = /(?:^|Stop hook blocked termination:\s*)continue\s*\n+\[autonomous-work-hook\]\s+Stalled turn detected\b/;
 
 const USER_STOP_DIRECTIVE_RE = new RegExp(
   [
@@ -131,7 +136,7 @@ function isSkillReadCall(toolName, rawArgs) {
 function classifyUserText(rawText) {
   const text = String(rawText ?? '').trim();
   if (!text) return null;
-  if (text.includes(HOOK_MARKER)) {
+  if (INJECTED_CONTINUATION_RE.test(text)) {
     return { kind: 'continuation', text };
   }
   return {
@@ -264,6 +269,13 @@ export function parseCodexTranscript(transcriptPath) {
   const hasUserEvents = rawObjects.some(
     (line) => line.type === 'event_msg' && line.payload?.type === 'item_completed' && line.payload.item?.type === 'UserMessage',
   );
+  const hasAssistantEvents = rawObjects.some((line) => {
+    if (line.type !== 'event_msg' || line.payload?.type !== 'item_completed') return false;
+    const item = line.payload.item;
+    if (item?.type !== 'AgentMessage') return false;
+    return (typeof item.text === 'string' && item.text.trim().length > 0) ||
+      extractCodexContentText(item.content).trim().length > 0;
+  });
 
   const events = [];
   for (const line of rawObjects) {
@@ -288,8 +300,9 @@ export function parseCodexTranscript(transcriptPath) {
         if (isSkillReadCall('exec_command', { command: item.command })) {
           events.push({ kind: 'skill', name: 'autonomous-work' });
         }
-      } else if (item.type === 'AgentMessage' && typeof item.text === 'string' && item.text.trim()) {
-        events.push({ kind: 'assistant', text: item.text.trim() });
+      } else if (item.type === 'AgentMessage') {
+        const agentText = (typeof item.text === 'string' ? item.text : extractCodexContentText(item.content)).trim();
+        if (agentText) events.push({ kind: 'assistant', text: agentText });
       }
       continue;
     }
@@ -297,7 +310,7 @@ export function parseCodexTranscript(transcriptPath) {
     if (line.type !== 'response_item' || !line.payload || typeof line.payload !== 'object') continue;
     const p = line.payload;
     if (p.type === 'message') {
-      if (p.role === 'assistant') {
+      if (p.role === 'assistant' && !hasAssistantEvents) {
         if (p.channel === 'analysis' || p.channel === 'reasoning' || p.phase === 'analysis' || p.phase === 'reasoning') {
           continue;
         }
@@ -369,9 +382,14 @@ export function parseAntigravityTranscript(transcriptPath) {
     if (kind === 'USER_INPUT' || kind === 'user') {
       const clean = unwrapAntigravityUserText(rawContent);
       const classified = classifyUserText(clean);
+      const metadataActivates = AGY_SKILL_INVOCATION_RE.test(rawContent);
       if (classified) {
-        if (classified.activatesSkill) events.push({ kind: 'skill', name: 'autonomous-work' });
+        if (classified.activatesSkill || metadataActivates) {
+          events.push({ kind: 'skill', name: 'autonomous-work' });
+        }
         events.push({ kind: classified.kind, text: classified.text });
+      } else if (metadataActivates) {
+        events.push({ kind: 'skill', name: 'autonomous-work' });
       }
       continue;
     }
@@ -395,7 +413,7 @@ export function parseAntigravityTranscript(transcriptPath) {
       continue;
     }
 
-    if (rawContent.includes(HOOK_MARKER)) {
+    if (AGY_INJECTED_CONTINUATION_RE.test(rawContent.trim())) {
       events.push({ kind: 'continuation', text: rawContent.trim() });
     }
   }
@@ -411,14 +429,34 @@ export function parseOpenCodeMessages(messages) {
     const parts = Array.isArray(entry.parts) ? entry.parts : [];
 
     if (role === 'user') {
-      const text = parts
-        .filter((part) => part?.type === 'text' && typeof part.text === 'string')
-        .map((part) => part.text)
+      const textParts = parts.filter((part) => part?.type === 'text' && typeof part.text === 'string');
+      const continuationPart = textParts.find((part) =>
+        INJECTED_CONTINUATION_RE.test(part.text.replace(SYNTHETIC_PLUGIN_BLOCK_RE, '').trim()),
+      );
+      if (continuationPart) {
+        events.push({ kind: 'continuation', text: continuationPart.text.trim() });
+        continue;
+      }
+
+      const commandActivates =
+        isSkillName(entry.info?.command ?? entry.command) ||
+        textParts.some((part) => SKILL_BODY_SIGNATURE_RE.test(part.text) || OPENCODE_SKILL_CONTENT_RE.test(part.text));
+
+      const nonSynthetic = textParts.filter((part) => !part.synthetic);
+      const selectedParts = nonSynthetic.length > 0 ? nonSynthetic : textParts;
+      const cleanedText = selectedParts
+        .map((part) => part.text.replace(SYNTHETIC_PLUGIN_BLOCK_RE, '').trim())
+        .filter(Boolean)
         .join('\n');
-      const classified = classifyUserText(text);
+
+      const classified = classifyUserText(cleanedText);
       if (classified) {
-        if (classified.activatesSkill) events.push({ kind: 'skill', name: 'autonomous-work' });
+        if (classified.activatesSkill || commandActivates) {
+          events.push({ kind: 'skill', name: 'autonomous-work' });
+        }
         events.push({ kind: classified.kind, text: classified.text });
+      } else if (commandActivates) {
+        events.push({ kind: 'skill', name: 'autonomous-work' });
       }
     } else if (role === 'assistant') {
       const texts = [];

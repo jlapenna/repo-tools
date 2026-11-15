@@ -13,7 +13,11 @@ import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
 import AutonomousWorkMonitor from '../plugins/repo-tools/opencode/autonomous-work.mjs';
-import { HOOK_MARKER, runStopHookPayload } from '../plugins/repo-tools/scripts/repo-autonomous-work-hook.mjs';
+import {
+  buildContinuationMessage,
+  parseCodexTranscript,
+  runStopHookPayload,
+} from '../plugins/repo-tools/scripts/repo-autonomous-work-hook.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const cliBin = join(root, 'bin/autonomous-work-hook.mjs');
@@ -48,8 +52,8 @@ function invokeCli(payload, args = [], extraEnv = {}) {
   return JSON.parse(proc.stdout);
 }
 
-test('Claude Code CLI hook stays silent when autonomous-work was not granted or only edited', () => {
-  withTempDir((dir) => {
+test('Claude Code CLI hook stays silent when autonomous-work was not granted or only edited', async () => {
+  await withTempDir((dir) => {
     const transcript = join(dir, 'claude.jsonl');
     writeJsonl(transcript, [
       { type: 'user', message: { content: [{ type: 'text', text: 'Tighten wording in autonomous-work/SKILL.md' }] } },
@@ -79,8 +83,8 @@ test('Claude Code CLI hook stays silent when autonomous-work was not granted or 
   });
 });
 
-test('Claude Code Stop hook blocks premature stalls and allows completion, blockers, watchers, revocation, and subagents', () => {
-  withTempDir((dir) => {
+test('Claude Code Stop hook blocks premature stalls and allows completion, blockers, watchers, revocation, and subagents', async () => {
+  await withTempDir((dir) => {
     const stateDir = join(dir, 'state');
     const transcript = join(dir, 'claude-auto.jsonl');
 
@@ -185,8 +189,8 @@ test('Claude Code Stop hook blocks premature stalls and allows completion, block
   });
 });
 
-test('per-user-turn continuation cap prevents infinite loops and resets on a new real user turn', () => {
-  withTempDir((dir) => {
+test('per-user-turn continuation cap prevents infinite loops and resets on a new real user turn', async () => {
+  await withTempDir((dir) => {
     const stateDir = join(dir, 'state');
     const transcript = join(dir, 'cap.jsonl');
     writeJsonl(transcript, [
@@ -213,21 +217,35 @@ test('per-user-turn continuation cap prevents infinite loops and resets on a new
     assert.equal(third.decision.shouldContinue, false);
     assert.equal(third.decision.reason, 'max-continuations-reached');
 
-    // A new real user turn resets the budget.
+    // A new real user turn resets the budget, even when prose mentions [autonomous-work-hook].
     writeJsonl(transcript, [
       { type: 'user', message: { content: '/autonomous-work Finish cleanup' } },
-      { type: 'assistant', message: { content: [{ type: 'text', text: `continue\n\n${HOOK_MARKER} prior` }] } },
-      { type: 'user', message: { content: 'Keep going with the remote branches too.' } },
+      { type: 'user', message: { content: buildContinuationMessage('announced-next-step', 1, 2) } },
+      { type: 'assistant', message: { content: [{ type: 'text', text: 'Deleted local branches.' }] } },
+      { type: 'user', message: { content: 'Keep going with remote branches too, and note [autonomous-work-hook] in the summary.' } },
       { type: 'assistant', message: { content: [{ type: 'text', text: 'Next, I will audit remote branches.' }] } },
     ]);
     const afterNewUserTurn = runStopHookPayload(payload, { stateDir, maxContinuations: 2, env: {} });
     assert.equal(afterNewUserTurn.decision.shouldContinue, true);
     assert.equal(afterNewUserTurn.decision.continuations, 1);
+
+    // Mentioning [autonomous-work-hook] in prose alongside $autonomous-work still grants autonomy.
+    const proseTranscript = join(dir, 'prose.jsonl');
+    writeJsonl(proseTranscript, [
+      { type: 'user', message: { content: '$autonomous-work Verify [autonomous-work-hook] behavior end to end.' } },
+      { type: 'assistant', message: { content: [{ type: 'text', text: 'Next, I will run the smoke suite.' }] } },
+    ]);
+    const proseGrant = runStopHookPayload(
+      { ...payload, session_id: 'prose-grant', transcript_path: proseTranscript },
+      { stateDir, maxContinuations: 2, env: {} },
+    );
+    assert.equal(proseGrant.decision.shouldContinue, true);
+    assert.equal(proseGrant.decision.continuations, 1);
   });
 });
 
-test('Codex Stop hook ignores startup skill catalogs, detects skill reads, and emits strict stop.command.output keys', () => {
-  withTempDir((dir) => {
+test('Codex Stop hook ignores startup skill catalogs, detects skill reads, and emits strict stop.command.output keys', async () => {
+  await withTempDir((dir) => {
     const stateDir = join(dir, 'state');
     const rollout = join(dir, 'rollout.jsonl');
 
@@ -337,11 +355,61 @@ test('Codex Stop hook ignores startup skill catalogs, detects skill reads, and e
     }
     assert.equal(stalled.decision, 'block');
     assert.match(stalled.reason, /^continue\n\n\[autonomous-work-hook\]/);
+
+    // Codex transcript_v2 emits AgentMessage.content alongside response_item assistant messages.
+    const rolloutV2 = join(dir, 'rollout-v2.jsonl');
+    writeJsonl(rolloutV2, [
+      {
+        type: 'event_msg',
+        payload: {
+          type: 'item_completed',
+          item: { type: 'UserMessage', content: [{ type: 'Text', text: '$autonomous-work Finish step 2.' }] },
+        },
+      },
+      {
+        type: 'event_msg',
+        payload: {
+          type: 'item_completed',
+          item: { type: 'AgentMessage', content: [{ type: 'Text', text: 'Next, I will finish step 2.' }] },
+        },
+      },
+      {
+        type: 'response_item',
+        payload: {
+          type: 'message',
+          role: 'assistant',
+          content: [{ type: 'output_text', text: 'Next, I will finish step 2.' }],
+        },
+      },
+    ]);
+
+    const parsedV2 = parseCodexTranscript(rolloutV2);
+    assert.equal(
+      parsedV2.filter((ev) => ev.kind === 'assistant').length,
+      1,
+      'transcript_v2 AgentMessage must not be duplicated by response_item assistant message',
+    );
+    const stalledV2 = invokeCli(
+      {
+        cwd: dir,
+        hook_event_name: 'Stop',
+        last_assistant_message: null,
+        model: 'gpt-5-codex',
+        session_id: 'codex-v2',
+        stop_hook_active: false,
+        transcript_path: rolloutV2,
+        turn_id: 'turn-v2',
+      },
+      ['--harness', 'codex'],
+      { REPO_AUTONOMOUS_STATE_DIR: stateDir },
+    );
+    assert.equal(stalledV2.decision, 'block');
+    assert.match(stalledV2.reason, /^continue\n\n\[autonomous-work-hook\]/);
   });
 });
 
-test('Antigravity Stop hook reads transcript_full.jsonl, honors fullyIdle/terminationReason, and emits continue decision', () => {
-  withTempDir((dir) => {
+test('Antigravity Stop hook reads transcript_full.jsonl, honors fullyIdle/terminationReason, and emits continue decision', async () => {
+  await withTempDir((dir) => {
     const stateDir = join(dir, 'state');
     const compactPath = join(dir, 'transcript.jsonl');
     const fullPath = join(dir, 'transcript_full.jsonl');
@@ -418,6 +486,75 @@ test('Antigravity Stop hook reads transcript_full.jsonl, honors fullyIdle/termin
     );
     assert.equal(resumed.decision, 'continue');
     assert.match(resumed.reason, /^continue\n\n\[autonomous-work-hook\]/);
+
+    // Direct @[autonomous-work] and <SKILL> metadata invocation activates without a tool read.
+    const slashFullPath = join(dir, 'slash-transcript.jsonl');
+    writeJsonl(slashFullPath, [
+      {
+        type: 'USER_INPUT',
+        content:
+          '<USER_REQUEST>@[autonomous-work]</USER_REQUEST>\n' +
+          '<ADDITIONAL_METADATA><SKILL>The user has explicitly invoked the (autonomous-work) skill.</SKILL></ADDITIONAL_METADATA>',
+      },
+      {
+        type: 'PLANNER_RESPONSE',
+        content: 'Next, I will finish step 2.',
+      },
+    ]);
+    const resumedSlash = invokeCli(
+      {
+        conversationId: 'agy-slash',
+        workspacePaths: [dir],
+        transcriptPath: slashFullPath,
+        hookEventName: 'Stop',
+        terminationReason: 'NO_TOOL_CALL',
+        fullyIdle: true,
+        continuationActive: false,
+      },
+      ['--harness', 'antigravity'],
+      { REPO_AUTONOMOUS_STATE_DIR: stateDir },
+    );
+    assert.equal(resumedSlash.decision, 'continue');
+    assert.match(resumedSlash.reason, /^continue\n\n\[autonomous-work-hook\]/);
+
+    // Antigravity records Stop-hook blocks as SYSTEM_MESSAGE steps; turnBoundary
+    // must advance past prior stalled PLANNER_RESPONSE steps once completed.
+    writeJsonl(slashFullPath, [
+      {
+        type: 'USER_INPUT',
+        content:
+          '<USER_REQUEST>@[autonomous-work]</USER_REQUEST>\n' +
+          '<ADDITIONAL_METADATA><SKILL>The user has explicitly invoked the (autonomous-work) skill.</SKILL></ADDITIONAL_METADATA>',
+      },
+      {
+        type: 'PLANNER_RESPONSE',
+        content: 'Implemented parser.\n\n- [x] Parser\n- [ ] Unit tests',
+      },
+      {
+        type: 'SYSTEM_MESSAGE',
+        content:
+          'The following is a <SYSTEM_MESSAGE> not actually sent by the user.\n\n' +
+          `<SYSTEM_MESSAGE>\nStop hook blocked termination: ${resumedSlash.reason}\n</SYSTEM_MESSAGE>`,
+      },
+      {
+        type: 'PLANNER_RESPONSE',
+        content: 'Added unit tests and verified all checks pass.',
+      },
+    ]);
+    const completedSlash = invokeCli(
+      {
+        conversationId: 'agy-slash',
+        workspacePaths: [dir],
+        transcriptPath: slashFullPath,
+        hookEventName: 'Stop',
+        terminationReason: 'NO_TOOL_CALL',
+        fullyIdle: true,
+        continuationActive: true,
+      },
+      ['--harness', 'antigravity'],
+      { REPO_AUTONOMOUS_STATE_DIR: stateDir },
+    );
+    assert.deepEqual(completedSlash, {});
   });
 });
 
@@ -485,11 +622,67 @@ test('OpenCode plugin injects promptAsync continue on stalled autonomous session
       // Once completed cleanly, session.idle does not re-prompt.
       sessionMessages.set('root-1', [
         ...sessionMessages.get('root-1'),
-        { info: { role: 'user' }, parts: [{ type: 'text', text: submittedPrompts[0].body.parts[0].text }] },
+        {
+          info: { role: 'user' },
+          parts: [
+            { type: 'text', synthetic: true, text: '<hindsight_page_refresh>refresh</hindsight_page_refresh>' },
+            { type: 'text', text: submittedPrompts[0].body.parts[0].text },
+          ],
+        },
         { info: { role: 'assistant' }, parts: [{ type: 'text', text: 'Pushed branch, merged PR #52, and removed the task worktree.' }] },
       ]);
       await hooks.event({ event: { type: 'session.idle', properties: { sessionID: 'root-1' } } });
       assert.equal(submittedPrompts.length, 1);
+
+      // OpenCode `/autonomous-work` command expands SKILL.md directly into user parts
+      // alongside synthetic plugin parts, and continuation caps still hold.
+      const prevMax = process.env.REPO_AUTONOMOUS_MAX_CONTINUATIONS;
+      process.env.REPO_AUTONOMOUS_MAX_CONTINUATIONS = '1';
+      try {
+        sessions.set('cmd-1', { id: 'cmd-1', directory: dir });
+        sessionMessages.set('cmd-1', [
+          {
+            info: { role: 'user' },
+            parts: [
+              { type: 'text', synthetic: true, text: '<hindsight_pages>memory</hindsight_pages>' },
+              {
+                type: 'text',
+                text: '# Autonomous work\n\nCarry the requested task as far as its existing authorization allows.\n\nFinish step 2.',
+              },
+            ],
+          },
+          {
+            info: { role: 'assistant' },
+            parts: [{ type: 'text', text: 'Step 1 done. Next, I will finish step 2.' }],
+          },
+        ]);
+
+        await hooks.event({ event: { type: 'session.idle', properties: { sessionID: 'cmd-1' } } });
+        assert.equal(submittedPrompts.length, 2);
+        assert.equal(submittedPrompts[1].path.id, 'cmd-1');
+
+        // Even if another plugin prepends synthetic text onto our injected continuation
+        // and the assistant stalls again, maxContinuations=1 prevents a second prompt.
+        sessionMessages.set('cmd-1', [
+          ...sessionMessages.get('cmd-1'),
+          {
+            info: { role: 'user' },
+            parts: [
+              { type: 'text', synthetic: true, text: '<hindsight_page_refresh>refresh</hindsight_page_refresh>' },
+              { type: 'text', text: submittedPrompts[1].body.parts[0].text },
+            ],
+          },
+          {
+            info: { role: 'assistant' },
+            parts: [{ type: 'text', text: 'Still working. Next, I will finish step 2.' }],
+          },
+        ]);
+        await hooks.event({ event: { type: 'session.idle', properties: { sessionID: 'cmd-1' } } });
+        assert.equal(submittedPrompts.length, 2);
+      } finally {
+        if (prevMax === undefined) delete process.env.REPO_AUTONOMOUS_MAX_CONTINUATIONS;
+        else process.env.REPO_AUTONOMOUS_MAX_CONTINUATIONS = prevMax;
+      }
     } finally {
       if (previousStateDir === undefined) delete process.env.REPO_AUTONOMOUS_STATE_DIR;
       else process.env.REPO_AUTONOMOUS_STATE_DIR = previousStateDir;

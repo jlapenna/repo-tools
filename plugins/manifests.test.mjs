@@ -1,9 +1,10 @@
 // Protected contract: repo-tools has one source layout consumed by four agent
-// runtimes — Codex, Claude Code, and Antigravity install its plugin manifests
-// and Stop hooks, while OpenCode loads its configured skill directory and
-// server plugin. A broken manifest, hook path, or mismatched skill set fails
-// provider setup fleet-wide without any other check noticing. Consumer:
-// `pnpm test` in ci.yml.
+// runtimes — Claude Code and Antigravity install its plugin manifests and Stop
+// hooks, Codex installs its plugin manifest for skills and calls
+// `repo-autonomous-work-hook --harness codex` from `$CODEX_HOME/hooks.json`,
+// while OpenCode loads its configured skill directory and server plugin. A
+// broken manifest, hook path, or mismatched skill set fails provider setup
+// fleet-wide without any other check noticing. Consumer: `pnpm test` in ci.yml.
 import assert from 'node:assert/strict';
 import {
   accessSync,
@@ -134,25 +135,37 @@ test('repo-tools plugin wires the autonomous-work stall hook across Claude Code,
   assert.doesNotThrow(() => accessSync(hookScript, constants.X_OK), `${hookScript} must be executable`);
   assert.ok(existsSync(opencodePlugin), `${opencodePlugin} must be bundled for OpenCode`);
 
-  for (const manifestRel of ['plugins/repo-tools/.claude-plugin/plugin.json', 'plugins/repo-tools/.codex-plugin/plugin.json']) {
-    const manifest = readJson(manifestRel);
-    assert.equal(typeof manifest.hooks, 'string', `${manifestRel} must declare hooks path`);
-    const hooksFile = resolve(pluginRoot, manifest.hooks);
-    assert.ok(existsSync(hooksFile), `${manifestRel} hooks file ${hooksFile} must exist`);
-    const hooksSpec = JSON.parse(readFileSync(hooksFile, 'utf8'));
-    const stopHooks = hooksSpec.hooks?.Stop?.flatMap((group) => group.hooks ?? []) ?? [];
-    assert.ok(stopHooks.length > 0, `${manifestRel} must register a Stop hook`);
-    for (const handler of stopHooks) {
-      const resolvedCmd = handler.command.replaceAll('${CLAUDE_PLUGIN_ROOT}', pluginRoot);
-      const run = spawnSync('sh', ['-c', resolvedCmd], {
-        cwd: pluginRoot,
-        input: '{}',
-        encoding: 'utf8',
-      });
-      assert.equal(run.status, 0, run.stderr);
-      assert.deepEqual(JSON.parse(run.stdout), {});
-    }
+  const claudeManifest = readJson('plugins/repo-tools/.claude-plugin/plugin.json');
+  assert.equal(typeof claudeManifest.hooks, 'string', 'Claude plugin.json must declare hooks path');
+  const claudeHooksFile = resolve(pluginRoot, claudeManifest.hooks);
+  assert.ok(existsSync(claudeHooksFile), `Claude hooks file ${claudeHooksFile} must exist`);
+  const claudeHooksSpec = JSON.parse(readFileSync(claudeHooksFile, 'utf8'));
+  const claudeStopHooks = claudeHooksSpec.hooks?.Stop?.flatMap((group) => group.hooks ?? []) ?? [];
+  assert.ok(claudeStopHooks.length > 0, 'Claude hooks.json must register a Stop hook');
+  for (const handler of claudeStopHooks) {
+    const resolvedCmd = handler.command.replaceAll('${CLAUDE_PLUGIN_ROOT}', pluginRoot);
+    const run = spawnSync('sh', ['-c', resolvedCmd], {
+      cwd: pluginRoot,
+      input: '{}',
+      encoding: 'utf8',
+    });
+    assert.equal(run.status, 0, run.stderr);
+    assert.deepEqual(JSON.parse(run.stdout), {});
   }
+
+  // Codex gates plugin-scoped hooks on interactive per-version .hook-trust
+  // fingerprints, which fail in headless `codex exec` after plugin upgrades.
+  // Keep `hooks` omitted from `.codex-plugin/plugin.json` and run the CLI
+  // entry point from user-scoped `$CODEX_HOME/hooks.json`.
+  const codexManifest = readJson('plugins/repo-tools/.codex-plugin/plugin.json');
+  assert.equal(codexManifest.hooks, undefined, '.codex-plugin/plugin.json must omit plugin-scoped hooks');
+  const codexCliRun = spawnSync(process.execPath, [join(root, 'bin/autonomous-work-hook.mjs'), '--harness', 'codex'], {
+    cwd: root,
+    input: '{}',
+    encoding: 'utf8',
+  });
+  assert.equal(codexCliRun.status, 0, codexCliRun.stderr);
+  assert.deepEqual(JSON.parse(codexCliRun.stdout), {});
 
   const agyManifest = readJson('plugins/repo-tools/plugin.json');
   assert.equal(agyManifest.name, 'repo-tools');
