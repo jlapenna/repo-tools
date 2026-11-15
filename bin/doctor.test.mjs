@@ -251,6 +251,36 @@ test('diagnoses Antigravity and OpenCode plugin installations and four-harness v
   assert.equal(brokenAgy.status, 1);
   assert.equal(check(brokenAgy.json, 'plugin:antigravity').status, 'fail');
 
+  // Launcher-backed Antigravity hooks.json requires both launcher and .mjs target.
+  writeFileSync(
+    path.join(agyDir, 'hooks.json'),
+    JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command: 'sh "./scripts/run-autonomous-work-hook.sh" --harness antigravity' }] }] } }),
+  );
+  writeFileSync(path.join(agyDir, 'scripts/run-autonomous-work-hook.sh'), '#!/bin/sh\n');
+  const missingTargetAgy = runFour();
+  assert.equal(missingTargetAgy.status, 1);
+  assert.equal(check(missingTargetAgy.json, 'plugin:antigravity').status, 'fail');
+  writeFileSync(path.join(agyDir, 'scripts/repo-autonomous-work-hook.mjs'), '#!/usr/bin/env node\n');
+  writeFileSync(path.join(agyDir, 'plugin.json'), JSON.stringify({ name: 'repo-tools', version: '2.0.10' }));
+  assert.equal(runFour().status, 0);
+
+  // Container-rewritten Claude installPath warns instead of failing when host cache exists.
+  writeFileSync(
+    path.join(fx.claude, 'plugins/installed_plugins.json'),
+    JSON.stringify({
+      version: 2,
+      plugins: { 'repo-tools@repo-tools': [{ version: '2.0.10', installPath: '/native/claude/plugins/cache/repo-tools/repo-tools/2.0.10' }] },
+    }),
+  );
+  const remappedClaude = runFour();
+  assert.equal(remappedClaude.status, 0, remappedClaude.stdout);
+  assert.equal(check(remappedClaude.json, 'plugin:claude:repo-tools@repo-tools').status, 'warn');
+  assert.match(check(remappedClaude.json, 'plugin:claude:repo-tools@repo-tools').detail, /records foreign root \/native\/claude/);
+  writeFileSync(
+    path.join(fx.claude, 'plugins/installed_plugins.json'),
+    JSON.stringify({ version: 2, plugins: { 'repo-tools@repo-tools': [{ version: '2.0.10', installPath: fx.installPath }] } }),
+  );
+
   // Direct opencode.jsonc file:// entry pointing at a missing module also fails.
   rmSync(agyDir, { recursive: true });
   rmSync(path.join(xdgConfig, 'opencode/plugins/repo-tools-autonomous-work.js'));

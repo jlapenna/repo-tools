@@ -128,9 +128,12 @@ test('repo-tools plugin bundles the executable auto-merge watcher referenced by 
 
 test('repo-tools plugin wires the autonomous-work stall hook across Claude Code, Codex, Antigravity, and OpenCode', async () => {
   const pluginRoot = join(root, 'plugins/repo-tools');
+  const hookLauncher = join(pluginRoot, 'scripts/run-autonomous-work-hook.sh');
   const hookScript = join(pluginRoot, 'scripts/repo-autonomous-work-hook.mjs');
   const opencodePlugin = join(pluginRoot, 'opencode/autonomous-work.mjs');
 
+  assert.ok(existsSync(hookLauncher), `${hookLauncher} must be bundled with the plugin`);
+  assert.doesNotThrow(() => accessSync(hookLauncher, constants.X_OK), `${hookLauncher} must be executable`);
   assert.ok(existsSync(hookScript), `${hookScript} must be bundled with the plugin`);
   assert.doesNotThrow(() => accessSync(hookScript, constants.X_OK), `${hookScript} must be executable`);
   assert.ok(existsSync(opencodePlugin), `${opencodePlugin} must be bundled for OpenCode`);
