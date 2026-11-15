@@ -5,13 +5,13 @@
 // and the skill-evals skill, which tells agents to run this command.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { findRuns, readRun } from './eval-history.mjs';
-import { ablationOf, carriedResult, carryForward, caseRecord, experimentKey, withoutScore, buildCase, markProviderLimit, canonicalJson, compareBaseline, defaultCacheDir, discoverSkills, findEvals, fixturePath, gatedTool, loadBaseline, loadEntries, main, modelOf, parseArgs, plan, planCases, renderTable, summarize, writeReport, writeWrapper } from './skill-evals.mjs';
+import { ablationOf, checkOf, criteria, carriedResult, carryForward, caseRecord, experimentKey, withoutScore, buildCase, markProviderLimit, canonicalJson, compareBaseline, defaultCacheDir, discoverSkills, findEvals, fixturePath, gatedTool, loadBaseline, loadEntries, main, modelOf, parseArgs, plan, planCases, renderTable, summarize, writeReport, writeWrapper } from './skill-evals.mjs';
 
 const script = fileURLToPath(new URL('./skill-evals.mjs', import.meta.url));
 
@@ -72,7 +72,12 @@ test('builds a case per eval entry with a skill-fired grader and a rubric from a
   assert.match('{"skill":"homelab-skills:oncall"}', new RegExp(first.graders[0].input_match));
   assert.doesNotMatch('{"skill":"oncall-extra"}', new RegExp(first.graders[0].input_match));
   assert.equal(first.graders[1].type, 'llm');
-  assert.match(first.graders[1].criteria, /- Reads the probe log\n- Names the failing unit/);
+  assert.deepEqual(first.graders.slice(1).map((g) => [g.name, g.type]), [['criteria-1', 'llm'], ['criteria-2', 'llm']], 'each assertion is judged on its own');
+  assert.match(first.graders[1].criteria, /holds for the response and its trace:\nReads the probe log\n/);
+  assert.match(first.graders[2].criteria, /Names the failing unit/);
+  assert.match(first.graders[1].criteria, /read-only tools/, 'a plan is not failed for not having executed');
+  assert.equal(checkOf(first.graders[2].criteria), 'Names the failing unit');
+  assert.match(criteria(entries[0]), /- Reads the probe log\n- Names the failing unit/, 'adapters still get one combined rubric');
   const second = buildCase(skill, entries[1], { runs: 3 });
   assert.equal(second.runs, 3);
   assert.equal(second.context, undefined);
@@ -140,9 +145,15 @@ test('real CLI lists coverage and writes a runnable wrapper plugin on --dry-run'
   assert.ok(!existsSync(path.join(plugin, 'skills/oncall/evals/results')), 'old results are not copied into the wrapper');
   assert.ok(!existsSync(path.join(plugin, 'skills/plain')), 'skills without evals stay out of the wrapper');
   const spec = JSON.parse(readFileSync(path.join(plugin, 'evals/oncall--eval-1/case.yaml'), 'utf8'));
-  assert.equal(spec.execution.prompt, 'Headscale probe is failing, what now?');
+  assert.equal(spec.execution.prompt, `Headscale probe is failing, what now?\n\nAttached files (read-only):\n- ${path.join(plugin, 'evals/oncall--eval-1/resources/probe.log')}`, 'the agent is told where its fixture is');
   assert.equal(readFileSync(path.join(plugin, 'evals/oncall--eval-1/resources/probe.log'), 'utf8'), 'probe failed\n');
   assert.deepEqual(JSON.parse(readFileSync(path.join(out, 'manifest.json'), 'utf8')).cases.map((c) => c.skill), ['handoff', 'handoff', 'land-pr', 'oncall', 'oncall']);
+  appendFileSync(path.join(root, 'repo/.agents/skills/oncall/SKILL.md'), '\nFor a plain check, load the plain skill.\n');
+  const linked = path.join(root, 'linked');
+  assert.equal(run('--dry-run', '--out', linked, '--skill', 'oncall').status, 0);
+  assert.ok(existsSync(path.join(linked, 'plugin/skills/plain/SKILL.md')), 'a sibling the selected skill names is copied');
+  assert.ok(!existsSync(path.join(linked, 'plugin/skills/handoff')), 'an unrelated sibling is not');
+  assert.ok(!existsSync(path.join(linked, 'plugin/evals/handoff--eval-1')));
   const only = run('--list', '--skill', 'oncall');
   assert.match(only.stdout, /1\/1 skills have evals/);
   assert.equal(run('--list', '--skill', 'nope').status, 1);
@@ -311,7 +322,7 @@ test('writes a Markdown job report and result.json with the baseline comparison'
   ] }));
   const spawn = (cmd, args) => {
     writeFileSync(args[args.indexOf('--json') + 1], JSON.stringify({ claudeVersion: '2.1.318', costUsd: 0.5, durationSeconds: 9, partial: true, partialReason: 'cost ceiling', aggregates: { casesTotal: 4, casesPassed: 1 }, cases: [
-      { name: 'oncall--probe', promptMarkdown: `Headscale probe is failing, ${'x'.repeat(400)}`, aggregates: { score: 0.5 }, arms: { with: [
+      { name: 'oncall--probe', promptMarkdown: `Headscale probe is failing, ${'x'.repeat(400)}`, graders: [{ name: 'criteria', type: 'llm', config: { criteria: 'PASS only if this holds for the response and its trace:\nReads the probe log\nNote.' } }], aggregates: { score: 0.5 }, arms: { with: [
         { graders: [{ name: 'skill-fired', passed: true }, { name: 'criteria', passed: false, explanation: 'judge votes: FAIL', evidence: `${'e'.repeat(700)}` }] },
         { error: 'boom', graders: [] },
       ] } },
@@ -371,7 +382,7 @@ test('writes a Markdown job report and result.json with the baseline comparison'
   assert.ok(report.indexOf('### Regressions') < report.indexOf('### Improvements'), 'regressions come first');
   assert.match(report, /- New skills: land-pr, plain\n- Removed skills: retired\n/);
   assert.match(report, /## Failures\n\n### oncall\n\nfired 2\/3\n\n#### oncall--probe\n\nPrompt:\n\n```text\nHeadscale probe is failing, x+…\n```\n/);
-  assert.match(report, /- `criteria` failed in run 1: judge votes: FAIL\n\n```text\ne{600}…\n```/);
+  assert.match(report, /- `criteria` failed in run 1 \(Reads the probe log\): judge votes: FAIL\n\n```text\ne{600}…\n```/, 'a failure names the check it judged');
   assert.doesNotMatch(report, /x{301}/, 'prompts are clipped to 300 characters');
   assert.doesNotMatch(report, /e{601}/, 'evidence is clipped to 600 characters');
   assert.doesNotMatch(report, /#### oncall--memory/, 'passing cases are not listed');

@@ -30,9 +30,9 @@ repository that keeps evals outside its skill directories, at
 | --- | --- | --- |
 | `prompt` | yes | The user turn of the case. |
 | `name` | no | Case name `<skill>--<name>` (lowercased, non `[a-z0-9._-]` runs become `-`); defaults to `eval-<id>`. |
-| `assertions` (or `expectations`) | no | The `llm` grader rubric: PASS only if every statement holds. |
+| `assertions` (or `expectations`) | no | One `llm` grader per statement (`criteria-1`, `criteria-2`, ...; a single statement is `criteria`). The case scores the share that hold, and a report names each failed statement. The judge is told the agent had read-only tools, so a proposed step satisfies a statement about running it. |
 | `expected_output` | no | Rubric when there are no assertions; otherwise shown to humans as the expected outcome. |
-| `files` | no | Fixture paths relative to the `evals.json` directory, copied into the case's `resources/` and granted read-only. |
+| `files` | no | Fixture paths relative to the `evals.json` directory, copied into the case's `resources/`, granted read-only, and listed by absolute path at the end of the prompt so the agent can find them. |
 | `execution` | no | Shared per-entry limits: `runs`, `max_turns` (default 8), `timeout_seconds` (default 600), `allowed_tools` (default `Skill, Read, Glob, Grep`). These are logical capabilities mapped by the selected harness. |
 | `plugin_eval` | no | Existing spelling of `execution`, retained for committed cases. Use one field, not both. |
 
