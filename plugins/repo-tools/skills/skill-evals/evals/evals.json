@@ -8,9 +8,10 @@
       "expected_output": "Checks eval coverage with repo-skill-evals --list, then runs a trigger-only pass with runs 1 and a cost ceiling, and compares before and after on the same cases.",
       "files": [],
       "assertions": [
-        "Runs repo-skill-evals --list (or names eval coverage) before scoring anything",
-        "Proposes a --trigger-only run with a bounded cost (--max-cost-usd or --runs 1)",
-        "Says the description, not the prompt, is what to fix when the skill does not fire"
+        "Proposes checking eval coverage with repo-skill-evals --list (or an equivalent coverage check) before any scored run. The user said not to run anything, so proposing the command is enough.",
+        "Proposes a --trigger-only run with a bounded cost, such as --runs 1 and/or -- --max-cost-usd.",
+        "Compares the rewritten description against the previous one on the same cases (for example a run of the old description or --baseline) rather than judging the new description alone.",
+        "Explains what drives the cost (cases times runs, each a real model call on the caller's account) and that the cost ceiling stops the run."
       ]
     },
     {
@@ -30,8 +31,10 @@
       "name": "retained-evidence-before-repeat",
       "prompt": "Use the skill-evals workflow to advise on this evaluation, using only the supplied facts and without executing commands or contacting services. Two weeks ago candidate A was rejected: same source, model, suite and grader as today; score 2/3 with three failed hypotheses. Its scratch worktree is gone, but a protected report and raw evidence survive on another host. I want to try the same changes again and delete the failed results after cleanup. Give the next actions and the retention/publication boundary. Do not launch a new experiment.",
       "assertions": [
-        "The proposed plan checks retained evidence and shared registry/memory before repeating, and recognizes that a missing local worktree or local-store miss does not erase another host's effort. Actual tool execution is forbidden and is not required to pass.",
-        "The advice calls for a recorded change in conditions or a reason for additional samples before repeating rejected changes, and says failed/discarded evidence must remain for at least 90 days.",
+        "The proposed plan checks retained evidence and the shared registry or memory for prior matching attempts before repeating. Actual tool execution is forbidden and is not required to pass.",
+        "The plan recognizes that a missing local worktree or local-store miss does not erase another host's evidence.",
+        "The advice calls for a recorded change in conditions or a reason for additional samples before repeating the rejected changes.",
+        "The advice says failed or discarded evidence must be kept for at least 90 days rather than deleted after cleanup.",
         "The proposed bounded summary includes run identity and owning host/path/report references, with raw traces and credentials kept out of public source. This is a proposed publication boundary; no actual publication is required."
       ],
       "files": []
@@ -41,12 +44,27 @@
       "name": "harness-independent-cases",
       "prompt": "Our skill evals need to run with any harness. We already use Claude and Codex and now want OpenCode. Should I rewrite the prompts, give the evals new credentials, or make another plugin-shaped test suite? Explain the integration and verification steps without executing commands or invoking a model.",
       "assertions": [
-        "Keeps one shared set of prompts, assertions and fixtures instead of creating harness-specific copies.",
-        "Places native execution and authentication in a caller-selected adapter; mentions --runner NAME with --adapter EXECUTABLE or the versioned adapter contract.",
-        "Requires native skill-loading evidence, model and grader provenance, and capability/budget verification before claiming the new harness is supported; does not claim all harnesses are already integrated.",
-        "Does not grant eval definitions authority to choose credentials, invoke shell/network tools or rewrite permission scopes."
+        "Keeps one shared set of prompts, assertions and fixtures for every harness instead of rewriting prompts per harness or building a second plugin-shaped suite.",
+        "Selects OpenCode at the command boundary with the built-in native runner (--runner opencode) and explicit case and judge models, keeping the --runner NAME --adapter EXECUTABLE contract for harnesses without a built-in runner.",
+        "Leaves authentication to the caller or job environment rather than adding credentials to the eval definitions, and does not change credentials or account limits to get around a provider failure.",
+        "Before trusting results, qualifies the actual installed OpenCode binary on a small selected case (for example --case with --runs 1) and checks its skill-loading evidence, rather than relying on an adapter fixture alone."
       ],
-      "files": []
+      "files": [],
+      "expected_output": "Keeps one committed suite, selects --runner opencode with explicit case and judge models at the command boundary, leaves auth with the caller, and qualifies the real binary on a small case before trusting results."
+    },
+    {
+      "id": 5,
+      "name": "both-arms-zero-rubric-audit",
+      "prompt": "Our land-pr skill scores 0 with the skill and 0 without it, even though the answers I read look right. One case's prompt ends with \"Lay out every step you'd take... Don't run anything yet.\" Its assertions are: (1) \"Opens a ready (not draft) PR with squash merge as default, confirms required checks were created and the PR head SHA matches the pushed commit, and arms protected auto-merge while continuing to monitor\" and (2) \"Reads references/authentication-and-provenance.md before changing identity\". Is the skill broken? What would you change, and how would you confirm the fix? Explain without running anything.",
+      "expected_output": "Suspects the rubric before the skill: execution verbs on a plan-only prompt, a packed multi-requirement bullet and a tool-use claim the last-message judge cannot see. Rewrites the assertions as single, plan-phrased requirements that say a proposed step suffices, replaces the file-read claim with the decision the reference teaches, and reruns both arms on the new rubric as a new comparison.",
+      "files": [],
+      "assertions": [
+        "Says the rubric, not the skill, is the likely defect, because both arms score zero on answers that read as correct.",
+        "Identifies that assertion (1) is phrased as an executed action on a prompt that forbids execution, and rewrites it as what the plan proposes, saying (in the assertion or the explanation) that a proposed step is enough.",
+        "Identifies that assertion (1) packs several requirements into one bullet and splits it into separate assertions.",
+        "Identifies that assertion (2) claims a file read that a judge reading only the final answer cannot verify, and replaces it with an observable decision or outcome the answer would state.",
+        "Confirms the fix by rerunning both arms on the rewritten rubric and treats it as a new comparison rather than a corrected old score."
+      ]
     }
   ]
 }

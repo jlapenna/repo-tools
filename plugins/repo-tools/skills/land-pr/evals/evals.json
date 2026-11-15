@@ -6,9 +6,10 @@
       "prompt": "The fix on my branch is done and tested locally. Ship it all the way: I don't want to come back to a PR link and find it waiting. Lay out every step you'd take from here to the branch being gone, and what you'd check at each gate. Don't run anything yet.",
       "expected_output": "Describes the full lifecycle: reconcile repo policy, isolate in a worktree, stage only intended files, run verification without --no-verify, push with tracking, open a ready PR with a complete body, confirm checks exist and head SHA matches, arm auto-merge and run the bundled watcher, fix CI and address/resolve review threads on the current head, merge through protection and verify MERGED state and merge commit, then post-merge fast-forward and worktree/branch cleanup via worktree-hygiene.",
       "assertions": [
-        "Opens a ready (not draft) PR with squash merge as default, confirms required checks were created and the PR head SHA matches the pushed commit, and arms protected auto-merge while continuing to monitor",
-        "Resolves review threads only after the requested change is present and verified in the PR head, and restarts the watch loop on each new head",
-        "Verifies the actual MERGED state, merge timestamp and merge commit rather than a CLI message, then cleans up with repo-safe-remove-worktree and deletes the exact local and remote feature branches"
+        "The plan opens a ready-for-review PR (not a draft), arms auto-merge and keeps monitoring rather than stopping at the PR link. The user said not to run anything, so a proposed step is enough; no executed evidence is required.",
+        "Before trusting CI, the plan checks that the required checks were actually created and that the PR head SHA matches the pushed commit.",
+        "The plan counts the PR as landed only after confirming its actual MERGED state and merge commit, not a CLI success message.",
+        "Before deleting the feature branch and removing the worktree, the plan proves the merged content landed (for example that the branch tree matches the squash-merge result) rather than deleting on the strength of the PR state alone."
       ],
       "id": 1,
       "files": []
@@ -18,9 +19,10 @@
       "prompt": "My PR has been open for two days with a couple of inline review comments and a failing lint job. Get it merged. What's your process for the comments versus the failing job, and when would you stop and ask me instead?",
       "expected_output": "Inspects the failing check's logs and fixes the cause in scope, reads thread-aware inline comments (not the flat list), addresses unambiguous actionable feedback by default and replies/resolves threads only once fixed in the head, pushes corrections and re-checks after every push; stops only for ambiguous or scope-expanding feedback, auth/permission issues, or an unsafe dirty checkout.",
       "assertions": [
-        "Inspects the failing job's actual logs, fixes the cause within scope, verifies locally, pushes, and restarts monitoring on the new head SHA",
-        "Uses thread-aware review comments and addresses every unambiguous actionable comment, asking only when feedback is ambiguous, conflicting, materially scope-expanding or regression-inducing",
-        "Does not declare success while an actionable unresolved thread or required check remains, and never bypasses hooks or protection"
+        "For the failing lint job, the described process reads the job's actual logs and fixes the cause within the PR's scope, without disabling the rule, skipping the job or bypassing hooks. The eval has no repository or GitHub access, so describing the process is enough, and asking where the PR lives is not a failure.",
+        "For the review comments, it reads thread-aware review state (resolved and unresolved threads, not a flat comment list) and resolves a thread only after the requested change is in the pushed PR head.",
+        "After each push it re-checks CI and review comments against the new head rather than relying on results from an earlier commit.",
+        "Its stop-and-ask conditions include ambiguous or conflicting feedback or a material scope expansion, while clear actionable comments are addressed without asking."
       ],
       "id": 2,
       "files": []

@@ -4,11 +4,12 @@
     {
       "name": "is-this-test-worth-keeping",
       "prompt": "There's a slow integration test in CI that re-renders every Compose file and I'm not sure it catches anything the unit tests don't. Should I delete it, keep it, or make it non-required? How would you decide and what do you need to name in the proposal?",
-      "expected_output": "Reads the testing-policy reference, decides by whether the check protects an observable production contract with a named consumer, and for a deletion names the policy category that makes it redundant or unearned; notes the policy does not itself authorize changing required checks.",
+      "expected_output": "Decides by whether the check protects an observable production contract with a named consumer; treats it as redundant only if a stronger, unskipped check blocks every breaking event; rejects 'non-required informational' as a consumer; and notes the policy does not itself authorize changing required checks.",
       "assertions": [
-        "Reads references/testing-policy.md and applies the observable-contract standard with a required consumer for every check",
-        "Names the protected production contract and the check's consumer, or for a deletion the policy category that makes it redundant or unearned",
-        "States that the policy is not authorization to change required checks, repository variables or deployment behavior without specific authority"
+        "Names the observable production contract the test would protect (for example that every Compose file still renders into a valid deployable configuration) and makes keeping it depend on that contract, not on runtime, test count or a hunch.",
+        "Says the test is redundant only if another check catches every breakage it would catch, blocks it, and is not skipped by a path filter, fork guard or disabled lane; overlap with unit tests alone does not justify deletion.",
+        "Says a non-required, informational check is not an acceptable end state: every check needs a consumer (a required merge check, a release gate, or an owned alert or dashboard signal), or it should be removed.",
+        "Says the proposal itself does not authorize changing required checks or branch protection; that needs separate authority."
       ],
       "id": 1,
       "files": []
@@ -16,11 +17,11 @@
     {
       "name": "add-arm-flag-path-filter",
       "prompt": "I want to add an enable flag so the deploy job only runs when a repo variable is set, and a path filter so docs-only changes skip the build. Anything I should think through before wiring that up?",
-      "expected_output": "Treats this as a CI decision governed by the testing policy: read the reference's rules for intentional control flags and operational hygiene, name the contract each job protects and its consumer, and confirm authority before changing required jobs or repository variables.",
+      "expected_output": "Warns that a path filter on a required job is unsafe because a skipped required job reports as passing, and moves the decision inside the job with an explicit successful short-circuit; names the deploy flag so its default is legible (disarmed unless set to true, e.g. *_ARMED); makes the flag's state visible on every run with a documented default and restore operation.",
       "assertions": [
-        "Recognises enable/arm flags and path filters as covered by the testing policy and reads references/testing-policy.md, including its exception for intentional control flags",
-        "Names the production contract and consumer for the deploy job and build check being gated",
-        "Warns that changing required checks or repository variables needs specific authority beyond this policy"
+        "Warns that putting the path filter on the build job itself is unsafe if the build is a required check, because GitHub treats a skipped required job as passing (or a filtered-out workflow never reports), and recommends deciding inside the job with an explicit successful short-circuit instead.",
+        "Recommends naming the deploy flag so it stays off unless explicitly set to true, such as a *_ARMED variable compared to 'true', rather than an *_ENABLED name that reads as on by default.",
+        "Says the flag's engaged state should be visible on every run and its default and how to restore it should be documented."
       ],
       "id": 2,
       "files": []

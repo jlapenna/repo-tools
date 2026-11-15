@@ -6,9 +6,10 @@
       "prompt": "Three different agent sessions this week all tried to run the integration suite from the primary checkout even though the repo docs say not to. I want the repo's agent guidance fixed so this stops. How would you approach it, and what would you need to show before claiming it's fixed?",
       "expected_output": "Starts from the concrete missed decision, corroborates it against source and existing guidance, finds the earliest missing handoff and its single semantic owner (prefer a deterministic check or the owning skill over a new root file), places context where it changes the decision, validates links/frontmatter, and only claims improved behavior after a fresh comparable trajectory.",
       "assertions": [
-        "Begins by recording the observed failure, promised outcome, target revision and evidence, and corroborates agent explanations against source rather than trusting them",
-        "Gives the requirement one owner (a deterministic check or the owning skill/runbook) and keeps the root agent guide a task router instead of adding a new root learning file or extra skill",
-        "States that structural validation (links, frontmatter) does not prove improved behavior and that an effectiveness claim needs a fresh comparable trajectory under comparable model, tools and authority"
+        "The plan starts from the three concrete failures (what each session did, read or was told) and treats the agents' own explanations as leads to corroborate against the source, not as facts. No transcripts are available in the eval, so planning this step is enough.",
+        "Gives the rule one owner at the point of decision, preferring a deterministic check in the integration entry point or the owning skill or runbook, instead of restating it in several places.",
+        "Does not add a new root learning file or a new skill when an existing owner can carry the rule; the root agent guide at most routes to that owner.",
+        "Says link, frontmatter or other structural checks do not prove the behavior changed; claiming the fix works needs a fresh comparable agent run (comparable model, configuration, authority and starting conditions) that actually encounters the rule."
       ],
       "id": 1,
       "files": []
@@ -18,9 +19,10 @@
       "prompt": "The skills and READMEs in one of my repos have drifted from how the code actually works and agents keep retrieving stale procedures. Plan a gardening pass: what do you fix, where does each fact live, and what are you not allowed to do as part of it?",
       "expected_output": "Repairs stale claims at their semantic owner and updates inbound routes, keeps operator procedures in runbooks and skill constraints in the skill entry point with conditional detail in references, regenerates inventories from their owner, runs target-native and repo-docs checks, and stays within existing grants (no deployments, credentials or new automation).",
       "assertions": [
-        "Repairs each stale claim at its owner and updates inbound routes, keeping the root guide a router and conditional procedures in skill references",
-        "Runs target-native checks plus source-consistency/frontmatter/link validation (e.g. repo-docs) while noting those do not prove semantic freshness or worker behavior",
-        "States a proof gap does not authorize deployment, new credentials, private-data export or policy bypass, and recurring work is scheduled only when requested with an owner and retirement condition"
+        "The plan fixes each stale claim at the one place that owns it, checked against current source, and updates the links or routes that point to it instead of adding another copy. The user asked for a plan and the eval has no repository, so a proposed step is enough.",
+        "Places facts by role: the root agent guide stays a router, a skill keeps essential constraints in its entry point with conditional procedures in references, and operator procedures live in the owning runbook.",
+        "Says link, frontmatter or other structural checks (such as repo-docs) do not prove the content is semantically current or that agents will behave differently.",
+        "Names actions outside the pass's authority, such as deployments, new credentials, private-data export or policy bypass, and does not add recurring automation unless it was requested."
       ],
       "id": 2,
       "files": []

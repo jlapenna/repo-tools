@@ -49,11 +49,31 @@ sandbox, so `repo-skill-evals` refuses such a case by name before running
 anything. Such entries must not be committed; `--allow-gated-tools` exists
 only for workstation runs.
 
-Write assertions a judge can verify from the final message or the trace:
-a named file, command, decision, ordering or refusal. Avoid assertions about
-tone or about work that happens outside the sandbox. Two or three per entry
-is enough; one obvious prompt and one that uses the user's plain wording
-covers most description regressions.
+Write assertions a judge can verify from the final answer: a named command,
+decision, ordering or refusal. The stock Claude runner's judge is a small
+model (Haiku unless `--judge-model` overrides it) grading with
+`focus: last_message`, so it reads the answer literally and does not see the
+tool trace. Rubrics that fail for reasons unrelated to the skill share a few
+shapes:
+
+- **Execution verbs on a plan-only case.** "Opens a ready PR" is graded as an
+  action that never happened when the prompt says "don't run anything" or the
+  sandbox has no repository. Phrase it as "The plan opens a ready PR…" and add
+  that a proposed step is enough.
+- **Tool-use claims.** "Reads references/x.md" is not visible in the last
+  message. Assert on the decision the reference teaches instead.
+- **Packed bullets.** One assertion that lists four requirements fails on
+  whichever one the answer phrased differently. State one requirement each.
+- **Unasked or stale requirements.** A requirement the prompt never raises,
+  or a detail the current skill contradicts, measures the rubric rather than
+  the skill. Re-read the rubric when the skill changes.
+
+Prefer requirements the skill actually teaches over generic good practice, so
+the with-without lift shows whether the skill helps. If both arms score zero
+on an answer that reads correctly, suspect the rubric before the skill. Avoid
+assertions about tone or about work that happens outside the sandbox. Two to
+four per entry is enough; one obvious prompt and one that uses the user's
+plain wording covers most description regressions.
 
 A skill with `disable-model-invocation: true` never fires on its own: its
 cases carry no `skill-fired` grader, `--trigger-only` skips it, and a behavior
