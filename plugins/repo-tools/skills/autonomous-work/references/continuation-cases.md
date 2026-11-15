@@ -6,6 +6,7 @@ evidence that work continued.
 
 | Situation | Expected next action | Premature return |
 | --- | --- | --- |
+| A complexity sweep just finished with three ranked findings; the user then says "load the autonomous-work skill." | Load it and, in the same turn, fix the findings through the repository's delivery workflow. | Reply "Loaded autonomous-work; it does not expand the sweep into implementation" and end the turn. |
 | Fix the tracker; one issue is closed and another has an executable repair. | Verify the closure, then perform the next authorized repair. | Report the closed issue as the end of the whole task. |
 | A publisher belongs to another live session; a different requested issue needs diagnosis. | Preserve that publisher and diagnose the independent issue. | End because the other session is watching the publisher. |
 | A draft is finished and the update closes with "Next: review it and arm auto-merge." Nothing gates either step. | Review the draft and arm auto-merge now, then report both as done. | End the turn with the step stated as the next action. |

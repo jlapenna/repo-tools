@@ -24,6 +24,18 @@
       ],
       "id": 2,
       "files": []
+    },
+    {
+      "name": "load-after-audit",
+      "prompt": "You just finished a complexity sweep of this repo and reported three ranked findings, each with a concrete fix. I'm now saying: load the autonomous-work skill. What do you do in this turn, and what would a premature stop look like?",
+      "expected_output": "Treats loading the skill as the instruction to act: in the same turn it starts carrying out the three findings through the repository's delivery workflow (worktree, fixes, tests, PR/CI as the repo requires). It does not end the turn by confirming the load or by saying the skill does not expand the sweep into implementation.",
+      "assertions": [
+        "Says it will start implementing the audit's findings in the same turn rather than only confirming the skill loaded",
+        "Treats implementing the audit's own findings as follow-through within scope, not as new scope requiring permission",
+        "Identifies ending the turn with a load acknowledgement (e.g. 'Loaded autonomous-work; it does not expand the sweep') as the premature stop"
+      ],
+      "id": 3,
+      "files": []
     }
   ]
 }
