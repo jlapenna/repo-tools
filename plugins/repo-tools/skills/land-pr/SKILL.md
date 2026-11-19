@@ -62,6 +62,24 @@ the pushed commit. Arm protected auto-merge when supported, but keep monitoring.
 
 ## 4. Shepherd CI and review
 
+For a review provider that posts round-specific completion comments, start
+the bundled watcher once the round ID and trigger comment ID are known.
+Pass the exact first lines the trusted bot emits for this round, including
+its round ID. Bound the wait to the task's remaining time.
+
+```bash
+timeout 30m "$REPO_TOOLS_PLUGIN_ROOT/scripts/watch-review-round.sh" \
+  "$repo" "$pr" "$head_sha" "$trigger_comment_id" "$review_bot" \
+  "$finished_first_line" "$failed_first_line"
+```
+
+A finished round can request changes. Read the review for the current head
+before deciding whether to merge. A failed round needs diagnosis even while
+the aggregate check stays pending. After two rounds that still request
+changes, narrow the patch to the behavior needed for acceptance and resolve
+outstanding findings before requesting another review.
+
+
 Prefer a repository-provided lifecycle watcher when one exists. Otherwise run
 the watcher bundled with this plugin after arming auto-merge, as a background
 task whose wait you bound with a caller-side deadline (see `github-ci-monitor`);
