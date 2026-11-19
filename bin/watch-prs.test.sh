@@ -103,3 +103,30 @@ run_watch norepo
 grep -F 'pass --repo <owner/name>' <<<"$output"
 [ "$(grep -c '^pr ' "$tmp/calls")" -eq 0 ]
 echo 'watch-prs unresolvable-repo test passed'
+
+# Review completion belongs to the requested round, even when older rounds
+# or another commenter post the same text and the PR check remains pending.
+cat >"$tmp/gh" <<'MOCK'
+#!/usr/bin/env bash
+case "$1" in
+  api)
+    printf '%s\n' '[{"id":8,"user":{"login":"review-bot"},"body":"finished r2"},{"id":11,"user":{"login":"review-bot"},"body":"failed r1"},{"id":12,"user":{"login":"someone"},"body":"finished r2"}]'
+    jq -nc --arg body "$RESULT" '[{id:15,user:{login:"review-bot"},body:$body}]'
+    ;;
+  pr) printf '%s\tOPEN\n' "$CURRENT_HEAD" ;;
+  *) exit 1 ;;
+esac
+MOCK
+sha=0123456789012345678901234567890123456789
+round() {
+  PATH="$tmp:$PATH" RESULT="$1" CURRENT_HEAD="$2" timeout 3 \
+    "$root/plugins/repo-tools/scripts/watch-review-round.sh" \
+    owner/repo 123 "$sha" 10 review-bot 'finished r2' 'failed r2'
+}
+round $'finished r2\nreview link' "$sha"
+code=0
+round 'failed r2' "$sha" || code=$?
+[[ $code == 2 ]]
+code=0
+round 'finished r2' changed || code=$?
+[[ $code == 2 ]]
