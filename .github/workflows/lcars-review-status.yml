@@ -2,7 +2,7 @@ name: Publish LCARS review status
 
 # Use the default branch's workflow and token for fork reviews as well.
 # Never check out PR code or consume artifacts from the triggering run.
-# The repository ruleset binds this check to the Agent LCARS App.
+# Configure the required check to use the Agent LCARS App after verification.
 # GitHub binds the result to a commit SHA.
 # Another PR sharing that SHA or a new review is reflected on reconciliation.
 on:
@@ -24,6 +24,7 @@ concurrency:
 
 jobs:
   publish:
+    environment: lcars-review-publisher
     if: github.ref_name == github.event.repository.default_branch
     runs-on: ubuntu-latest
     timeout-minutes: 5
