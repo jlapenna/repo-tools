@@ -1,0 +1,113 @@
+name: Publish LCARS review status
+
+# Use the default branch's workflow and token for fork reviews as well.
+# Never check out PR code or consume artifacts from the triggering run.
+# This check trusts GitHub Actions workflows with
+# checks:write in this repository. GitHub binds the result to a commit SHA.
+# Another PR sharing that SHA or a new review is reflected on reconciliation.
+on:
+  workflow_run:
+    workflows: ['LCARS review event']
+    types: [completed]
+  workflow_dispatch:
+  # Reconcile even when the PR changes its review-event workflow or a fork run awaits approval.
+  schedule:
+    - cron: "37 * * * *"
+
+permissions:
+  pull-requests: read
+  checks: write
+
+concurrency:
+  group: publish-lcars-review-status
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Reconcile open PR heads
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          BASE: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          # Re-read every open head. Fork events can lack PR numbers, and
+          # GitHub may coalesce queued runs in the concurrency group.
+          pulls=$(gh api --paginate "repos/$REPO/pulls?base=$BASE&state=open&per_page=100" --jq '.[] | [.number, .head.sha] | @tsv')
+          declare -A states descriptions prs
+          while read -r pr head; do
+            [[ -n "$pr" ]] || continue
+            reviews=$(gh api --paginate --slurp "repos/$REPO/pulls/$pr/reviews?per_page=100")
+            # GraphQL variables must reach GitHub literally.
+            # shellcheck disable=SC2016
+            base_event=$(gh api graphql -F owner="${REPO%/*}" -F repo="${REPO#*/}" -F pr="$pr" \
+              -f query='query($owner:String!, $repo:String!, $pr:Int!) {
+                repository(owner:$owner, name:$repo) { pullRequest(number:$pr) {
+                  timelineItems(last:1, itemTypes:[BASE_REF_CHANGED_EVENT]) {
+                    nodes { ... on BaseRefChangedEvent { id createdAt } }
+                  }
+                } }
+              }' --jq '.data.repository.pullRequest.timelineItems.nodes[0] // {}')
+            state=$(jq -r --argjson base_event "$base_event" --arg head "$head" '
+              def marked($marker): (.body // "" | split("\n") | any(rtrimstr("\r") == $marker));
+              def base_receipt: (.body // "" | split("\n")[0] | rtrimstr("\r") |
+                [capture("^<!-- lcars-review:base-event (?<id>[^[:space:]<>]+) -->$").id][0]);
+              [ .[][] | select(.user.login == "agent-lcars[bot]" and .commit_id == $head)
+                | select($base_event.id == null or (base_receipt == $base_event.id) or
+                    (.submitted_at >= $base_event.createdAt and
+                     (base_receipt == null) and
+                     (.state == "CHANGES_REQUESTED" or (.state == "COMMENTED" and marked("<!-- lcars-review:block -->"))))) ]
+              | reduce .[] as $r ("pending";
+                  if $r.state == "CHANGES_REQUESTED" then
+                    if . == "blocked" or $base_event.id == null or
+                      ($r | (base_receipt == $base_event.id))
+                    then "blocked" else "provisional_block" end
+                  elif $r.state == "COMMENTED" and . != "blocked" and
+                    ($r | marked("<!-- lcars-review:block -->")) then "comment_blocked"
+                  elif ($r.body // "" | test("<!-- attempt-claim:g[0-9]+:[^[:space:]>]+ -->")) and
+                    ($r.state == "APPROVED" or ($r.state == "COMMENTED" and ($r.body | split("\n") | any(rtrimstr("\r") == "<!-- lcars-review:pass -->")) and . != "blocked"))
+                  then "success" else . end)
+            ' <<< "$reviews")
+            case "$state" in
+              blocked|provisional_block|comment_blocked) state=pending; description="LCARS requested changes" ;;
+              pending) description="Awaiting LCARS code review; ask a maintainer to comment /review" ;;
+              success) description="LCARS reviewed this commit" ;;
+            esac
+            # A commit status is shared across PRs with the same SHA.
+            # Every such PR needs its own review before the SHA can pass.
+            if [[ ${states[$head]:-} != pending ]]; then
+              states[$head]=$state
+              descriptions[$head]=$description
+              prs[$head]=$pr
+            fi
+          done <<< "$pulls"
+          for head in "${!states[@]}"; do
+            state=${states[$head]}
+            description=${descriptions[$head]}
+            pr=${prs[$head]}
+            # Update the existing check so a blocking rereview revokes success.
+            checks=$(gh api --paginate --slurp "repos/$REPO/commits/$head/check-runs?check_name=LCARS%20review&filter=all&per_page=100")
+            current=$(jq -c '[.[].check_runs[] | select(.app.id == 15368 and .external_id == "lcars-review")] | max_by(.id)' <<< "$checks")
+            details_url="https://github.com/$REPO/pull/$pr"
+            fields=(-f name="LCARS review" -f details_url="$details_url"
+              -f "output[title]=$description" -f "output[summary]=$description")
+            check_status=in_progress
+            if [[ "$state" == success ]]; then
+              check_status=completed
+              fields+=(-f conclusion=success)
+            fi
+            if [[ "$current" == null ]]; then
+              # Missing required checks block merge. During staging, an optional
+              # in-progress check would also hold unrelated Renovate updates.
+              [[ "$state" == success ]] || continue
+              gh api --method POST "repos/$REPO/check-runs" -f head_sha="$head" -f external_id=lcars-review \
+                -f status="$check_status" "${fields[@]}" --silent
+            elif ! jq -e --arg status "$check_status" --arg title "$description" --arg url "$details_url" \
+              '.status == $status and .details_url == $url and .output.title == $title and ($status != "completed" or .conclusion == "success")' <<< "$current" >/dev/null; then
+              id=$(jq -r .id <<< "$current")
+              gh api --method PATCH "repos/$REPO/check-runs/$id" -f status="$check_status" "${fields[@]}" --silent
+            fi
+          done
