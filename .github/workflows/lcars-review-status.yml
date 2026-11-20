@@ -2,8 +2,8 @@ name: Publish LCARS review status
 
 # Use the default branch's workflow and token for fork reviews as well.
 # Never check out PR code or consume artifacts from the triggering run.
-# This check trusts GitHub Actions workflows with
-# checks:write in this repository. GitHub binds the result to a commit SHA.
+# The repository ruleset binds this check to the Agent LCARS App.
+# GitHub binds the result to a commit SHA.
 # Another PR sharing that SHA or a new review is reflected on reconciliation.
 on:
   workflow_run:
@@ -16,7 +16,7 @@ on:
 
 permissions:
   pull-requests: read
-  checks: write
+  checks: read
 
 concurrency:
   group: publish-lcars-review-status
@@ -24,12 +24,21 @@ concurrency:
 
 jobs:
   publish:
+    if: github.ref_name == github.event.repository.default_branch
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      - name: Mint a repository-scoped review publisher token
+        id: publisher
+        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3
+        with:
+          client-id: ${{ vars.AGENT_LCARS_CLIENT_ID }}
+          private-key: ${{ secrets.AGENT_LCARS_PRIVATE_KEY }}
+          permission-checks: write
       - name: Reconcile open PR heads
         env:
           GH_TOKEN: ${{ github.token }}
+          PUBLISHER_TOKEN: ${{ steps.publisher.outputs.token }}
           REPO: ${{ github.repository }}
           BASE: ${{ github.event.repository.default_branch }}
         run: |
@@ -90,7 +99,7 @@ jobs:
             pr=${prs[$head]}
             # Update the existing check so a blocking rereview revokes success.
             checks=$(gh api --paginate --slurp "repos/$REPO/commits/$head/check-runs?check_name=LCARS%20review&filter=all&per_page=100")
-            current=$(jq -c '[.[].check_runs[] | select(.app.id == 15368 and .external_id == "lcars-review")] | max_by(.id)' <<< "$checks")
+            current=$(jq -c '[.[].check_runs[] | select(.app.id == 4457090 and .external_id == "lcars-review")] | max_by(.id)' <<< "$checks")
             details_url="https://github.com/$REPO/pull/$pr"
             fields=(-f name="LCARS review" -f details_url="$details_url"
               -f "output[title]=$description" -f "output[summary]=$description")
@@ -104,12 +113,12 @@ jobs:
               # Missing required checks block merge. During staging, an optional
               # failed check would also hold unrelated Renovate updates.
               [[ "$state" == success ]] || continue
-              gh api --method POST "repos/$REPO/check-runs" -f head_sha="$head" -f external_id=lcars-review \
+              GH_TOKEN="$PUBLISHER_TOKEN" gh api --method POST "repos/$REPO/check-runs" -f head_sha="$head" -f external_id=lcars-review \
                 -f status="$check_status" "${fields[@]}" --silent
             elif ! jq -e --arg status "$check_status" --arg title "$description" --arg url "$details_url" --arg conclusion "$conclusion" \
               '.status == $status and .details_url == $url and .output.title == $title and .conclusion == $conclusion' <<< "$current" >/dev/null; then
               id=$(jq -r .id <<< "$current")
-              gh api --method PATCH "repos/$REPO/check-runs/$id" -f status="$check_status" "${fields[@]}" |
+              GH_TOKEN="$PUBLISHER_TOKEN" gh api --method PATCH "repos/$REPO/check-runs/$id" -f status="$check_status" "${fields[@]}" |
                 jq -e --arg conclusion "$conclusion" ' .status == "completed" and .conclusion == $conclusion' >/dev/null
             fi
           done
