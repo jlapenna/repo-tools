@@ -5,6 +5,8 @@ copying procedures into always-loaded context.
 
 ## Start Here
 
+- For LCARS pull request reviews, follow the [repository review instructions](docs/lcars-review.md).
+
 - Read `ARCHITECTURE.md` before changing command, plugin, or provider
   boundaries.
 - Use `docs/README.md` to locate durable documentation and the generated
