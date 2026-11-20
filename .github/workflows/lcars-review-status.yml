@@ -94,20 +94,22 @@ jobs:
             details_url="https://github.com/$REPO/pull/$pr"
             fields=(-f name="LCARS review" -f details_url="$details_url"
               -f "output[title]=$description" -f "output[summary]=$description")
-            check_status=in_progress
+            check_status=completed
+            conclusion=failure
             if [[ "$state" == success ]]; then
-              check_status=completed
-              fields+=(-f conclusion=success)
+              conclusion=success
             fi
+            fields+=(-f conclusion="$conclusion")
             if [[ "$current" == null ]]; then
               # Missing required checks block merge. During staging, an optional
-              # in-progress check would also hold unrelated Renovate updates.
+              # failed check would also hold unrelated Renovate updates.
               [[ "$state" == success ]] || continue
               gh api --method POST "repos/$REPO/check-runs" -f head_sha="$head" -f external_id=lcars-review \
                 -f status="$check_status" "${fields[@]}" --silent
-            elif ! jq -e --arg status "$check_status" --arg title "$description" --arg url "$details_url" \
-              '.status == $status and .details_url == $url and .output.title == $title and ($status != "completed" or .conclusion == "success")' <<< "$current" >/dev/null; then
+            elif ! jq -e --arg status "$check_status" --arg title "$description" --arg url "$details_url" --arg conclusion "$conclusion" \
+              '.status == $status and .details_url == $url and .output.title == $title and .conclusion == $conclusion' <<< "$current" >/dev/null; then
               id=$(jq -r .id <<< "$current")
-              gh api --method PATCH "repos/$REPO/check-runs/$id" -f status="$check_status" "${fields[@]}" --silent
+              gh api --method PATCH "repos/$REPO/check-runs/$id" -f status="$check_status" "${fields[@]}" |
+                jq -e --arg conclusion "$conclusion" ' .status == "completed" and .conclusion == $conclusion' >/dev/null
             fi
           done

@@ -8,6 +8,10 @@ on:
 
 permissions: {}
 
+concurrency:
+  group: lcars-review-event-${{ (github.event_name == 'pull_request' || github.event.review.user.login == 'agent-lcars[bot]') && github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
 jobs:
   notify:
     if: github.event_name == 'pull_request' || github.event.review.user.login == 'agent-lcars[bot]'

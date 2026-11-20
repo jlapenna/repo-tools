@@ -4,7 +4,9 @@ The installed LCARS app reviews pull requests. A maintainer can comment
 `/review` to request a review of the current commit, including a Renovate
 update. GitHub Actions publishes the `LCARS review` check after the first
 passing verdict. A later blocking verdict reopens the check. A formal change
-request needs an approval or dismissal before a passing comment can clear it.
+request for the current comparison needs an approval or dismissal. After a
+retarget, a change request without the new comparison receipt is provisional.
+A passing review with the current receipt clears that provisional request.
 GitHub associates the check with a commit; review changes and other open PRs
 at the same commit take effect when the publisher reconciles.
 
