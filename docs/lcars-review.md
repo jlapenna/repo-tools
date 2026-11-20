@@ -2,7 +2,7 @@
 
 The installed LCARS app reviews pull requests. A maintainer can comment
 `/review` to request a review of the current commit, including a Renovate
-update. GitHub Actions publishes the `LCARS review` check after the first
+update. The workflow uses the Agent LCARS App to publish the `LCARS review` check after the first
 passing verdict. A later blocking verdict reopens the check. A formal change
 request for the current comparison needs an approval or dismissal. After a
 retarget, a change request without the new comparison receipt is provisional.
