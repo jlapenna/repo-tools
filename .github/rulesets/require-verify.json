@@ -22,7 +22,7 @@
             "context": "verify"
           },
           {
-            "context": "LCARS review",
+            "context": "LCARS review (merge candidate)",
             "integration_id": 4457090
           }
         ]
