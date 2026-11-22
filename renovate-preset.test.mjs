@@ -183,3 +183,16 @@ test("npm lock file maintenance passes release age without dropping --before", (
     "timestamp-optional warning is demoted from the Dependency Dashboard",
   );
 });
+
+test("vendored use-modern-go skill pin is tracked as its Go module", () => {
+  const [manager] = preset.customManagers.filter(
+    (m) => m.depNameTemplate === "github.com/JetBrains/go-modern-guidelines",
+  );
+  assert.ok(manager, "use-modern-go custom manager is missing");
+  assert.equal(manager.datasourceTemplate, "go");
+  const file = new RegExp(manager.managerFilePatterns[0].slice(1, -1));
+  assert.ok(file.test(".agents/skills/use-modern-go/scripts/VERSION"));
+  assert.ok(!file.test(".agents/skills/other/scripts/VERSION"));
+  const version = new RegExp(manager.matchStrings[0]);
+  assert.equal(version.exec("v0.1.1\n")?.groups.currentValue, "v0.1.1");
+});
