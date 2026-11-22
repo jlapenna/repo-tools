@@ -5,7 +5,8 @@ copying procedures into always-loaded context.
 
 ## Start Here
 
-
+- LCARS-dispatched workers follow the shared protocol supplied by the runner in
+  `$AGENT_PROTOCOL_PATH`. For GitHub issue work, use the [fleet issue workflow](https://github.com/jlapenna/agent-lcars/blob/main/agents/shared/skills/agent-protocol/SKILL.md).
 - Read `ARCHITECTURE.md` before changing command, plugin, or provider
   boundaries.
 - Use `docs/README.md` to locate durable documentation and the generated
