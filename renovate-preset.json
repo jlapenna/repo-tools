@@ -56,7 +56,9 @@
       "managerFilePatterns": [
         "/(^|/)\\.agents/skills/use-modern-go/scripts/VERSION$/"
       ],
-      "matchStrings": ["^(?<currentValue>v\\d+\\.\\d+\\.\\d+)\\s*$"],
+      "matchStrings": [
+        "^(?<currentValue>v\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?)\\s*$"
+      ],
       "depNameTemplate": "github.com/JetBrains/go-modern-guidelines",
       "datasourceTemplate": "go"
     }

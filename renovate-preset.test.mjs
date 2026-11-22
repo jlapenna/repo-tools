@@ -195,4 +195,10 @@ test("vendored use-modern-go skill pin is tracked as its Go module", () => {
   assert.ok(!file.test(".agents/skills/other/scripts/VERSION"));
   const version = new RegExp(manager.matchStrings[0]);
   assert.equal(version.exec("v0.1.1\n")?.groups.currentValue, "v0.1.1");
+  // Tagged upstream releases have shipped a prerelease pin (v0.1.0 -> v0.1.0-dev.1).
+  assert.equal(
+    version.exec("v0.1.0-dev.1\n")?.groups.currentValue,
+    "v0.1.0-dev.1",
+  );
+  assert.equal(version.exec("not-a-version\n"), null);
 });
