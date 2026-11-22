@@ -42,8 +42,9 @@ repository policy, check names, deployment rules, and product behavior.
 
 ## Runtime-Neutral Boundary
 
-repo-tools may inspect repository state and coordinate generic Git/GitHub
-operations. It must not contain:
+Published Repo Tools commands and plugins may inspect repository state and
+coordinate generic Git/GitHub operations. The contributor hooks in this
+repository configure its own workers. Published tools must not contain:
 
 - agent identity or session ownership;
 - Agent LCARS dispatch/runtime behavior;
