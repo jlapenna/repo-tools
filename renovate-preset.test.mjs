@@ -184,21 +184,9 @@ test("npm lock file maintenance passes release age without dropping --before", (
   );
 });
 
-test("vendored use-modern-go skill pin is tracked as its Go module", () => {
-  const [manager] = preset.customManagers.filter(
-    (m) => m.depNameTemplate === "github.com/JetBrains/go-modern-guidelines",
-  );
-  assert.ok(manager, "use-modern-go custom manager is missing");
-  assert.equal(manager.datasourceTemplate, "go");
-  const file = new RegExp(manager.managerFilePatterns[0].slice(1, -1));
-  assert.ok(file.test(".agents/skills/use-modern-go/scripts/VERSION"));
-  assert.ok(!file.test(".agents/skills/other/scripts/VERSION"));
-  const version = new RegExp(manager.matchStrings[0]);
-  assert.equal(version.exec("v0.1.1\n")?.groups.currentValue, "v0.1.1");
-  // Tagged upstream releases have shipped a prerelease pin (v0.1.0 -> v0.1.0-dev.1).
-  assert.equal(
-    version.exec("v0.1.0-dev.1\n")?.groups.currentValue,
-    "v0.1.0-dev.1",
-  );
-  assert.equal(version.exec("not-a-version\n"), null);
+test("vendored skills are not version-pinned by Renovate", () => {
+  // agent-lcars' vendored-skill-sync workflow copies the whole upstream skill
+  // directory; a Renovate pin on one file would fight that copy.
+  const managers = JSON.stringify(preset.customManagers ?? []);
+  assert.ok(!managers.includes(".agents/skills"), managers);
 });

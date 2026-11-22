@@ -47,22 +47,6 @@
     "automerge": true,
     "automergeType": "pr"
   },
-  "customManagers": [
-    {
-      "description": [
-        "Vendored JetBrains use-modern-go agent skill (.agents/skills/use-modern-go). Its guidance comes from the CLI version pinned in scripts/VERSION, which scripts/run-tool.sh installs with go install, so bumping the pin is the update. When an upstream release also changes the skill's SKILL.md or scripts, refresh them from the same tag in that PR."
-      ],
-      "customType": "regex",
-      "managerFilePatterns": [
-        "/(^|/)\\.agents/skills/use-modern-go/scripts/VERSION$/"
-      ],
-      "matchStrings": [
-        "^(?<currentValue>v\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?)\\s*$"
-      ],
-      "depNameTemplate": "github.com/JetBrains/go-modern-guidelines",
-      "datasourceTemplate": "go"
-    }
-  ],
   "logLevelRemap": [
     {
       "matchMessage": "/Some .+ did not have a releaseTimestamp, but as we're running with minimumReleaseAgeBehaviour=timestamp-optional, proceeding/",
