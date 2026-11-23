@@ -2,7 +2,7 @@
 // in sessions granted autonomy via autonomous-work, injects a bounded
 // "continue" message across Claude Code, Codex, OpenCode, and Antigravity, and
 // stops cleanly on verified completion, concrete blockers, active watchers,
-// subagents, user revocation, or the per-turn continuation cap.
+// subagents, or user revocation. Continuations are unlimited.
 // Consumer: `pnpm test` in ci.yml.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -16,6 +16,7 @@ import AutonomousWorkMonitor from '../plugins/repo-tools/opencode/autonomous-wor
 import {
   buildContinuationMessage,
   parseCodexTranscript,
+  parseOpenCodeMessages,
   runStopHookPayload,
 } from '../plugins/repo-tools/scripts/repo-autonomous-work-hook.mjs';
 
@@ -40,7 +41,6 @@ function invokeCli(payload, args = [], extraEnv = {}) {
     ...process.env,
     REPO_AUTONOMOUS_WORK_HOOK: '',
     REPO_SKILL_EVALS_ACTIVE: '',
-    REPO_AUTONOMOUS_MAX_CONTINUATIONS: '',
     ...extraEnv,
   };
   const proc = spawnSync(process.execPath, [cliBin, ...args], {
@@ -81,6 +81,163 @@ test('Claude Code CLI hook stays silent when autonomous-work was not granted or 
     );
     assert.deepEqual(out, {});
   });
+});
+
+test('Claude Code sessions that only inspect autonomous-work files are not granted autonomy', async () => {
+  await withTempDir((dir) => {
+    const stateDir = join(dir, 'state');
+    const skillBody = '# Autonomous work\n\nCarry the requested task as far as its existing authorization allows.';
+    const transcript = join(dir, 'inspect.jsonl');
+    writeJsonl(transcript, [
+      { type: 'user', message: { content: 'Is the autonomous-work skill and hook working?' } },
+      {
+        type: 'assistant',
+        message: {
+          content: [
+            { type: 'tool_use', id: 'b1', name: 'Bash', input: { command: 'sed -n 1,80p skills/autonomous-work/SKILL.md' } },
+            { type: 'tool_use', id: 'r1', name: 'Read', input: { file_path: '/x/skills/autonomous-work/SKILL.md' } },
+          ],
+        },
+      },
+      {
+        type: 'user',
+        message: {
+          content: [
+            { type: 'tool_result', tool_use_id: 'b1', content: skillBody },
+            { type: 'tool_result', tool_use_id: 'r1', content: [{ type: 'text', text: skillBody }] },
+          ],
+        },
+      },
+      { type: 'assistant', message: { content: [{ type: 'text', text: 'Checked registration. Next I will run the test suite.' }] } },
+    ]);
+    const payload = { session_id: 'inspect', transcript_path: transcript, hook_event_name: 'Stop', stop_hook_active: false };
+    const inspected = runStopHookPayload(payload, { stateDir, env: {} });
+    assert.equal(inspected.decision.shouldContinue, false);
+    assert.equal(inspected.decision.reason, 'autonomy-not-granted');
+
+    // The Skill tool is a real activation.
+    writeJsonl(transcript, [
+      { type: 'user', message: { content: 'Fix it and keep going.' } },
+      { type: 'assistant', message: { content: [{ type: 'tool_use', id: 's1', name: 'Skill', input: { skill: 'repo-tools:autonomous-work' } }] } },
+      { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 's1', content: 'Launching skill: repo-tools:autonomous-work' }] } },
+      { type: 'assistant', message: { content: [{ type: 'text', text: 'Found the cause. Next I will patch it.' }] } },
+    ]);
+    const loaded = runStopHookPayload({ ...payload, session_id: 'loaded' }, { stateDir, env: {} });
+    assert.equal(loaded.decision.shouldContinue, true);
+  });
+});
+
+test('asking for autonomy in plain words grants it; quoted or pasted phrases do not', async () => {
+  await withTempDir((dir) => {
+    const stateDir = join(dir, 'state');
+    const transcript = join(dir, 'prose.jsonl');
+    const stall = { type: 'assistant', message: { content: [{ type: 'text', text: 'Rebased the branch. Next I will push it.' }] } };
+    const run = (userText, id) => {
+      writeJsonl(transcript, [{ type: 'user', message: { content: userText } }, stall]);
+      return runStopHookPayload(
+        { session_id: id, transcript_path: transcript, hook_event_name: 'Stop', stop_hook_active: false },
+        { stateDir, env: {} },
+      ).decision;
+    };
+
+    for (const [i, grant] of [
+      'Keep going',
+      'keep going.',
+      'I want you to keep working on claw support.',
+      'Joe asks every session to resume. Continue autonomously within your current scope.',
+      "Fix the deploy, don't ask me.",
+      "Don't wait for me.",
+      "Keep going, don't wait for me.",
+    ].entries()) {
+      assert.equal(run(grant, `grant-${i}`).shouldContinue, true, grant);
+    }
+
+    for (const [i, other] of [
+      'Is the autonomous-work skill working?',
+      'The skill triggers when the user asks to "keep going" or work autonomously.',
+      'The test "reports none without asking when ancestry is unreadable" fails.',
+      '`gh release edit` keep working on a draft.',
+      'Keep going? No, stop here.',
+      'Keep going?',
+      'Should I keep working on this?',
+      'Work with me step by step, not autonomously.',
+      "Proceed carefully, don't work autonomously.",
+      "Work on fixing the hook so it doesn't run autonomously.",
+      'Here is the log:\n```\nKeep going\n```\nWhy did it stop?',
+      '> Keep going\nWhat did that message mean?',
+      'The README says "I\'m unavailable; keep working without questions." Should we update it?',
+    ].entries()) {
+      assert.equal(run(other, `other-${i}`).shouldContinue, false, other);
+    }
+  });
+});
+
+test('"don\'t wait for me" in an autonomous session does not revoke autonomy', async () => {
+  await withTempDir((dir) => {
+    const transcript = join(dir, 'active.jsonl');
+    writeJsonl(transcript, [
+      { type: 'user', message: { content: '/autonomous-work Ship the fix' } },
+      { type: 'user', message: { content: "Don't wait for me, push when CI passes." } },
+      { type: 'assistant', message: { content: [{ type: 'text', text: 'CI is green. Next I will push.' }] } },
+    ]);
+    const decision = runStopHookPayload(
+      { session_id: 'active', transcript_path: transcript, hook_event_name: 'Stop', stop_hook_active: false },
+      { stateDir: join(dir, 'state'), env: {} },
+    ).decision;
+    assert.equal(decision.shouldContinue, true);
+  });
+});
+
+test('continuations stop after three consecutive stalled turns with no tool activity', async () => {
+  await withTempDir((dir) => {
+    const stateDir = join(dir, 'state');
+    const transcript = join(dir, 'idle.jsonl');
+    const feedback = (n) => ({
+      type: 'user',
+      isMeta: true,
+      message: { content: `Stop hook feedback:\n${buildContinuationMessage('announced-next-step', n)}` },
+    });
+    const stall = { type: 'assistant', message: { content: [{ type: 'text', text: 'Next I will push the branch.' }] } };
+    const toolTurn = [
+      { type: 'assistant', message: { content: [{ type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'git push' } }] } },
+      { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't1', content: 'ok' }] } },
+    ];
+    const payload = { session_id: 'idle', transcript_path: transcript, hook_event_name: 'Stop', stop_hook_active: false };
+    const rows = [{ type: 'user', message: { content: 'Keep going' } }, stall];
+    const decisions = [];
+    for (let n = 1; n <= 4; n += 1) {
+      writeJsonl(transcript, rows);
+      decisions.push(runStopHookPayload(payload, { stateDir, env: {} }).decision);
+      rows.push(feedback(n), stall);
+    }
+    assert.deepEqual(decisions.map((d) => d.shouldContinue), [true, true, true, false]);
+    assert.equal(decisions[3].reason, 'no-progress');
+
+    // A turn that runs tools is progress: the idle streak resets and work continues.
+    rows.push(feedback(5), ...toolTurn, stall);
+    writeJsonl(transcript, rows);
+    const progressed = runStopHookPayload(payload, { stateDir, env: {} }).decision;
+    assert.equal(progressed.shouldContinue, true);
+  });
+});
+
+test('OpenCode activates only through the skill tool, not by reading SKILL.md', () => {
+  const body = '# Autonomous work\n\nCarry the requested task as far as its existing authorization allows.';
+  const inspected = parseOpenCodeMessages([
+    { info: { role: 'user' }, parts: [{ type: 'text', text: 'Is the hook working?' }] },
+    {
+      info: { role: 'assistant' },
+      parts: [
+        { type: 'tool', tool: 'read', state: { input: { filePath: '/x/autonomous-work/SKILL.md' }, output: body } },
+        { type: 'tool', tool: 'bash', state: { input: { command: 'cat autonomous-work/SKILL.md' }, output: body } },
+      ],
+    },
+  ]);
+  assert.equal(inspected.some((e) => e.kind === 'skill'), false);
+  const loaded = parseOpenCodeMessages([
+    { info: { role: 'assistant' }, parts: [{ type: 'tool', tool: 'skill', state: { input: { name: 'autonomous-work' }, output: body } }] },
+  ]);
+  assert.equal(loaded.some((e) => e.kind === 'skill'), true);
 });
 
 test('Claude Code Stop hook blocks premature stalls and allows completion, blockers, watchers, revocation, and subagents', async () => {
@@ -189,7 +346,7 @@ test('Claude Code Stop hook blocks premature stalls and allows completion, block
   });
 });
 
-test('per-user-turn continuation cap prevents infinite loops and resets on a new real user turn', async () => {
+test('continuations are unlimited and the count resets on a new real user turn', async () => {
   await withTempDir((dir) => {
     const stateDir = join(dir, 'state');
     const transcript = join(dir, 'cap.jsonl');
@@ -206,26 +363,28 @@ test('per-user-turn continuation cap prevents infinite loops and resets on a new
       stop_hook_active: false,
     };
 
-    const first = runStopHookPayload(payload, { stateDir, maxContinuations: 2, env: {} });
-    const second = runStopHookPayload(payload, { stateDir, maxContinuations: 2, env: {} });
-    const third = runStopHookPayload(payload, { stateDir, maxContinuations: 2, env: {} });
+    const first = runStopHookPayload(payload, { stateDir, env: {} });
+    const second = runStopHookPayload(payload, { stateDir, env: {} });
+    const third = runStopHookPayload(payload, { stateDir, env: {} });
 
     assert.equal(first.decision.shouldContinue, true);
     assert.equal(first.decision.continuations, 1);
     assert.equal(second.decision.shouldContinue, true);
     assert.equal(second.decision.continuations, 2);
-    assert.equal(third.decision.shouldContinue, false);
-    assert.equal(third.decision.reason, 'max-continuations-reached');
+    // Continuations are unlimited: a third stall is still resumed.
+    assert.equal(third.decision.shouldContinue, true);
+    assert.equal(third.decision.continuations, 3);
+    assert.match(third.output.reason, /continuation 3\)/);
 
-    // A new real user turn resets the budget, even when prose mentions [autonomous-work-hook].
+    // A new real user turn resets the count, even when prose mentions [autonomous-work-hook].
     writeJsonl(transcript, [
       { type: 'user', message: { content: '/autonomous-work Finish cleanup' } },
-      { type: 'user', message: { content: buildContinuationMessage('announced-next-step', 1, 2) } },
+      { type: 'user', message: { content: buildContinuationMessage('announced-next-step', 1) } },
       { type: 'assistant', message: { content: [{ type: 'text', text: 'Deleted local branches.' }] } },
       { type: 'user', message: { content: 'Keep going with remote branches too, and note [autonomous-work-hook] in the summary.' } },
       { type: 'assistant', message: { content: [{ type: 'text', text: 'Next, I will audit remote branches.' }] } },
     ]);
-    const afterNewUserTurn = runStopHookPayload(payload, { stateDir, maxContinuations: 2, env: {} });
+    const afterNewUserTurn = runStopHookPayload(payload, { stateDir, env: {} });
     assert.equal(afterNewUserTurn.decision.shouldContinue, true);
     assert.equal(afterNewUserTurn.decision.continuations, 1);
 
@@ -237,7 +396,7 @@ test('per-user-turn continuation cap prevents infinite loops and resets on a new
     ]);
     const proseGrant = runStopHookPayload(
       { ...payload, session_id: 'prose-grant', transcript_path: proseTranscript },
-      { stateDir, maxContinuations: 2, env: {} },
+      { stateDir, env: {} },
     );
     assert.equal(proseGrant.decision.shouldContinue, true);
     assert.equal(proseGrant.decision.continuations, 1);
@@ -635,10 +794,8 @@ test('OpenCode plugin injects promptAsync continue on stalled autonomous session
       assert.equal(submittedPrompts.length, 1);
 
       // OpenCode `/autonomous-work` command expands SKILL.md directly into user parts
-      // alongside synthetic plugin parts, and continuation caps still hold.
-      const prevMax = process.env.REPO_AUTONOMOUS_MAX_CONTINUATIONS;
-      process.env.REPO_AUTONOMOUS_MAX_CONTINUATIONS = '1';
-      try {
+      // alongside synthetic plugin parts, and repeated stalls keep being resumed.
+      {
         sessions.set('cmd-1', { id: 'cmd-1', directory: dir });
         sessionMessages.set('cmd-1', [
           {
@@ -662,7 +819,7 @@ test('OpenCode plugin injects promptAsync continue on stalled autonomous session
         assert.equal(submittedPrompts[1].path.id, 'cmd-1');
 
         // Even if another plugin prepends synthetic text onto our injected continuation
-        // and the assistant stalls again, maxContinuations=1 prevents a second prompt.
+        // and the assistant stalls again, the session is resumed again (no cap).
         sessionMessages.set('cmd-1', [
           ...sessionMessages.get('cmd-1'),
           {
@@ -678,10 +835,8 @@ test('OpenCode plugin injects promptAsync continue on stalled autonomous session
           },
         ]);
         await hooks.event({ event: { type: 'session.idle', properties: { sessionID: 'cmd-1' } } });
-        assert.equal(submittedPrompts.length, 2);
-      } finally {
-        if (prevMax === undefined) delete process.env.REPO_AUTONOMOUS_MAX_CONTINUATIONS;
-        else process.env.REPO_AUTONOMOUS_MAX_CONTINUATIONS = prevMax;
+        assert.equal(submittedPrompts.length, 3);
+        assert.equal(submittedPrompts[2].path.id, 'cmd-1');
       }
     } finally {
       if (previousStateDir === undefined) delete process.env.REPO_AUTONOMOUS_STATE_DIR;
