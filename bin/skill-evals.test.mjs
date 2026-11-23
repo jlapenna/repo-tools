@@ -474,6 +474,7 @@ test('carries forward a case whose experiment key matches a recent baseline resu
   const first = fakeRunner({ 'oncall--memory-alert': 0.5 });
   assert.equal(main(args('week1'), { log: () => {}, spawn: first.spawn, exec, now: () => t0 }), 1);
   const week1 = read('week1');
+  assert.equal(week1.complete, true, 'completed run with rubric failures still advances the job baseline');
   assert.deepEqual(week1.data.cases.map((c) => [c.case, c.score, c.fired, c.carried, c.runAt]), [['eval-1', 1, true, false, iso(t0)], ['memory-alert', 0.5, true, false, iso(t0)]]);
   assert.deepEqual(week1.data.cases[1].graders, [{ name: 'criteria', passed: false }], '`fired` stands in for the skill-fired grader');
   assert.doesNotMatch(JSON.stringify(week1.data.cases), /evidence/, 'evidence stays in report.md');
@@ -727,6 +728,7 @@ test('adapter trigger scores require observed skill loading, not a claimed rubri
   const r = externalHarness(t, 'no-load').invoke();
   assert.equal(r.status, 1, r.stderr);
   const report = JSON.parse(readFileSync(path.join(r.report, 'result.json')));
+  assert.equal(report.complete, true);
   assert.equal(report.data.partial, false);
   assert.equal(report.data.skills.find(s => s.skill === 'oncall').fired, 0);
   assert.equal(report.data.casesPassed, 2, 'explicit-only cases are graded on behavior');
@@ -736,8 +738,27 @@ test('adapter rubric failures remain real failures', t => {
   const r = externalHarness(t, 'grade-fail').invoke();
   assert.equal(r.status, 1, r.stderr);
   const report = JSON.parse(readFileSync(path.join(r.report, 'result.json')));
+  assert.equal(report.complete, true);
   assert.equal(report.data.casesPassed, 0);
   assert.equal(report.data.partial, false);
+});
+
+test('unscored run errors keep exit 1 reports incomplete so broken cases are not baselined', t => {
+  const { root } = fixture(t);
+  const spawn = (cmd, args) => {
+    writeFileSync(args[args.indexOf('--json') + 1], JSON.stringify({
+      cases: [
+        { name: 'oncall--eval-1', aggregates: { score: 1 }, arms: { with: [{ graders: [{ name: 'skill-fired', passed: true }, { name: 'criteria', passed: true }] }] } },
+        { name: 'oncall--memory-alert', aggregates: { score: 0 }, arms: { with: [{ error: 'Judge request timed out', graders: [] }] } },
+      ],
+    }));
+    return { status: 1, stdout: '' };
+  };
+  assert.equal(main(['--root', path.join(root, 'repo'), '--skill', 'oncall', '--out', path.join(root, 'out-err'), '--report', path.join(root, 'job-err'), '--json'], { log: () => {}, spawn, exec }), 1);
+  const report = JSON.parse(readFileSync(path.join(root, 'job-err/result.json'), 'utf8'));
+  assert.equal(report.complete, false);
+  assert.equal(report.data.cases.length, 1);
+  assert.equal(report.data.casesTotal, 2);
 });
 
 test('unsupported adapter capabilities fail before evaluation starts', t => {
