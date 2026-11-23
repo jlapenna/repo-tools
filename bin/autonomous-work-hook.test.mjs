@@ -17,6 +17,7 @@ import {
   buildContinuationMessage,
   parseCodexTranscript,
   parseOpenCodeMessages,
+  runPromptHookPayload,
   runStopHookPayload,
 } from '../plugins/repo-tools/scripts/repo-autonomous-work-hook.mjs';
 
@@ -127,20 +128,15 @@ test('Claude Code sessions that only inspect autonomous-work files are not grant
   });
 });
 
-test('asking for autonomy in plain words grants it; quoted or pasted phrases do not', async () => {
+test('plain-words autonomy requests prompt the agent to load the skill but do not grant autonomy', async () => {
   await withTempDir((dir) => {
     const stateDir = join(dir, 'state');
     const transcript = join(dir, 'prose.jsonl');
     const stall = { type: 'assistant', message: { content: [{ type: 'text', text: 'Rebased the branch. Next I will push it.' }] } };
-    const run = (userText, id) => {
-      writeJsonl(transcript, [{ type: 'user', message: { content: userText } }, stall]);
-      return runStopHookPayload(
-        { session_id: id, transcript_path: transcript, hook_event_name: 'Stop', stop_hook_active: false },
-        { stateDir, env: {} },
-      ).decision;
-    };
+    const prompt = (text, harness = 'claude') =>
+      runPromptHookPayload({ hook_event_name: 'UserPromptSubmit', session_id: 's', prompt: text }, { harness, env: {} });
 
-    for (const [i, grant] of [
+    const grants = [
       'Keep going',
       'keep going.',
       'I want you to keep working on claw support.',
@@ -148,11 +144,21 @@ test('asking for autonomy in plain words grants it; quoted or pasted phrases do 
       "Fix the deploy, don't ask me.",
       "Don't wait for me.",
       "Keep going, don't wait for me.",
-    ].entries()) {
-      assert.equal(run(grant, `grant-${i}`).shouldContinue, true, grant);
+    ];
+    for (const [i, grant] of grants.entries()) {
+      const context = prompt(grant).hookSpecificOutput?.additionalContext ?? '';
+      assert.match(context, /Skill tool/, grant);
+      // Only loading the skill arms the Stop hook.
+      writeJsonl(transcript, [{ type: 'user', message: { content: grant } }, stall]);
+      const decision = runStopHookPayload(
+        { session_id: `grant-${i}`, transcript_path: transcript, hook_event_name: 'Stop', stop_hook_active: false },
+        { stateDir, env: {} },
+      ).decision;
+      assert.equal(decision.reason, 'autonomy-not-granted', grant);
     }
+    assert.match(prompt('Keep going', 'codex').hookSpecificOutput.additionalContext, /SKILL\.md/);
 
-    for (const [i, other] of [
+    for (const other of [
       'Is the autonomous-work skill working?',
       'The skill triggers when the user asks to "keep going" or work autonomously.',
       'The test "reports none without asking when ancestry is unreadable" fails.',
@@ -166,8 +172,10 @@ test('asking for autonomy in plain words grants it; quoted or pasted phrases do 
       'Here is the log:\n```\nKeep going\n```\nWhy did it stop?',
       '> Keep going\nWhat did that message mean?',
       'The README says "I\'m unavailable; keep working without questions." Should we update it?',
-    ].entries()) {
-      assert.equal(run(other, `other-${i}`).shouldContinue, false, other);
+    
+      '/autonomous-work keep going',
+    ]) {
+      assert.deepEqual(prompt(other), {}, other);
     }
   });
 });
@@ -203,7 +211,7 @@ test('continuations stop after three consecutive stalled turns with no tool acti
       { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't1', content: 'ok' }] } },
     ];
     const payload = { session_id: 'idle', transcript_path: transcript, hook_event_name: 'Stop', stop_hook_active: false };
-    const rows = [{ type: 'user', message: { content: 'Keep going' } }, stall];
+    const rows = [{ type: 'user', message: { content: '/autonomous-work Ship it' } }, stall];
     const decisions = [];
     for (let n = 1; n <= 4; n += 1) {
       writeJsonl(transcript, rows);

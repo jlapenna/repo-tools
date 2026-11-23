@@ -31,9 +31,9 @@ const AGY_SKILL_INVOCATION_RE = /<SKILL>\s*The user has explicitly invoked the \
 const OPENCODE_SKILL_CONTENT_RE = /<skill_content\b[^>]*\bname=["']?(?:repo-tools:)?autonomous-work["']?/i;
 const SYNTHETIC_PLUGIN_BLOCK_RE = /<(?:hindsight_pages|hindsight_page_refresh)>[\s\S]*?<\/(?:hindsight_pages|hindsight_page_refresh)>/gi;
 const SKILL_BODY_SIGNATURE_RE = /^#\s+Autonomous work\b[\s\S]{0,400}\bCarry the requested task as far as its existing authorization allows\./m;
-// Asking in plain words is a grant, exactly like loading the skill. Agents
-// often answer "keep going" without loading autonomous-work, and the hook must
-// still keep them working.
+// Plain-words autonomy requests. These never grant autonomy to the Stop hook;
+// only loading autonomous-work does. The UserPromptSubmit hook uses this to
+// tell the agent to load the skill, so activation stays explicit.
 const PROSE_AUTONOMY_GRANT_RE = new RegExp(
   // The phrase must open a sentence as an instruction, so quoted skill text,
   // pasted logs and test names that merely contain the words do not count.
@@ -192,9 +192,7 @@ function classifyUserText(rawText) {
   return {
     kind: 'user',
     text,
-    activatesSkill: SLASH_OR_DOLLAR_SKILL_RE.test(text)
-      || CODEX_SKILL_BLOCK_RE.test(text)
-      || (PROSE_AUTONOMY_GRANT_RE.test(proseForGrant(text)) && !USER_STOP_DIRECTIVE_RE.test(text)),
+    activatesSkill: SLASH_OR_DOLLAR_SKILL_RE.test(text) || CODEX_SKILL_BLOCK_RE.test(text),
   };
 }
 
@@ -899,6 +897,34 @@ export function formatHookOutput(harness, decision) {
   };
 }
 
+export function isPlainWordsAutonomyRequest(text) {
+  const raw = String(text ?? '');
+  return PROSE_AUTONOMY_GRANT_RE.test(proseForGrant(raw)) && !USER_STOP_DIRECTIVE_RE.test(raw);
+}
+
+// UserPromptSubmit: when the user asks for autonomy in plain words without
+// invoking the skill, tell the agent to load autonomous-work. Loading it is
+// what arms the Stop hook.
+export function runPromptHookPayload(payload, options = {}) {
+  const env = options.env ?? process.env;
+  if (isHookDisabled(env) || !payload || typeof payload !== 'object') return {};
+  if (payload.agent_id || payload.agent_transcript_path) return {};
+  const prompt = typeof payload.prompt === 'string' ? payload.prompt : '';
+  if (!prompt.trim() || SLASH_OR_DOLLAR_SKILL_RE.test(prompt) || !isPlainWordsAutonomyRequest(prompt)) return {};
+  const harness = detectHarness(payload, options.harness);
+  const how = harness === 'codex'
+    ? 'Load the `autonomous-work` skill now by reading its SKILL.md'
+    : 'Load the `repo-tools:autonomous-work` skill now with the Skill tool';
+  return {
+    hookSpecificOutput: {
+      hookEventName: 'UserPromptSubmit',
+      additionalContext:
+        `${HOOK_MARKER} The user asked you to work autonomously. ${how}, before any other action, ` +
+        'then continue the current task under it.',
+    },
+  };
+}
+
 export function runStopHookPayload(payload, options = {}) {
   const env = options.env ?? process.env;
   const harness = detectHarness(payload, options.harness);
@@ -1030,7 +1056,9 @@ export function main(argv = process.argv.slice(2)) {
   }
 
   try {
-    const { output } = runStopHookPayload(payload, { harness: parsedArgs.harness });
+    const output = payload.hook_event_name === 'UserPromptSubmit'
+      ? runPromptHookPayload(payload, { harness: parsedArgs.harness })
+      : runStopHookPayload(payload, { harness: parsedArgs.harness }).output;
     process.stdout.write(`${JSON.stringify(output)}\n`);
   } catch {
     process.stdout.write('{}\n');
