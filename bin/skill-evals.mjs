@@ -662,7 +662,8 @@ export function writeReport(dir, { options, rows, results, manifest, run, compar
   const { markdown, casesTotal, casesPassed } = renderReport({ roots: options.roots.map((r) => path.resolve(r)), revision, runnerVersion, date: now.toISOString(), exit, results, rows, manifest, comparison, counts, records, now });
   const result = {
     report: markdown,
-    complete: exit === 0 && !partial,
+    // Rubric or trigger failures on a finished, error-free run are real measurements that advance the job baseline and carry unchanged cases forward; partial runs and unscored run errors never do.
+    complete: !partial && (exit === 0 || (exit === 1 && counts != null && counts.total > 0 && records.length === counts.total)),
     // data is the next run's baseline, bounded to 48 KiB: rows drop the per-case scores, paths and failed graders that data.cases and the report carry.
     data: { runner: options.runner ?? 'claude', model: results.model ?? null, judgeModel: results.judgeModel ?? null, ...(results.adapter ? { adapter: results.adapter } : {}), skills: rows.map(({ scores, evals, failed, ...row }) => row), exit, partial, partialReason: results.partialReason ?? null, costUsd: results.costUsd ?? null, durationSeconds: results.durationSeconds ?? null, casesTotal, casesPassed, casesRun: counts?.run ?? null, casesCarried: counts?.carried ?? 0, baseline: comparison ?? null, cases: records },
   };
