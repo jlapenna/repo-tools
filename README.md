@@ -441,15 +441,16 @@ setup scripts.
 
 | Runtime     | Supported integration from a shared checkout                                                                                                                               |
 | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Codex       | `codex plugin marketplace add /opt/repo-tools`, `codex plugin add repo-tools@repo-tools`, and `repo-autonomous-work-hook --harness codex` in `$CODEX_HOME/hooks.json` (`Stop`) |
+| Codex       | `codex plugin marketplace add /opt/repo-tools`, `codex plugin add repo-tools@repo-tools`, and `repo-autonomous-work-hook --harness codex` in `$CODEX_HOME/hooks.json` (`Stop` and `UserPromptSubmit`) |
 | Claude Code | `claude plugin marketplace add /opt/repo-tools`, then `claude plugin install repo-tools@repo-tools`                                                                        |
 | Antigravity | `agy plugin install /opt/repo-tools/plugins/repo-tools`                                                                                                                    |
 | OpenCode    | Add `"/opt/repo-tools/plugins/repo-tools/skills"` to `skills` (or `skills.paths`) and `"file:///opt/repo-tools/plugins/repo-tools/opencode/autonomous-work.mjs"` to `plugin` in `opencode.json`. |
 
-Claude Code and Antigravity load both skills and the `autonomous-work` `Stop`
-hook from their plugin manifests; Codex loads skills from its plugin manifest
-and runs `repo-autonomous-work-hook --harness codex` from user-scoped
-`$CODEX_HOME/hooks.json` (avoiding per-release plugin `.hook-trust` prompts or
+Claude Code loads both skills and the `autonomous-work` `Stop` and
+`UserPromptSubmit` hooks from its plugin manifest; Antigravity loads both skills
+and the `Stop` hook only. Codex loads skills from its plugin manifest and runs
+`repo-autonomous-work-hook --harness codex` for `Stop` and `UserPromptSubmit`
+from user-scoped `$CODEX_HOME/hooks.json` (avoiding per-release plugin `.hook-trust` prompts or
 `codex exec` hook failures); OpenCode loads skills from its configured skill
 paths and runs `opencode/autonomous-work.mjs` on `session.idle`. The provider
 matrix in `plugins/manifests.test.mjs` protects this shared source layout.
