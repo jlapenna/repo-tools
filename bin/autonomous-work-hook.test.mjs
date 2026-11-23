@@ -16,6 +16,7 @@ import AutonomousWorkMonitor from '../plugins/repo-tools/opencode/autonomous-wor
 import {
   buildContinuationMessage,
   parseCodexTranscript,
+  parseOpenCodeMessages,
   runStopHookPayload,
 } from '../plugins/repo-tools/scripts/repo-autonomous-work-hook.mjs';
 
@@ -145,6 +146,8 @@ test('asking for autonomy in plain words grants it; quoted or pasted phrases do 
       'I want you to keep working on claw support.',
       'Joe asks every session to resume. Continue autonomously within your current scope.',
       "Fix the deploy, don't ask me.",
+      "Don't wait for me.",
+      "Keep going, don't wait for me.",
     ].entries()) {
       assert.equal(run(grant, `grant-${i}`).shouldContinue, true, grant);
     }
@@ -155,10 +158,86 @@ test('asking for autonomy in plain words grants it; quoted or pasted phrases do 
       'The test "reports none without asking when ancestry is unreadable" fails.',
       '`gh release edit` keep working on a draft.',
       'Keep going? No, stop here.',
+      'Keep going?',
+      'Should I keep working on this?',
+      'Work with me step by step, not autonomously.',
+      "Proceed carefully, don't work autonomously.",
+      "Work on fixing the hook so it doesn't run autonomously.",
+      'Here is the log:\n```\nKeep going\n```\nWhy did it stop?',
+      '> Keep going\nWhat did that message mean?',
+      'The README says "I\'m unavailable; keep working without questions." Should we update it?',
     ].entries()) {
       assert.equal(run(other, `other-${i}`).shouldContinue, false, other);
     }
   });
+});
+
+test('"don\'t wait for me" in an autonomous session does not revoke autonomy', async () => {
+  await withTempDir((dir) => {
+    const transcript = join(dir, 'active.jsonl');
+    writeJsonl(transcript, [
+      { type: 'user', message: { content: '/autonomous-work Ship the fix' } },
+      { type: 'user', message: { content: "Don't wait for me, push when CI passes." } },
+      { type: 'assistant', message: { content: [{ type: 'text', text: 'CI is green. Next I will push.' }] } },
+    ]);
+    const decision = runStopHookPayload(
+      { session_id: 'active', transcript_path: transcript, hook_event_name: 'Stop', stop_hook_active: false },
+      { stateDir: join(dir, 'state'), env: {} },
+    ).decision;
+    assert.equal(decision.shouldContinue, true);
+  });
+});
+
+test('continuations stop after three consecutive stalled turns with no tool activity', async () => {
+  await withTempDir((dir) => {
+    const stateDir = join(dir, 'state');
+    const transcript = join(dir, 'idle.jsonl');
+    const feedback = (n) => ({
+      type: 'user',
+      isMeta: true,
+      message: { content: `Stop hook feedback:\n${buildContinuationMessage('announced-next-step', n)}` },
+    });
+    const stall = { type: 'assistant', message: { content: [{ type: 'text', text: 'Next I will push the branch.' }] } };
+    const toolTurn = [
+      { type: 'assistant', message: { content: [{ type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'git push' } }] } },
+      { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't1', content: 'ok' }] } },
+    ];
+    const payload = { session_id: 'idle', transcript_path: transcript, hook_event_name: 'Stop', stop_hook_active: false };
+    const rows = [{ type: 'user', message: { content: 'Keep going' } }, stall];
+    const decisions = [];
+    for (let n = 1; n <= 4; n += 1) {
+      writeJsonl(transcript, rows);
+      decisions.push(runStopHookPayload(payload, { stateDir, env: {} }).decision);
+      rows.push(feedback(n), stall);
+    }
+    assert.deepEqual(decisions.map((d) => d.shouldContinue), [true, true, true, false]);
+    assert.equal(decisions[3].reason, 'no-progress');
+
+    // A turn that runs tools is progress: the idle streak resets and work continues.
+    rows.push(feedback(5), ...toolTurn, stall);
+    writeJsonl(transcript, rows);
+    const progressed = runStopHookPayload(payload, { stateDir, env: {} }).decision;
+    assert.equal(progressed.shouldContinue, true);
+  });
+});
+
+test('OpenCode activates only through the skill tool, not by reading SKILL.md', () => {
+  const body = '# Autonomous work\n\nCarry the requested task as far as its existing authorization allows.';
+  const inspected = parseOpenCodeMessages([
+    { info: { role: 'user' }, parts: [{ type: 'text', text: 'Is the hook working?' }] },
+    {
+      info: { role: 'assistant' },
+      parts: [
+        { type: 'tool', tool: 'read', state: { input: { filePath: '/x/autonomous-work/SKILL.md' }, output: body } },
+        { type: 'tool', tool: 'bash', state: { input: { command: 'cat autonomous-work/SKILL.md' }, output: body } },
+      ],
+    },
+  ]);
+  assert.equal(inspected.some((e) => e.kind === 'skill'), false);
+  const loaded = parseOpenCodeMessages([
+    { info: { role: 'assistant' }, parts: [{ type: 'tool', tool: 'skill', state: { input: { name: 'autonomous-work' }, output: body } }] },
+  ]);
+  assert.equal(loaded.some((e) => e.kind === 'skill'), true);
 });
 
 test('Claude Code Stop hook blocks premature stalls and allows completion, blockers, watchers, revocation, and subagents', async () => {

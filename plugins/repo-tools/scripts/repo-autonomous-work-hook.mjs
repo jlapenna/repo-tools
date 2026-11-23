@@ -17,6 +17,10 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const HOOK_MARKER = '[autonomous-work-hook]';
+// Continuations are unlimited while the agent makes progress. This many
+// consecutive stalled turns with no tool activity at all (empty turns, API
+// errors, a false-positive stall repeated verbatim) stop the loop.
+export const MAX_IDLE_CONTINUATIONS = 3;
 
 const SKILL_PATH_RE = /(?:^|[\s"'`(=:/\\])autonomous-work[\\/](?:SKILL\.md|references[\\/][^\s"'`):]+\.md)(?=$|[\s"'`):])/i;
 const SKILL_WRITE_TOOL_RE = /^(?:write|edit|multiedit|write_file|edit_file|write_to_file|replace_file_content|multi_replace_file_content|apply_patch|notebookedit|notebook_edit)$/i;
@@ -33,17 +37,31 @@ const SKILL_BODY_SIGNATURE_RE = /^#\s+Autonomous work\b[\s\S]{0,400}\bCarry the 
 const PROSE_AUTONOMY_GRANT_RE = new RegExp(
   // The phrase must open a sentence as an instruction, so quoted skill text,
   // pasted logs and test names that merely contain the words do not count.
+  // Quoted spans, code and blockquotes are removed before this runs (see
+  // proseForGrant), and a sentence that ends in a question is not a grant.
   String.raw`(?:^|[.!?;,]\s+|\n\s*)(?:(?:please|now|ok(?:ay)?|so|then|and),?\s+)*(?:i\s+want\s+you\s+to\s+|you\s+should\s+)?` +
     '(?:' +
     [
       String.raw`keep\s+(?:going|working|at\s+it)\b`,
-      String.raw`(?:continue|work|proceed|carry\s+on|finish|resume)\b[^.\n]{0,40}\bautonomously\b`,
+      // The gap cannot cross clause punctuation or a negation, so "work with
+      // me, not autonomously" and "don't work autonomously" are not grants.
+      String.raw`(?:continue|work|proceed|carry\s+on|finish|resume)\b(?:(?!\b(?:not|no|never|without|don't|dont|doesn't|do\s+not)\b)[^.\n,;!?]){0,40}\bautonomously\b`,
       String.raw`(?:do\s+not|don't|dont)\s+(?:ask|check\s+in\s+with|wait\s+(?:on|for))\s+me\b`,
     ].join('|') +
-    ')',
+    String.raw`)(?![^.!\n]*\?)`,
   'i',
 );
-const INJECTED_CONTINUATION_RE = /^continue\s*\n+\[autonomous-work-hook\]\s+Stalled turn detected\b/;
+
+// Removes text the user is quoting or pasting rather than saying.
+function proseForGrant(text) {
+  return stripCodeBlocks(text)
+    .replace(/`[^`\n]*`/g, ' ')
+    .replace(/^\s*>.*$/gm, ' ')
+    .replace(/"[^"\n]*"/g, ' ')
+    .replace(/“[^”\n]*”/g, ' ');
+}
+
+const INJECTED_CONTINUATION_RE = /^(?:Stop hook feedback:\s*\n)?continue\s*\n+\[autonomous-work-hook\]\s+Stalled turn detected\b/;
 const AGY_INJECTED_CONTINUATION_RE = /(?:^|Stop hook blocked termination:\s*)continue\s*\n+\[autonomous-work-hook\]\s+Stalled turn detected\b/;
 
 const USER_STOP_DIRECTIVE_RE = new RegExp(
@@ -51,7 +69,8 @@ const USER_STOP_DIRECTIVE_RE = new RegExp(
     String.raw`^\s*\/?(?:stop|pause|cancel|abort|quit|exit|wait|hold\s+on)[.!]?\s*$`,
     String.raw`\b(?:stop|pause|cancel)\s+(?:autonomous|working|here|now|execution|the\s+task)\b`,
     String.raw`\b(?:do\s+not|don't)\s+continue(?:\s+autonomously)?\b`,
-    String.raw`\bwait\s+for\s+(?:me|my\s+(?:approval|input|confirmation|go-ahead))\b`,
+    String.raw`(?<!\b(?:do\s+not|don't|dont)\s+)\bwait\s+for\s+(?:me|my\s+(?:approval|input|confirmation|go-ahead))\b`,
+    String.raw`\b(?:not|never|don't|dont|do\s+not)\s+(?:(?:work|run|proceed|continue)\s+)?autonomously\b`,
   ].join('|'),
   'i',
 );
@@ -175,7 +194,7 @@ function classifyUserText(rawText) {
     text,
     activatesSkill: SLASH_OR_DOLLAR_SKILL_RE.test(text)
       || CODEX_SKILL_BLOCK_RE.test(text)
-      || (PROSE_AUTONOMY_GRANT_RE.test(text) && !USER_STOP_DIRECTIVE_RE.test(text)),
+      || (PROSE_AUTONOMY_GRANT_RE.test(proseForGrant(text)) && !USER_STOP_DIRECTIVE_RE.test(text)),
   };
 }
 
@@ -203,6 +222,11 @@ export function parseClaudeTranscript(transcriptPath) {
             : '';
         if (SKILL_BODY_SIGNATURE_RE.test(metaText)) {
           events.push({ kind: 'skill', name: 'autonomous-work' });
+        }
+        // Claude records a Stop-hook block as an isMeta "Stop hook feedback"
+        // message; it is our own continuation, not a real user turn.
+        if (INJECTED_CONTINUATION_RE.test(metaText.trim())) {
+          events.push({ kind: 'continuation', text: metaText.trim() });
         }
         continue;
       }
@@ -532,8 +556,9 @@ export function parseOpenCodeMessages(messages) {
           }
           const toolName = part.tool ?? part.name;
           const toolInput = part.state?.input ?? part.input ?? part.args;
-          const toolOutput = part.state?.output ?? part.output ?? '';
-          if (isSkillReadCall(toolName, toolInput) || SKILL_BODY_SIGNATURE_RE.test(String(toolOutput))) {
+          // Like Claude, OpenCode activates skills through its skill tool;
+          // reading SKILL.md or printing it is inspection, not activation.
+          if (/^skill$/i.test(String(toolName ?? '').trim()) && isSkillReadCall(toolName, toolInput)) {
             events.push({ kind: 'skill', name: 'autonomous-work' });
           }
           events.push({ kind: 'activity' });
@@ -780,11 +805,33 @@ export function evaluateConversation({
     return { shouldContinue: false, reason: classification.reason, continuations: priorContinuations };
   }
 
+  // Circuit breaker: count consecutive stalled turns that ran no tools.
+  const turnStart = Math.max(lastRealUserIndex, events.findLastIndex((ev) => ev.kind === 'continuation'));
+  const turnHadActivity = events.slice(turnStart + 1).some((ev) => ev.kind === 'activity');
+  let transcriptIdle = 0;
+  if (!turnHadActivity) {
+    transcriptIdle = 1;
+    for (let i = turnStart; i > lastRealUserIndex && events[i]?.kind === 'continuation'; ) {
+      const prevStart = Math.max(lastRealUserIndex, events.slice(0, i).findLastIndex((ev) => ev.kind === 'continuation'));
+      if (events.slice(prevStart + 1, i).some((ev) => ev.kind === 'activity')) break;
+      transcriptIdle += 1;
+      i = prevStart;
+    }
+  }
+  const savedIdle = saved?.userFingerprint === userFingerprint && Number.isInteger(saved.idleContinuations)
+    ? saved.idleContinuations
+    : 0;
+  const idleContinuations = turnHadActivity ? 0 : Math.max(transcriptIdle, savedIdle + 1);
+  if (idleContinuations > MAX_IDLE_CONTINUATIONS) {
+    return { shouldContinue: false, reason: 'no-progress', continuations: priorContinuations };
+  }
+
   const nextContinuation = priorContinuations + 1;
   if (stateDir && sessionId) {
     writeSessionState(stateDir, harness, sessionId, {
       userFingerprint,
       continuations: nextContinuation,
+      idleContinuations,
       updatedAt: new Date().toISOString(),
     });
   }

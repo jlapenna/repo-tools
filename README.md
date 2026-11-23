@@ -165,13 +165,15 @@ health checks.
   evaluate a harness `Stop` hook payload from stdin and emit a `"continue"`
   decision only when the current session loaded `autonomous-work` (or the user
   asked for it in plain words, such as "keep going" or "continue
-  autonomously"; reading the skill's files does not count) and stalled
+  autonomously"; on Claude Code and OpenCode only the skill tool or command
+  counts, not reading the skill's files) and stalled
   prematurely (empty or code-only turn, announced next step, optional question
   or `"your call"` handoff, or unfinished step progress). Clean completion,
   Section-6 blockers, live watchers, provider quota/rate limits, subagents,
   and user stop/pause revocations pass through untouched. Continuations are
-  unlimited: every stalled turn is resumed until the work completes, blocks,
-  or the user stops it. Set `REPO_AUTONOMOUS_WORK_HOOK=0` to disable.
+  unlimited while the agent makes progress: every stalled turn is resumed
+  until the work completes, blocks, or the user stops it. After three
+  consecutive stalled turns that ran no tools, the hook stops (`no-progress`). Set `REPO_AUTONOMOUS_WORK_HOOK=0` to disable.
 - `repo-safe-remove-worktree` — validate and safely remove a completed
   feature worktree, including clean worktrees with initialized submodules.
 - `repo-sweep-worktrees [--repo <checkout>] [--base <ref>] [--delete]` —
