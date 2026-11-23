@@ -163,13 +163,15 @@ health checks.
   pinned title; `--force` explicitly pins or replaces a title for manual use.
 - `repo-autonomous-work-hook [--harness auto|claude|codex|antigravity]` —
   evaluate a harness `Stop` hook payload from stdin and emit a `"continue"`
-  decision only when the current session loaded `autonomous-work` and stalled
+  decision only when the current session loaded `autonomous-work` (or the user
+  asked for it in plain words, such as "keep going" or "continue
+  autonomously"; reading the skill's files does not count) and stalled
   prematurely (empty or code-only turn, announced next step, optional question
   or `"your call"` handoff, or unfinished step progress). Clean completion,
   Section-6 blockers, live watchers, provider quota/rate limits, subagents,
-  user stop/pause revocations, and turns reaching
-  `REPO_AUTONOMOUS_MAX_CONTINUATIONS` (default `3`, reset on each real user
-  prompt) pass through untouched. Set `REPO_AUTONOMOUS_WORK_HOOK=0` to disable.
+  and user stop/pause revocations pass through untouched. Continuations are
+  unlimited: every stalled turn is resumed until the work completes, blocks,
+  or the user stops it. Set `REPO_AUTONOMOUS_WORK_HOOK=0` to disable.
 - `repo-safe-remove-worktree` — validate and safely remove a completed
   feature worktree, including clean worktrees with initialized submodules.
 - `repo-sweep-worktrees [--repo <checkout>] [--base <ref>] [--delete]` —

@@ -17,7 +17,6 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const HOOK_MARKER = '[autonomous-work-hook]';
-export const DEFAULT_MAX_CONTINUATIONS = 3;
 
 const SKILL_PATH_RE = /(?:^|[\s"'`(=:/\\])autonomous-work[\\/](?:SKILL\.md|references[\\/][^\s"'`):]+\.md)(?=$|[\s"'`):])/i;
 const SKILL_WRITE_TOOL_RE = /^(?:write|edit|multiedit|write_file|edit_file|write_to_file|replace_file_content|multi_replace_file_content|apply_patch|notebookedit|notebook_edit)$/i;
@@ -28,6 +27,22 @@ const AGY_SKILL_INVOCATION_RE = /<SKILL>\s*The user has explicitly invoked the \
 const OPENCODE_SKILL_CONTENT_RE = /<skill_content\b[^>]*\bname=["']?(?:repo-tools:)?autonomous-work["']?/i;
 const SYNTHETIC_PLUGIN_BLOCK_RE = /<(?:hindsight_pages|hindsight_page_refresh)>[\s\S]*?<\/(?:hindsight_pages|hindsight_page_refresh)>/gi;
 const SKILL_BODY_SIGNATURE_RE = /^#\s+Autonomous work\b[\s\S]{0,400}\bCarry the requested task as far as its existing authorization allows\./m;
+// Asking in plain words is a grant, exactly like loading the skill. Agents
+// often answer "keep going" without loading autonomous-work, and the hook must
+// still keep them working.
+const PROSE_AUTONOMY_GRANT_RE = new RegExp(
+  // The phrase must open a sentence as an instruction, so quoted skill text,
+  // pasted logs and test names that merely contain the words do not count.
+  String.raw`(?:^|[.!?;,]\s+|\n\s*)(?:(?:please|now|ok(?:ay)?|so|then|and),?\s+)*(?:i\s+want\s+you\s+to\s+|you\s+should\s+)?` +
+    '(?:' +
+    [
+      String.raw`keep\s+(?:going|working|at\s+it)\b`,
+      String.raw`(?:continue|work|proceed|carry\s+on|finish|resume)\b[^.\n]{0,40}\bautonomously\b`,
+      String.raw`(?:do\s+not|don't|dont)\s+(?:ask|check\s+in\s+with|wait\s+(?:on|for))\s+me\b`,
+    ].join('|') +
+    ')',
+  'i',
+);
 const INJECTED_CONTINUATION_RE = /^continue\s*\n+\[autonomous-work-hook\]\s+Stalled turn detected\b/;
 const AGY_INJECTED_CONTINUATION_RE = /(?:^|Stop hook blocked termination:\s*)continue\s*\n+\[autonomous-work-hook\]\s+Stalled turn detected\b/;
 
@@ -158,7 +173,9 @@ function classifyUserText(rawText) {
   return {
     kind: 'user',
     text,
-    activatesSkill: SLASH_OR_DOLLAR_SKILL_RE.test(text) || CODEX_SKILL_BLOCK_RE.test(text),
+    activatesSkill: SLASH_OR_DOLLAR_SKILL_RE.test(text)
+      || CODEX_SKILL_BLOCK_RE.test(text)
+      || (PROSE_AUTONOMY_GRANT_RE.test(text) && !USER_STOP_DIRECTIVE_RE.test(text)),
   };
 }
 
@@ -201,14 +218,9 @@ export function parseClaudeTranscript(transcriptPath) {
             texts.push(block.text);
           } else if (block.type === 'tool_result') {
             sawToolResult = true;
-            const resultText = typeof block.content === 'string'
-              ? block.content
-              : Array.isArray(block.content)
-                ? block.content.filter((c) => c?.type === 'text' && typeof c.text === 'string').map((c) => c.text).join('\n')
-                : '';
-            if (SKILL_BODY_SIGNATURE_RE.test(resultText)) {
-              events.push({ kind: 'skill', name: 'autonomous-work' });
-            }
+            // Claude delivers a loaded skill's body as an isMeta message. A
+            // tool result that merely contains SKILL.md (cat, grep, Read while
+            // inspecting or debugging the skill) is not an activation.
           }
         }
       }
@@ -232,7 +244,9 @@ export function parseClaudeTranscript(transcriptPath) {
             events.push({ kind: 'assistant', text: texts.join('\n') });
             texts.length = 0;
           }
-          if (isSkillReadCall(block.name, block.input)) {
+          // Claude activates skills only through its Skill tool. Reading the
+          // skill's files with Bash or Read is inspection, not activation.
+          if (isClaudeSkillToolCall(block.name, block.input)) {
             events.push({ kind: 'skill', name: 'autonomous-work' });
           }
           events.push({ kind: 'activity' });
@@ -244,6 +258,11 @@ export function parseClaudeTranscript(transcriptPath) {
     }
   }
   return events;
+}
+
+function isClaudeSkillToolCall(toolName, input) {
+  if (String(toolName ?? '').trim() !== 'Skill') return false;
+  return Boolean(input && typeof input === 'object' && isSkillName(input.skill));
 }
 
 const CODEX_STARTUP_KINDS = new Set([
@@ -658,11 +677,11 @@ function writeSessionState(stateDir, harness, sessionId, data) {
   }
 }
 
-export function buildContinuationMessage(reason, continuationNumber, maxContinuations) {
+export function buildContinuationMessage(reason, continuationNumber) {
   return [
     'continue',
     '',
-    `${HOOK_MARKER} Stalled turn detected (${reason}; continuation ${continuationNumber}/${maxContinuations}). ` +
+    `${HOOK_MARKER} Stalled turn detected (${reason}; continuation ${continuationNumber}). ` +
       'Autonomy was granted via autonomous-work: execute the next authorized in-scope step now instead of stopping on an announced action, partial status update, or optional question. ' +
       (reason === 'skill-load-acknowledged'
         ? 'Loading the skill was the instruction to act, not to confirm the load: resume the conversation\'s task now, and if it ended in findings or recommendations, carry them out through the repository\'s delivery workflow. '
@@ -678,7 +697,6 @@ export function evaluateConversation({
   lastAssistantMessage,
   autonomousGrantedHint = false,
   continuationActiveHint = false,
-  maxContinuations = DEFAULT_MAX_CONTINUATIONS,
   stateDir,
 }) {
   let skillIndex = -1;
@@ -728,10 +746,6 @@ export function evaluateConversation({
     continuationActiveHint ? 1 : 0,
   );
 
-  if (priorContinuations >= maxContinuations) {
-    return { shouldContinue: false, reason: 'max-continuations-reached', continuations: priorContinuations };
-  }
-
   let effectiveAssistantText = typeof lastAssistantMessage === 'string' && lastAssistantMessage.trim()
     ? lastAssistantMessage.trim()
     : '';
@@ -775,8 +789,8 @@ export function evaluateConversation({
     });
   }
 
-  const message = buildContinuationMessage(classification.reason, nextContinuation, maxContinuations);
-  const systemMessage = `${HOOK_MARKER} Resuming stalled autonomous-work session (${classification.reason}, ${nextContinuation}/${maxContinuations}).`;
+  const message = buildContinuationMessage(classification.reason, nextContinuation);
+  const systemMessage = `${HOOK_MARKER} Resuming stalled autonomous-work session (${classification.reason}, continuation ${nextContinuation}).`;
 
   return {
     shouldContinue: true,
@@ -785,13 +799,6 @@ export function evaluateConversation({
     message,
     systemMessage,
   };
-}
-
-function parseMaxContinuations(env = process.env) {
-  const raw = env.REPO_AUTONOMOUS_MAX_CONTINUATIONS;
-  if (raw === undefined || raw === '') return DEFAULT_MAX_CONTINUATIONS;
-  const parsed = Number.parseInt(raw, 10);
-  return Number.isInteger(parsed) && parsed >= 0 ? parsed : DEFAULT_MAX_CONTINUATIONS;
 }
 
 function isHookDisabled(env = process.env) {
@@ -852,7 +859,6 @@ export function runStopHookPayload(payload, options = {}) {
     return { harness, decision: { shouldContinue: false, reason: 'disabled-or-empty' }, output: {} };
   }
 
-  const maxContinuations = options.maxContinuations ?? parseMaxContinuations(env);
   const stateDir = options.stateDir ?? defaultStateDir(env);
 
   if (harness === 'antigravity') {
@@ -872,7 +878,6 @@ export function runStopHookPayload(payload, options = {}) {
       sessionId: payload.conversationId,
       events,
       continuationActiveHint: Boolean(payload.continuationActive),
-      maxContinuations,
       stateDir,
     });
     return { harness, decision, output: formatHookOutput(harness, decision) };
@@ -897,7 +902,6 @@ export function runStopHookPayload(payload, options = {}) {
       sessionId: payload.sessionID ?? payload.session_id ?? payload.info?.id,
       events,
       autonomousGrantedHint: Boolean(payload.autonomousActivated),
-      maxContinuations,
       stateDir,
     });
     return { harness, decision, output: formatHookOutput(harness, decision) };
@@ -921,7 +925,6 @@ export function runStopHookPayload(payload, options = {}) {
     events,
     lastAssistantMessage: payload.last_assistant_message,
     continuationActiveHint: Boolean(payload.stop_hook_active),
-    maxContinuations,
     stateDir,
   });
 
