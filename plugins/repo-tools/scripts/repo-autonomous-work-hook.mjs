@@ -898,7 +898,7 @@ export function formatHookOutput(harness, decision) {
 }
 
 export function isPlainWordsAutonomyRequest(text) {
-  const raw = String(text ?? '');
+  const raw = String(text ?? '').trim();
   return PROSE_AUTONOMY_GRANT_RE.test(proseForGrant(raw)) && !USER_STOP_DIRECTIVE_RE.test(raw);
 }
 

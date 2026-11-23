@@ -138,6 +138,8 @@ test('plain-words autonomy requests prompt the agent to load the skill but do no
 
     const grants = [
       'Keep going',
+      ' Keep going',
+      '\tDon\'t wait for me.',
       'keep going.',
       'I want you to keep working on claw support.',
       'Joe asks every session to resume. Continue autonomously within your current scope.',
