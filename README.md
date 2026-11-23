@@ -163,17 +163,21 @@ health checks.
   pinned title; `--force` explicitly pins or replaces a title for manual use.
 - `repo-autonomous-work-hook [--harness auto|claude|codex|antigravity]` —
   evaluate a harness `Stop` hook payload from stdin and emit a `"continue"`
-  decision only when the current session loaded `autonomous-work` (or the user
-  asked for it in plain words, such as "keep going" or "continue
-  autonomously"; on Claude Code and OpenCode only the skill tool or command
-  counts, not reading the skill's files) and stalled
+  decision only when the current session loaded `autonomous-work` (on Claude
+  Code and OpenCode only the skill tool or command counts, not reading the
+  skill's files) and stalled
   prematurely (empty or code-only turn, announced next step, optional question
   or `"your call"` handoff, or unfinished step progress). Clean completion,
   Section-6 blockers, live watchers, provider quota/rate limits, subagents,
   and user stop/pause revocations pass through untouched. Continuations are
   unlimited while the agent makes progress: every stalled turn is resumed
   until the work completes, blocks, or the user stops it. After three
-  consecutive stalled turns that ran no tools, the hook stops (`no-progress`). Set `REPO_AUTONOMOUS_WORK_HOOK=0` to disable.
+  consecutive stalled turns that ran no tools, the hook stops (`no-progress`).
+  On a `UserPromptSubmit` payload it instead tells the agent to load
+  `autonomous-work` when the user asks for autonomy in plain words ("keep
+  going", "continue autonomously", "don't ask me"); plain words never arm the
+  Stop hook by themselves. The Claude Code plugin registers both events.
+  Set `REPO_AUTONOMOUS_WORK_HOOK=0` to disable.
 - `repo-safe-remove-worktree` — validate and safely remove a completed
   feature worktree, including clean worktrees with initialized submodules.
 - `repo-sweep-worktrees [--repo <checkout>] [--base <ref>] [--delete]` —

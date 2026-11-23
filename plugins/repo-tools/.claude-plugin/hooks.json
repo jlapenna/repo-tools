@@ -1,5 +1,5 @@
 {
-  "description": "Monitor autonomous-work sessions for premature stalls and inject a bounded continue prompt",
+  "description": "Monitor autonomous-work sessions for premature stalls and inject a continue prompt; ask the agent to load autonomous-work when the user requests autonomy in plain words",
   "hooks": {
     "Stop": [
       {
@@ -8,6 +8,17 @@
             "type": "command",
             "command": "if [ -f \"${CLAUDE_PLUGIN_ROOT}/scripts/run-autonomous-work-hook.sh\" ]; then sh \"${CLAUDE_PLUGIN_ROOT}/scripts/run-autonomous-work-hook.sh\" --harness claude; elif [ -f \"$HOME/.claude/plugins/marketplaces/repo-tools/plugins/repo-tools/scripts/run-autonomous-work-hook.sh\" ]; then sh \"$HOME/.claude/plugins/marketplaces/repo-tools/plugins/repo-tools/scripts/run-autonomous-work-hook.sh\" --harness claude; else printf '{}\\n'; fi",
             "timeout": 15
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if [ -f \"${CLAUDE_PLUGIN_ROOT}/scripts/run-autonomous-work-hook.sh\" ]; then sh \"${CLAUDE_PLUGIN_ROOT}/scripts/run-autonomous-work-hook.sh\" --harness claude; elif [ -f \"$HOME/.claude/plugins/marketplaces/repo-tools/plugins/repo-tools/scripts/run-autonomous-work-hook.sh\" ]; then sh \"$HOME/.claude/plugins/marketplaces/repo-tools/plugins/repo-tools/scripts/run-autonomous-work-hook.sh\" --harness claude; else printf '{}\\n'; fi",
+            "timeout": 10
           }
         ]
       }
