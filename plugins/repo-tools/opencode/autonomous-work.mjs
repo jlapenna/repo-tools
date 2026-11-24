@@ -3,22 +3,12 @@
 // Claude Code, Codex, and Antigravity Stop hooks.
 import { runStopHookPayload } from '../scripts/repo-autonomous-work-hook.mjs';
 
-const SKILL_PATH_RE = /(?:^|[\\/])autonomous-work[\\/]SKILL\.md$/i;
-const SKILL_BODY_RE = /^#\s+Autonomous work\b[\s\S]{0,400}\bCarry the requested task as far as its existing authorization allows\./m;
-
-function isAutonomousSkillTool(tool, args, outputText) {
-  const name = String(tool ?? '').toLowerCase();
-  if (name === 'skill') {
-    const requested = String(args?.name ?? args?.skill ?? '').trim().replace(/^[/$]/, '');
-    if (requested === 'autonomous-work' || requested.endsWith(':autonomous-work')) {
-      return true;
-    }
-  }
-  if (name === 'read') {
-    const filePath = String(args?.filePath ?? args?.path ?? '');
-    if (SKILL_PATH_RE.test(filePath)) return true;
-  }
-  return typeof outputText === 'string' && SKILL_BODY_RE.test(outputText);
+// OpenCode activates skills through its skill tool. Reading SKILL.md or
+// printing it is inspection, not activation.
+function isAutonomousSkillTool(tool, args) {
+  if (String(tool ?? '').toLowerCase() !== 'skill') return false;
+  const requested = String(args?.name ?? args?.skill ?? '').trim().replace(/^[/$]/, '');
+  return requested === 'autonomous-work' || requested.endsWith(':autonomous-work');
 }
 
 export const AutonomousWorkMonitor = async ({ client, directory } = {}) => {
@@ -79,10 +69,10 @@ export const AutonomousWorkMonitor = async ({ client, directory } = {}) => {
     'chat.message': async ({ sessionID }) => {
       if (sessionID) blockedSessions.delete(sessionID);
     },
-    'tool.execute.after': async (input, output) => {
+    'tool.execute.after': async (input) => {
       const sessionID = input?.sessionID;
       if (!sessionID || childSessions.has(sessionID)) return;
-      if (isAutonomousSkillTool(input.tool, input.args, output?.output)) {
+      if (isAutonomousSkillTool(input.tool, input.args)) {
         activatedSessions.add(sessionID);
       }
     },

@@ -1,13 +1,13 @@
 {
   "name": "@jlapenna/repo-tools",
-  "version": "4.10.0",
+  "version": "4.12.0",
   "private": false,
   "description": "General repository-management commands for worktree safety and CI monitoring.",
   "license": "MIT",
-  "packageManager": "pnpm@11.28.13",
+  "packageManager": "pnpm@11.29.0",
   "engines": {
     "node": ">=24.22.1 <25 || >=26.12.1 <27",
-    "pnpm": "11.28.13"
+    "pnpm": "11.29.0"
   },
   "bin": {
     "repo-docs": "bin/docs.mjs",
@@ -52,7 +52,7 @@
     "test:skill-evals-native": "REPO_EVAL_NATIVE_CODEX=1 node --test bin/skill-evals-codex.test.mjs"
   },
   "dependencies": {
-    "@agentclientprotocol/sdk": "2.8.0",
+    "@agentclientprotocol/sdk": "2.9.1",
     "@modelcontextprotocol/server": "2.4.0",
     "@nx/devkit": "24.0.6",
     "@typescript-eslint/utils": "8.73.0",

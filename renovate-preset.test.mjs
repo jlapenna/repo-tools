@@ -183,3 +183,25 @@ test("npm lock file maintenance passes release age without dropping --before", (
     "timestamp-optional warning is demoted from the Dependency Dashboard",
   );
 });
+
+test("vendored skills are not version-pinned by Renovate", () => {
+  // agent-lcars' vendored-skill-sync workflow copies the whole upstream skill
+  // directory; a Renovate pin on one file would fight that copy.
+  const vendored = [
+    ".agents/skills/use-modern-go/scripts/VERSION",
+    ".agents/skills/use-modern-go/SKILL.md",
+  ];
+  for (const manager of preset.customManagers ?? []) {
+    for (const pattern of manager.managerFilePatterns ?? []) {
+      const regex = pattern.startsWith("/")
+        ? new RegExp(pattern.slice(1, pattern.lastIndexOf("/")))
+        : null;
+      for (const file of vendored) {
+        assert.ok(
+          regex ? !regex.test(file) : !file.endsWith(pattern),
+          `${pattern} manages vendored ${file}`,
+        );
+      }
+    }
+  }
+});
