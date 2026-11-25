@@ -182,14 +182,15 @@ when interpreting who merged a PR.
    about it.
 3. Confirm a linked issue closed only when the merged PR completed it. Do not
    close partial or follow-up work silently.
-4. Hand teardown to `worktree-hygiene`. Prove squash-merged content landed,
-   scan for live processes, require a clean worktree, and remove it with
-   `repo-safe-remove-worktree` rather than plain `git worktree remove` (the
-   helper safely handles initialized submodules). Delete the exact local and
-   remote feature branches, and synchronize a clean primary base checkout.
-5. Report anything intentionally retained. Deleted branch/worktree content is
-   recoverable from the merged commit and PR when the tree-equivalence proof
-   succeeded.
+4. Hand teardown to `worktree-hygiene`. Use its guarded
+   `repo-prune-merged-worktrees` procedure and exact merged-head or ancestry
+   evidence. Preserve foreign live processes, locks, and every guard refusal;
+   report the exact retained path and unblock condition. Finish only the
+   task's local and remote branch cleanup through the shared audit command,
+   then verify the primary base is synchronized. The merged PR head and merge
+   commit retain the delivered history; do not substitute an ad hoc removal
+   or an older tree-comparison recipe for the current shared guard.
+
 
 Finish with the PR link, merge commit, checks, review disposition, post-merge
 verification, and cleanup result. Stop and name the precise blocker only when
