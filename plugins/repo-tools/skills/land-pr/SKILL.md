@@ -1,6 +1,6 @@
 ---
 name: land-pr
-description: "Carry a local change or existing pull request through the complete GitHub delivery lifecycle: verify and commit the intended scope, push a ready PR, monitor CI, address review feedback, reply to and resolve addressed threads, merge through branch protection, perform repository-required post-merge verification, and safely clean up branches and worktrees. Use when the user says to push, publish, ship, land, or merge a change or PR and expects completion rather than a handoff at PR creation. Worktree creation and teardown belong to worktree-hygiene; CI waits outside a PR lifecycle belong to github-ci-monitor."
+description: "Carry a local change or existing pull request through the complete GitHub delivery lifecycle: verify and commit the intended scope, push a ready PR, monitor CI, address review feedback, reply to and resolve addressed threads, merge through branch protection, perform repository-required post-merge verification, and safely clean up branches and worktrees. Use when the user says to push, publish, ship, land, or merge a change or PR and expects completion rather than a handoff at PR creation. Also use for an incoming LCARS notice while delivering a PR, including a linked review or CI result that requires action. Worktree creation and teardown belong to worktree-hygiene; CI waits outside a PR lifecycle belong to github-ci-monitor."
 ---
 
 # Land a Pull Request

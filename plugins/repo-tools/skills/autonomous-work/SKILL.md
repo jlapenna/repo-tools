@@ -1,6 +1,6 @@
 ---
 name: autonomous-work
-description: Complete a bounded, authorized task without optional questions when the user is unavailable or asks to "keep going", "don't ask me", or work autonomously. Loading it is the instruction to start or resume the work now, including carrying out a just-finished audit's findings. Resolve routine choices, continue around blockers, and verify completion before handing work back. Does not authorize unrelated scope, external actions, or scheduled work.
+description: Complete a bounded, authorized task without optional questions when the user is unavailable or asks to "keep going", "don't ask me", or work autonomously. Loading it is the instruction to start or resume the work now, including carrying out a just-finished audit's findings. Resolve routine choices, continue around blockers, and verify completion before handing work back. Also use when auditing an unattended run’s handoff or blocker list for work the agent should finish itself. Does not authorize unrelated scope, external actions, or scheduled work.
 ---
 
 # Autonomous work
