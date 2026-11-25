@@ -14,7 +14,12 @@ export const DEFAULT_MODEL = "gpt-6.1-sol";
 // Standard list prices, USD/1M tokens, verified 2026-11-06 against
 // https://developers.openai.com/api/docs/models/gpt-6.1-sol . These are an
 // experiment budget estimate, not subscription billing or remaining quota.
-const PRICES = { "gpt-6.1-sol": { input: 2, cached: 0.1, output: 10 } };
+// GPT-6.2 Sol verified 2026-11-25 against
+// https://developers.openai.com/api/docs/models/gpt-6.2-sol (Standard tier).
+const PRICES = {
+  "gpt-6.1-sol": { input: 2, cached: 0.1, output: 10 },
+  "gpt-6.2-sol": { input: 2, cached: 0.1, output: 10 },
+};
 // A subscription quota stop is a provider limit, not a grading failure: callers
 // (e.g. LCARS) may rerun the same committed suite on another harness.
 const PROVIDER_LIMIT =

@@ -15,6 +15,7 @@ import test from 'node:test';
 import AutonomousWorkMonitor from '../plugins/repo-tools/opencode/autonomous-work.mjs';
 import {
   buildContinuationMessage,
+  classifyAssistantStop,
   parseCodexTranscript,
   parseOpenCodeMessages,
   runPromptHookPayload,
@@ -1034,6 +1035,46 @@ test('multi-step tool turns, plural step ranges, and live watchers do not trigge
     );
     assert.equal(watcherAllowed.decision.shouldContinue, false);
     assert.equal(watcherAllowed.decision.reason, 'waiting-on-live-watcher');
+
+    // An LCARS event subscription is a live watcher: its notice wakes the session.
+    writeJsonl(claudeTranscript, [
+      { type: 'user', message: { content: '/autonomous-work Land PR #42' } },
+      {
+        type: 'assistant',
+        message: {
+          content: [
+            {
+              type: 'text',
+              text: [
+                '1. Step 2 of 3 done: armed auto-merge on PR #42.',
+                '2. Subscribed this session to github:pr:owner/repo#42 until merged.',
+                '3. Next: when the merged notice arrives, I will sync main and prune the worktree.',
+              ].join('\n'),
+            },
+          ],
+        },
+      },
+    ]);
+    const subscriptionAllowed = runStopHookPayload(
+      {
+        session_id: 'claude-subscription',
+        transcript_path: claudeTranscript,
+        hook_event_name: 'Stop',
+        stop_hook_active: false,
+      },
+      { harness: 'claude', stateDir, env: {} },
+    );
+    assert.equal(subscriptionAllowed.decision.shouldContinue, false);
+    assert.equal(subscriptionAllowed.decision.reason, 'waiting-on-live-watcher');
+    for (const text of [
+      'Not subscribed to github:pr:owner/repo#42 because registration failed.',
+      'I have not yet subscribed to github:pr:owner/repo#42.',
+      'lcars session subscribe github:pr:owner/repo#42 failed.',
+    ]) {
+      const result = classifyAssistantStop(`${text}\nNext: I will start the fallback.`);
+      assert.equal(result.stalled, true);
+    }
+
 
     writeJsonl(claudeTranscript, [
       { type: 'user', message: { content: '/autonomous-work Land PR #42' } },

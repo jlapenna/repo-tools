@@ -20,7 +20,8 @@ const manifest = JSON.parse(readFileSync(path.join(packageRoot, 'package.json'),
 const commands = Object.keys(manifest.bin);
 
 // Required by every command and hook helper; the rest serve specific commands.
-const RUNTIME = { git: true, bash: true, gh: false, jq: false };
+// lcars lets repo-watch-prs subscribe to PR events instead of polling.
+const RUNTIME = { git: true, bash: true, gh: false, jq: false, lcars: false };
 
 function which(name, env) {
   for (const dir of (env.PATH ?? '').split(path.delimiter)) {

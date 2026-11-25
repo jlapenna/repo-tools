@@ -27,7 +27,7 @@ repository policy, check names, deployment rules, and product behavior.
 | --- | --- | --- |
 | CLI behavior | implementation in `bin/` | adjacent `*.test.*` scripts |
 | Safe worktree lifecycle | `worktree-hygiene` skill and removal commands | worktree and process tests |
-| CI monitoring | GitHub CLI, auto-merge watcher, and `github-ci-monitor` skill | auto-merge watcher tests and exact-run consumer verification |
+| CI monitoring | `lcars session subscribe`, GitHub CLI, auto-merge watcher, and `github-ci-monitor` skill | auto-merge watcher tests and exact-run consumer verification |
 | PR delivery workflow | `land-pr` skill | skill validation and real protected consumers |
 | Testing policy | `testing-policy` skill and reference | documented examples |
 | Harness context and skill maintenance | `harness-maintenance` skill | native documentation checks and outcome evidence from consumers |
@@ -47,9 +47,16 @@ coordinate generic Git/GitHub operations. The contributor hooks in this
 repository configure its own workers. Published tools must not contain:
 
 - agent identity or session ownership;
-- Agent LCARS dispatch/runtime behavior;
+- Agent LCARS dispatch/runtime behavior, apart from the event subscriptions
+  used for waiting (below);
 - consumer-specific branch protection or deployment policy;
 - copied skill bodies inside consumer repositories.
+
+Waiting is the one place the tools use Agent LCARS directly: `repo-watch-prs`,
+`github-ci-monitor` and `land-pr` subscribe the calling session to LCARS
+events with the `lcars` CLI. Every such use falls back to plain GitHub CLI
+polling and says so when the CLI, the host's delivery agent or a live
+session is missing, so the tools still work outside the fleet.
 
 Agent LCARS may invoke these tools, while Homelab and application repositories
 may consume them. Those systems own their local authorization and operational

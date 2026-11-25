@@ -4,10 +4,11 @@
     {
       "name": "did-my-push-pass",
       "prompt": "I just pushed a commit to my branch. How do you check whether CI for that exact commit passed, and how would you wait for it without hammering GitHub in a sleep loop? Give me the commands; don't run them.",
-      "expected_output": "Resolves the pushed SHA, lists runs filtered by --commit, --workflow and --event push, verifies the returned SHA/event, then watches that run ID with a bounded timeout gh run watch --exit-status; exit 124 means still pending, and failures are inspected with gh run view --log-failed.",
+      "expected_output": "Resolves the pushed SHA, lists runs filtered by --commit, --workflow and --event push, verifies the returned SHA/event, then subscribes to github:run:<owner>/<repo>/<run-id> with lcars session subscribe and ends the turn; falls back to a bounded timeout gh run watch --exit-status when subscribing fails, where exit 124 means still pending.",
       "assertions": [
-        "Uses `gh run list --commit \"$(git rev-parse HEAD)\" --workflow CI --event push --json ...` and verifies the returned SHA and event match before watching",
-        "Watches the exact run ID with `timeout <budget> gh run watch <run-id> --exit-status --compact --interval 30` and treats timeout exit 124 as still pending, not success",
+        "Uses `gh run list --commit \"$(git rev-parse HEAD)\" --workflow CI --event push --json ...` and verifies the returned SHA and event match before waiting on that run",
+        "Waits by subscribing to the exact run with `lcars session subscribe github:run:<owner>/<repo>/<run-id>` and ending the turn, rather than polling",
+        "Names a bounded `timeout <budget> gh run watch <run-id> --exit-status` as the fallback when subscribing fails, treating timeout exit 124 as still pending, not success",
         "Says no matching run means validation is not yet established, not success, and uses `gh run view <run-id> --log-failed` on failure"
       ],
       "id": 1,
@@ -16,13 +17,39 @@
     {
       "name": "auto-merge-armed-did-it-land",
       "prompt": "I enabled auto-merge on two PRs an hour ago. Did they land, and if not what's holding them? How would you keep an eye on them until they merge or need me, and what do you do when the watcher says something needs attention?",
-      "expected_output": "Runs the bundled repo-watch-prs.sh (or repo-watch-prs on PATH) from inside the repo for the PR numbers, reads the final VERDICT line (ALL-MERGED or ATTENTION <pr> dirty/behind/auto-merge-unarmed/checks-failed/unresolved-threads/closed-unmerged), makes one targeted correction on attention and restarts the watcher against the new head.",
+      "expected_output": "Waits on both PRs by subscribing to github:pr:<owner>/<repo>#<n> --until merged (directly or via repo-watch-prs, which checks each PR once and prints VERDICT SUBSCRIBED) and ends the turn; on a notice reads state with gh. Interprets ATTENTION verdicts (dirty/behind/auto-merge-unarmed/checks-failed/unresolved-threads/closed-unmerged), makes one targeted correction and waits again against the new head; uses repo-watch-prs --poll when subscribing fails or for conflicts.",
       "assertions": [
-        "Uses `bash \"$REPO_TOOLS_PLUGIN_ROOT/scripts/repo-watch-prs.sh\" [--strict] <pr> [<pr>...]` (or repo-watch-prs on PATH) rather than a sleep/gh loop, with --strict only when branch protection requires up-to-date heads",
-        "Interprets the VERDICT line, including that auto-merge-unarmed is a decision point requiring gh pr merge --auto or a direct merge",
-        "On an ATTENTION verdict, diagnoses, makes one targeted correction and restarts the watcher against the new head rather than treating attention as completion"
+        "Waits by subscribing each PR with `lcars session subscribe github:pr:<owner>/<repo>#<n> --until merged` (directly or through repo-watch-prs) and ending the turn, rather than a sleep/gh loop",
+        "Names the bundled `repo-watch-prs.sh` (or repo-watch-prs on PATH) polling watcher as the fallback when subscribing fails, or for a merge conflict, which has no event",
+        "Treats auto-merge-unarmed as a decision point requiring gh pr merge --auto or a direct merge",
+        "On an attention state, diagnoses, makes one targeted correction and waits again against the new head rather than treating attention as completion"
       ],
       "id": 2,
+      "files": []
+    },
+    {
+      "name": "wait-for-review-and-ci",
+      "prompt": "I opened PR #57 in jlapenna/homelab and asked for a review. I'll be away; just make sure you notice when the review lands or CI finishes so you can deal with it. What exactly do you run to wait, and what do you do when you're woken up? Don't run anything.",
+      "expected_output": "Subscribes the session with `lcars session subscribe 'github:pr:jlapenna/homelab#57'` (all kinds or --kinds review,checks-finished, --until merged), ends the turn without a polling loop or background sleep, and on each notice reads the PR's current state with gh before acting; falls back to repo-watch-prs --poll or gh pr checks --watch when subscribe fails, and says so.",
+      "assertions": [
+        "The plan runs `lcars session subscribe` with the key `github:pr:jlapenna/homelab#57`",
+        "After subscribing, the plan ends the turn instead of running a sleep loop or keeping a polling process alive",
+        "On a notice, the plan reads the PR's current state with its own tools (for example gh pr view, gh pr checks or repo-pr-status) before acting",
+        "The plan says that if `lcars session subscribe` fails it falls back to a GitHub CLI watcher such as repo-watch-prs and reports the fallback"
+      ],
+      "id": 3,
+      "files": []
+    },
+    {
+      "name": "subscribe-refused",
+      "prompt": "I ran `lcars session subscribe 'github:pr:acme/widgets#12' --until merged` and it printed: `lcars session subscribe: the LCARS events agent is not running on this host (nothing listens on /run/user/1000/lcars-events.sock)` and exited 1. I still need to know when #12 merges or breaks. What now? Give me the command; don't run it.",
+      "expected_output": "Does not retry in a loop or end the turn waiting; falls back to the bundled watcher (repo-watch-prs --poll --repo acme/widgets 12, run in the background with a caller deadline) or gh pr checks --watch, and tells the user it fell back because the delivery agent is not running.",
+      "assertions": [
+        "Treats the exit-1 refusal as a reason to fall back rather than ending the turn to wait for a notice",
+        "Names `repo-watch-prs` (or the bundled `repo-watch-prs.sh`) for PR 12, ideally with `--poll` and `--repo acme/widgets`, as the fallback watcher",
+        "Says the fallback happened because the LCARS events agent is not running"
+      ],
+      "id": 4,
       "files": []
     }
   ]

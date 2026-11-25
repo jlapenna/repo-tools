@@ -130,9 +130,18 @@ appropriate to the task. A timeout means still pending, not success. If using a 
 check the actual target; a `pgrep -f` pattern embedded in the watcher's own
 command can match itself indefinitely.
 
+An LCARS event subscription is a live watcher. When
+`lcars session subscribe <key>` succeeds (for example
+`github:pr:<owner>/<repo>#<n> --until merged`, or `repo-watch-prs` printing
+`VERDICT SUBSCRIBED`), LCARS types a notice into this session when it is
+idle, so ending the turn is the wait; keep no process running for it. A
+subscription that failed, or one for a repository LCARS does not watch, wakes
+nothing: fall back to a background watcher and say so.
+
 End a turn "waiting on X" only when a live watcher you armed will wake it;
 otherwise check X now or keep working. Stop your own watchers before reporting
-done, and name any you deliberately leave running by PID or task ID.
+done, and name any you deliberately leave running by PID, task ID or
+subscription ID (`lcars session unsubscribe <id>` stops one).
 
 Another session watching an item establishes ownership of that item, not a
 wakeup for this session or a blocker for the rest of your task. Preserve its
