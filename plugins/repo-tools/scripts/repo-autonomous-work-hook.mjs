@@ -96,6 +96,10 @@ const LIVE_WATCHER_RE = new RegExp(
     String.raw`\bwill\s+wake\s+(?:me|this\s+(?:session|turn))\b`,
     String.raw`\bwatching\s+[^\n]{0,80}\b(?:pid|task[_\s-]?id|task-\d+|run[_\s-]?id)\b`,
     String.raw`\bwaiting\s+(?:on|for)\s+[^\n]{0,80}\b(?:watcher|task[_\s-]?\d+|task_id|background\s+(?:task|job|command)|subagent|ci|checks?|auto-merge)\b`,
+    // An LCARS event subscription types a notice into the idle session, so it
+    // wakes the session like a background watcher does.
+    String.raw`\bVERDICT\s+SUBSCRIBED\b`,
+    String.raw`\bsubscribed\b[^\n]{0,80}\b(?:github|lcars|outline):[a-z]+:`,
   ].join('|'),
   'i',
 );
@@ -628,7 +632,12 @@ export function classifyAssistantStop(assistantText) {
 
   const closing = tailWindow(prose);
   const hasConcreteBlocker = CONCRETE_BLOCKER_RE.test(prose);
-  const hasLiveWatcher = LIVE_WATCHER_RE.test(prose);
+  // Only affirmative registration claims count as a wakeup. A failed or
+  // not-yet-created subscription is work still to do.
+  const watcherProse = prose.split('\n').filter((line) =>
+    !(/\bsubscrib/i.test(line) && /\b(?:not|never|failed|refused|unavailable)\b/i.test(line))
+  ).join('\n');
+  const hasLiveWatcher = LIVE_WATCHER_RE.test(watcherProse);
   const nonEmptyLines = prose.split('\n').map((line) => line.trim()).filter(Boolean);
   const lastLine = nonEmptyLines.at(-1) ?? '';
 

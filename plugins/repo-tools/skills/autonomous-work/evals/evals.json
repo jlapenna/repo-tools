@@ -3,7 +3,7 @@
   "evals": [
     {
       "name": "keep-going-dont-ask",
-      "prompt": "I'm heading out for the afternoon. Finish the retry-logic change in the uploader, get it through tests and up as a PR, and don't ask me questions while I'm gone. Before you start, tell me how you'll handle the little decisions that come up and what you'll do if something genuinely blocks you.",
+      "prompt": "I'm heading out for the afternoon. Finish the retry-logic change in the uploader, get it through tests and up as a PR, and don't ask me questions while I'm gone. Before you start, tell me how you'll handle the little decisions that come up and what you'll do if something genuinely blocks you. This is a hypothetical workflow question: describe your process only; do not look for a checkout or execute the change.",
       "expected_output": "Explains it will recover scope and acceptance from the conversation, resolve missing facts by inspection, follow repository conventions for implementation choices, take conservative reversible defaults for preferences and state them, pick and justify judgment calls, defer only consequential uncertainty, continue through PR/CI, and report with evidence; a blocker is declared only after documenting the exact operation, why no alternative works, and what remains.",
       "assertions": [
         "States it will not end the turn with optional questions or a 'your call' item and will resolve routine choices with stated reversible defaults",
@@ -15,7 +15,7 @@
     },
     {
       "name": "report-ended-with-todo-for-me",
-      "prompt": "Last night's unattended run ended with a report listing four 'next actions for Joe': rerun a flaky check, comment on the issue with the findings, pick between two equivalent config layouts, and clean up its own worktree. I had said I couldn't answer anything. Which of those should it have just done, and what's the test for deciding?",
+      "prompt": "Last night's unattended run ended with a report listing four 'next actions for Joe': rerun a flaky check, comment on the issue with the findings, pick between two equivalent config layouts, and clean up its own worktree. I had said I couldn't answer anything. Which of those should it have just done, and what's the test for deciding? The original task explicitly authorized posting those findings to its GitHub issue; no new external destination or unrelated comment was involved.",
       "expected_output": "All four should have been done by the agent: rerunning a check, commenting on an issue, cleaning up its own artifacts, and choosing between options are within existing tools and authorization; an item belongs to the user only when it needs authority, access, facts or physical action the agent cannot obtain.",
       "assertions": [
         "Identifies that rerunning a check, filing/commenting on an issue, and cleaning up its own worktree are things the agent should do with tools it already holds, then report as done",
@@ -27,7 +27,7 @@
     },
     {
       "name": "load-after-audit",
-      "prompt": "You just finished a complexity sweep of this repo and reported three ranked findings, each with a concrete fix. I'm now saying: load the autonomous-work skill. What do you do in this turn, and what would a premature stop look like?",
+      "prompt": "You just finished a complexity sweep of this repo and reported three ranked findings, each with a concrete fix. I'm now saying: load the autonomous-work skill. What do you do in this turn, and what would a premature stop look like? Explain the process for that hypothetical situation only; do not execute or search for a repository.",
       "expected_output": "Treats loading the skill as the instruction to act: in the same turn it starts carrying out the three findings through the repository's delivery workflow (worktree, fixes, tests, PR/CI as the repo requires). It does not end the turn by confirming the load or by saying the skill does not expand the sweep into implementation.",
       "assertions": [
         "Says it will start implementing the audit's findings in the same turn rather than only confirming the skill loaded",

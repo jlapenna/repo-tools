@@ -67,7 +67,7 @@ health checks.
 - `repo-doctor [--json]` — read-only check that the installed runtime is
   usable before an agent relies on it. It reports the repo-tools package
   root (and commit, for a checkout), the enclosing repository if any, the
-  `git`, `bash`, `gh`, and `jq` binaries, every `repo-*` command on `PATH`
+  `git`, `bash`, `gh`, `jq`, and `lcars` binaries, every `repo-*` command on `PATH`
   with the file its symlink or pnpm shim runs, the repo-tools commands that
   Codex (`$CODEX_HOME/hooks.json`), Claude Code
   (`$CLAUDE_CONFIG_DIR/settings.json`), and Antigravity
@@ -140,9 +140,18 @@ health checks.
   the design should react to an event instead. With no files it checks every
   tracked file, so `--list` (or `git grep schedule-justification`) is the
   complete inventory. Also the `repo-check-schedules` pre-commit hook.
-- `repo-watch-prs [--strict] [--interval SECONDS] [--repo OWNER/NAME] PR...` —
-  watch auto-merge lifecycle for pull requests in the current repository, or
-  in `--repo`. An unresolvable repository exits 1 instead of retrying.
+- `repo-watch-prs [--poll] [--strict] [--interval SECONDS] [--repo OWNER/NAME] PR...` —
+  wait on the auto-merge lifecycle of pull requests in the current repository,
+  or in `--repo`. It reads each PR once and reports a merge or an attention
+  verdict at once. For PRs still waiting it subscribes the calling session to
+  `github:pr:<owner>/<repo>#<n>` with `lcars session subscribe --until merged`
+  and exits 0 with `VERDICT SUBSCRIBED <prs>`; LCARS then types a notice into
+  the idle session for each review, check result, push, merge or close. When
+  subscribing fails (no `lcars`, no delivery agent, session not live on this
+  host), it says why and polls as before. `--poll` skips the subscription:
+  use it for a repository the LCARS GitHub App does not watch, or to catch
+  conflicts and behind branches, which have no event yet. An unresolvable
+  repository exits 1 instead of retrying.
 - `repo-pr-status [--json] [--repo OWNER/NAME] [PR]` — one read-only
   snapshot of a pull request at its current head (default: the current
   branch's PR): head SHA, mergeability and merge state, required checks,
@@ -394,8 +403,9 @@ The plugin exposes the authoritative skills listed in the generated inventory:
 
 - `worktree-hygiene` covers safe creation, use, and teardown in shared
   repository checkouts.
-- `github-ci-monitor` uses GitHub CLI for workflow runs and PR checks, and
-  `repo-watch-prs` for protected auto-merge attention states.
+- `github-ci-monitor` waits on pull requests and workflow runs with
+  `lcars session subscribe`, and falls back to GitHub CLI watchers and
+  `repo-watch-prs` when the session cannot receive LCARS notices.
 - `testing-policy` guides test, CI-check, and control-flag decisions.
 - `harness-maintenance` applies observed feedback to documentation, skills,
   context routes, and their owning contracts. Consumers keep local truth and
