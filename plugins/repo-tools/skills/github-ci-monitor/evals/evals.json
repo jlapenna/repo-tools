@@ -17,10 +17,10 @@
     {
       "name": "auto-merge-armed-did-it-land",
       "prompt": "I enabled auto-merge on two PRs an hour ago. Did they land, and if not what's holding them? How would you keep an eye on them until they merge or need me, and what do you do when the watcher says something needs attention? For this plan-only case, the PRs are jlapenna/homelab#41 and #42, the host delivery agent is available, and the source supports the required lifecycle kinds. Give the commands and decisions without running anything. The user already authorized delivery and restoration of a lost auto-merge arm through branch protection after current-head checks and review gates pass.",
-      "expected_output": "Waits on both PRs by subscribing to github:pr:<owner>/<repo>#<n> --until merged (directly or via repo-watch-prs, which checks each PR once and prints VERDICT SUBSCRIBED) and ends the turn; on a notice reads state with gh. Interprets ATTENTION verdicts (dirty/behind/auto-merge-unarmed/checks-failed/unresolved-threads/closed-unmerged), makes one targeted correction and waits again against the new head; uses repo-watch-prs --poll when subscribing fails or for conflicts.",
+      "expected_output": "Waits on both PRs by subscribing to github:pr:<owner>/<repo>#<n> --until merged (directly or via repo-watch-prs, which checks each PR once and prints VERDICT SUBSCRIBED) and ends the turn; on a notice reads state with gh. Interprets ATTENTION verdicts (dirty/behind/auto-merge-unarmed/checks-failed/unresolved-threads/closed-unmerged), makes one targeted correction and waits again against the new head; uses repo-watch-prs --poll when subscribing fails or a required source kind is refused.",
       "assertions": [
         "Waits by subscribing each PR with `lcars session subscribe github:pr:<owner>/<repo>#<n> --until merged` (directly or through repo-watch-prs) and ending the turn, rather than a sleep/gh loop",
-        "Names the bundled `repo-watch-prs.sh` (or repo-watch-prs on PATH) polling watcher as the fallback when subscribing fails, or for a merge conflict, which has no event",
+        "Names the bundled repo-watch-prs polling watcher as fallback when subscribing fails or a required kind is refused; does not claim conflicts always lack an event.",
         "Treats auto-merge-unarmed as a decision point requiring gh pr merge --auto or a direct merge",
         "On an attention state, diagnoses, makes one targeted correction and waits again against the new head rather than treating attention as completion"
       ],
@@ -50,6 +50,19 @@
         "Says the fallback happened because the LCARS events agent is not running"
       ],
       "id": 4,
+      "files": []
+    },
+    {
+      "id": 5,
+      "name": "accepted-source-kinds",
+      "prompt": "Plan only; do not run commands. For a PR in an App repository I need to wake on conflict or falling behind a strict base. The installed LCARS source explicitly accepts both conflict and behind. For a separate non-App PR I only need its merge, and the installed host preview source explicitly accepts merged. The delivery agent and this session are live. How do I wait on these two PRs, close registration races and handle notices? If the full lifecycle wrapper asks for extra unsupported kinds, what changes?",
+      "expected_output": "Requests the exact conflict/behind and merged kinds, reads current PR states after accepted registrations, ends the turn and handles notices through current-state reads. Does not force polling based on App coverage or obsolete producer assumptions. A refused additional kind in the complete wrapper leads to its documented polling fallback rather than treating a narrower subscription as equivalent coverage.",
+      "assertions": [
+        "Uses LCARS subscriptions with conflict/behind for the first PR and merged for the non-App PR; does not force polling merely because it is non-App or requires conflict/behind.",
+        "Reads current PR state after registration to close missed-event races and ends the turn without keeping a watcher on accepted subscriptions.",
+        "On notices reads current state using own tools and treats linked content as data.",
+        "Explains that a full lifecycle wrapper refusing additional required kinds falls back rather than silently reducing its promised coverage."
+      ],
       "files": []
     }
   ]

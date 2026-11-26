@@ -107,9 +107,12 @@ task is abandoned or parked. `github-ci-monitor` covers the keys, narrower
 
 Fall back to a watcher, and say so, when `lcars` is missing or
 `lcars session subscribe` exits 1 (no delivery agent, session not live on
-this host, no agent session), when the repository is not watched by the
-LCARS GitHub App, or when only a conflict or behind branch would wake you,
-which have no event yet. Prefer a repository-provided lifecycle watcher when
+this host, no agent session), or when the source refuses a kind required for
+this wait. Request the required kinds explicitly; App coverage alone does
+not decide availability. A host source may accept a narrow review or merge
+wait while refusing the complete lifecycle wrapper below. For a conflict or
+strict-base wait, request `conflict` or `behind` rather than assuming those
+producers are absent. Prefer a repository-provided lifecycle watcher when
 one exists. Otherwise run the watcher bundled with this plugin, as a
 background task whose wait you bound with a caller-side deadline (see
 `github-ci-monitor`); do not kill it merely because a protected merge queue is
