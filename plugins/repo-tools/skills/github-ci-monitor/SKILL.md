@@ -17,7 +17,7 @@ notice starts your next turn. Nothing needs to keep running.
 
 ```bash
 # A pull request: review, thread, threads-resolved, pushed, comment,
-# auto-merge, checks-finished, merged, closed, reopened.
+# auto-merge, checks-finished, merged, closed, reopened, conflict, behind.
 lcars session subscribe "github:pr:<owner>/<repo>#<pr>" --until merged
 # Only the next CI result, or only reviews:
 lcars session subscribe "github:pr:<owner>/<repo>#<pr>" --kinds checks-finished --until checks-finished
@@ -59,11 +59,14 @@ and why, when:
    on this host (for example outside a herdr-core terminal), or there is no
    agent session at all (a CI script or cron job). Exit 2 is a usage error:
    fix the key rather than falling back.
-2. The repository is not watched by the LCARS GitHub App. The source refuses
-   registration when no producer is available.
-3. You must be woken by a state that has no event yet: a merge conflict
-   (`dirty`) or a branch behind a strict base (`behind`). Otherwise check
-   mergeability with `repo-pr-status` on each notice.
+2. The source refuses the key or any kind required for this wait. Ask for
+   those kinds explicitly; an accepted unfiltered subscription alone does not
+   establish complete lifecycle coverage. App coverage alone is not a fallback
+   reason: a host source can support narrower review or merge waits. Consult
+   the installed CLI's help for its supported kinds. For merge conflicts or
+   a strict base, request `--kinds conflict` or `--kinds behind`; use notices
+   when accepted and fall back when refused. Read current mergeability with
+   `repo-pr-status` on each notice.
 
 Dispatched LCARS workers follow `agent-protocol` for waits instead of this
 section.
@@ -150,7 +153,8 @@ still waiting it runs `lcars session subscribe github:pr:<owner>/<repo>#<pr>
 --until merged`, prints `VERDICT SUBSCRIBED <prs>` and exits 0: end your turn
 and handle notices as above. When subscribing fails it logs why and polls
 every `--interval` seconds (default 120) until a verdict. `--poll` skips the
-subscription; use it under fallback rules 2 and 3. The wrapper requests
+subscription; use it after a known source refusal or when the delivery agent
+is unavailable. The wrapper requests
 all the kinds it needs (including `conflict`, plus `behind` in strict mode);
 the source refuses unavailable kinds so partial rollout cannot silently
 replace a complete lifecycle watch.

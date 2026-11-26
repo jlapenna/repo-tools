@@ -20,10 +20,10 @@
 # agent is not running or not configured, or this session is not live on the
 # host (for example outside a herdr-core terminal or outside an agent
 # session). The script then says so and falls back to polling. `--poll`
-# skips the subscription and polls from the start; use it when the
-# repository is not watched by the LCARS GitHub App (subscribing still
-# succeeds there, but no notice would ever arrive) or when you need a state
-# that has no event yet (`dirty`/conflict and `behind`).
+# skips the subscription and polls from the start. Use it after the source
+# refuses a kind needed for this lifecycle; App coverage alone does not decide
+# whether a narrower host-supported wait is available. The explicit requested
+# kinds include conflict, and behind in strict mode.
 #
 # The polling loop exits the moment anything needs a human/agent (a DIRTY
 # merge state, a failed check, a close without merge) — or with success once
@@ -381,7 +381,7 @@ subscribe_all() {
     fi
   done
   keep_subscriptions=true
-  echo "LCARS will type a notice into this session's terminal when it is idle (review, checks-finished, pushed, merged, closed, ...). End your turn now; on each notice read the PR's state with gh and act. Merge ends each subscription. Conflicts and behind branches have no event yet: re-check mergeability on each notice, or rerun with --poll."
+  echo "LCARS will type a notice into this session's terminal when it is idle (review, checks-finished, pushed, merged, closed, ...). End your turn now; on each notice read the PR's state with gh and act. Merge ends each subscription. Registered kinds include conflict and, in strict mode, behind; re-check current mergeability on each notice."
   echo "VERDICT SUBSCRIBED $(IFS=,; echo "${subscribed[*]}")"
   return 0
 }
