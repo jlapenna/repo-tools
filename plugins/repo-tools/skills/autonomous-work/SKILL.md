@@ -1,6 +1,6 @@
 ---
 name: autonomous-work
-description: Complete a bounded, authorized task without optional questions when the user is unavailable or asks to "keep going", "don't ask me", or work autonomously. Loading it is the instruction to start or resume the work now, including carrying out a just-finished audit's findings. Resolve routine choices, continue around blockers, and verify completion before handing work back. Also use when auditing an unattended run’s handoff or blocker list for work the agent should finish itself. Does not authorize unrelated scope, external actions, or scheduled work.
+description: Complete a bounded, authorized task without optional questions when the user is unavailable or asks to "keep going", "don't ask me", or work autonomously. When asked to apply it, start or resume the authorized work now, including carrying out a just-finished audit's findings. Also load it to explain or assess that workflow when the user requests a plan-only answer; consultation does not override that scope. Resolve routine choices, continue around blockers, and verify completion before handing work back. Also use when auditing an unattended run’s handoff or blocker list for work the agent should finish itself. Does not authorize unrelated scope, external actions, or scheduled work.
 ---
 
 # Autonomous work
@@ -13,8 +13,10 @@ repository's existing workflow and the harness's required approvals.
 
 ## Loading this skill is the instruction to act
 
-Being asked to load, use, or apply this skill means "go": start or resume the
-work in the same turn. Never end a turn by confirming that the skill loaded,
+Being asked to load, use, or apply this skill to an authorized task means "go":
+start or resume the work in the same turn. A request to explain the workflow
+without executing it permits consulting the skill but limits the answer to
+that explanation; loading never overrides an explicit plan-only instruction. Never end a turn by confirming that the skill loaded,
 summarizing what it governs, or noting what it does not authorize.
 
 The work is the conversation's current task. If that task is still in
