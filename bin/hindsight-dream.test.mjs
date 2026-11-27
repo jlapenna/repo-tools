@@ -332,7 +332,13 @@ test('CLI end-to-end against mock Hindsight API enforces curation guards and rec
     }
     if (req.method === 'POST' && sub === '/memories') {
       state.retained.push(body);
-      send(200, { success: true, bank_id: 'agent-lcars::widgets', items_count: body.items.length, async: false });
+      send(200, {
+        success: true,
+        bank_id: 'agent-lcars::widgets',
+        items_count: body.items.length,
+        async: Boolean(body.async),
+        ...(body.async ? { operation_id: 'op-retain-1' } : {}),
+      });
       return;
     }
     if (sub.startsWith('/memories/')) {
@@ -436,8 +442,10 @@ test('CLI end-to-end against mock Hindsight API enforces curation guards and rec
     );
     assert.equal(retainRun.result, 0, retainRun.stderr);
     assert.equal(state.retained.length, 1);
+    assert.equal(state.retained[0].async, true);
     assert.equal(state.retained[0].items[0].document_id, 'dream:correction:auth-module-path');
     assert.equal(state.retained[0].items[0].update_mode, 'replace');
+    assert.equal(JSON.parse(retainRun.stdout).operationStatus, 'completed');
 
     // 5. Guard: delete-doc refuses canonical gitlog and arbitrary user chat, allows gitlog:checkout
     const refuseCanonical = await captureLogs(() =>
@@ -1005,6 +1013,122 @@ test('gitlog duplicate detection and delete-doc protect sibling repos on shared 
     assert.deepEqual(deletedDocs, ['gitlog:workspace', 'gitlog:frontend']);
   } finally {
     server.close();
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('hardening: config parse error redaction, path traversal rejection, CLI flag validation, OPENCODE_SESSION_ID auto-detect, and refresh=true stats', async () => {
+  const tmp = mkdtempSync(path.join(tmpdir(), 'hindsight-dream-harden-'));
+  const repoDir = path.join(tmp, 'widgets');
+  mkdirSync(repoDir, { recursive: true });
+  execFileSync('git', ['init', repoDir], { stdio: 'ignore' });
+
+  try {
+    // 1. Malformed config JSON never leaks raw file contents/tokens
+    const brokenCfg = path.join(tmp, 'broken.json');
+    writeFileSync(brokenCfg, '{"apiToken":"hs_ultra_secret_leak_token" bad json');
+    assert.throws(
+      () =>
+        resolveHindsightConnection({
+          cwd: repoDir,
+          env: { HINDSIGHT_CONFIG: brokenCfg },
+          home: tmp,
+        }),
+      (err) => {
+        assert.equal(err.exitCode, 2);
+        assert.doesNotMatch(err.message, /hs_ultra_secret_leak_token/);
+        return true;
+      },
+    );
+
+    // 2. Path traversal segments are ignored by extractReferencedRepoPaths
+    const extracted = extractReferencedRepoPaths(
+      'Check src/../../etc/passwd.json and ../secret/config.yaml alongside src/valid.ts.',
+    );
+    assert.deepEqual(extracted, ['src/valid.ts']);
+
+    // 3. Invalid numeric or missing CLI values fail with exit code 2
+    const badLimit = await captureLogs(() =>
+      main(['candidates', '--cwd', repoDir, '--limit', 'not-a-number'], {}),
+    );
+    assert.equal(badLimit.result, 2);
+    assert.match(badLimit.stderr, /Invalid numeric value/);
+
+    const missingId = await captureLogs(() =>
+      main(['read-memory', '--cwd', repoDir, '--id'], {}),
+    );
+    assert.equal(missingId.result, 2);
+    assert.match(missingId.stderr, /requires a value/);
+
+    // 4. OPENCODE_SESSION_ID auto-detection, /stats?refresh=true, and wait-seconds=0 operationStatuses
+    const statsRefreshParams = [];
+    const deletedSelfDocs = [];
+    const server = http.createServer((req, res) => {
+      const send = (code, data) => {
+        res.writeHead(code, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(data));
+      };
+      const url = new URL(req.url, 'http://127.0.0.1');
+      if (url.pathname.endsWith('/stats')) {
+        statsRefreshParams.push(url.searchParams.get('refresh'));
+        return send(200, { total_nodes: 1, total_documents: 1 });
+      }
+      if (url.pathname.endsWith('/pages/tree')) return send(200, { roots: [] });
+      if (url.pathname.endsWith('/mental-models')) {
+        return send(200, {
+          items: [
+            {
+              id: 'mm-core-1',
+              name: 'Core concepts',
+              is_page: true,
+              is_stale: true,
+              source_query: 'Core concepts',
+            },
+          ],
+        });
+      }
+      if (url.pathname.endsWith('/mental-models/mm-core-1')) {
+        return send(200, {
+          id: 'mm-core-1',
+          name: 'Core concepts',
+          is_page: true,
+          is_stale: true,
+          content: '# Core concepts',
+        });
+      }
+      if (req.method === 'POST' && url.pathname.endsWith('/mental-models/mm-core-1/refresh')) {
+        return send(200, { operation_id: 'op-refresh-zero-wait' });
+      }
+      if (url.pathname.endsWith('/operations/op-refresh-zero-wait')) {
+        return send(200, { operation_id: 'op-refresh-zero-wait', status: 'processing' });
+      }
+      if (req.method === 'DELETE' && url.pathname.includes('/documents/')) {
+        deletedSelfDocs.push(decodeURIComponent(url.pathname.split('/documents/')[1]));
+        return send(200, { success: true });
+      }
+      return send(404, {});
+    });
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const { port } = server.address();
+    try {
+      const cfg = path.join(tmp, 'cfg.json');
+      writeFileSync(cfg, JSON.stringify({ apiUrl: `http://127.0.0.1:${port}` }));
+      const rec = await captureLogs(() =>
+        main(['reconcile', '--cwd', repoDir, '--refresh-stale', '--wait-seconds', '0'], {
+          HINDSIGHT_CONFIG: cfg,
+          HOME: tmp,
+          OPENCODE_SESSION_ID: 'ses_opencode_auto_1',
+        }),
+      );
+      assert.equal(rec.result, 0, rec.stderr);
+      const parsed = JSON.parse(rec.stdout);
+      assert.deepEqual(deletedSelfDocs, ['conversation:ses_opencode_auto_1']);
+      assert.deepEqual(statsRefreshParams, ['true', 'true']);
+      assert.equal(parsed.actions.operationStatuses['op-refresh-zero-wait'], 'processing');
+    } finally {
+      server.close();
+    }
+  } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
 });

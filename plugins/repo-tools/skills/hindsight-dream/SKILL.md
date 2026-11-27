@@ -12,9 +12,12 @@ it never edits repository files, commits, branches, issues, or pull requests.
 Use `repo-hindsight-dream` (on `PATH`, or bundled at
 `../../scripts/repo-hindsight-dream.mjs` relative to this `SKILL.md`) for all
 reads and mutations so bearer tokens stay out of command arguments and core
-taxonomy pages remain protected. When the calling runtime or job provides a
-session identifier, pass `--session-id <current-session-id>` so the dreaming
-session excludes and removes its own transcript from the bank.
+taxonomy pages remain protected. `repo-hindsight-dream` auto-detects standard
+coding-agent session variables (`OPENCODE_SESSION_ID`, `CLAUDE_CODE_SESSION_ID`,
+`CODEX_THREAD_ID`, `ANTIGRAVITY_CONVERSATION_ID`); pass
+`--session-id <current-session-id>` explicitly when another runtime or job
+provides a session identifier so the dreaming session excludes and removes its
+own transcript from the bank.
 
 Read [references/dream-rubric.md](references/dream-rubric.md) before mutating
 memories or retiring pages.
@@ -64,11 +67,14 @@ status instead of inventing changes.
 ## 3. Compact: remove duplicates, ephemeral noise, and finished initiatives
 
 1. **Duplicate gitlog seeds:** if `duplicateGitlogs` lists `gitlog:checkout`
-   or `gitlog:workspace` alongside canonical `gitlog:<repo>`, remove the
-   duplicate with `delete-doc --id gitlog:checkout --reason "Duplicate of canonical gitlog:<repo>"`.
-   Leave `gitlog:checkout` intact when canonical `gitlog:<repo>` is absent, and
-   do not delete sibling repositories' `gitlog:<other-repo>` seeds on shared
-   multi-repo banks unless explicitly confirmed with `--allow-other-gitlog`.
+   or `gitlog:workspace` alongside canonical `gitlog:<repo>` from a retired
+   clone, remove the duplicate with `delete-doc --id gitlog:checkout --reason "Duplicate of canonical gitlog:<repo>"`.
+   Leave `gitlog:checkout` intact when canonical `gitlog:<repo>` is absent or
+   when ephemeral `/checkout` workers still run with `autoSeed: true` (deleting
+   an active `autoSeed` marker forces the next worker to re-extract commit
+   history), and do not delete sibling repositories' `gitlog:<other-repo>`
+   seeds on shared multi-repo banks unless explicitly confirmed with
+   `--allow-other-gitlog`.
 2. **Ephemeral dispatch chatter:** review `ephemeralFacts` (`read-memory` when
    context is unclear). Invalidate routine zero-finding review receipts,
    auto-merge queue notices, and transient status checkpoints that carry no
@@ -102,7 +108,7 @@ status instead of inventing changes.
 2. Finish with `reconcile`:
 
 ```bash
-$dream_cli reconcile --refresh-stale --max-refreshes 3 --wait-seconds 180 \
+$dream_cli reconcile --refresh-stale --max-refreshes 3 --wait-seconds 600 \
   ${session_id:+--session-id "$session_id"}
 ```
 

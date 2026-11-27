@@ -213,9 +213,9 @@ export function resolveHindsightConnection({
       if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
         fileCfg = parsed;
       }
-    } catch (error) {
+    } catch {
       throw new DreamError(
-        `Failed to parse Hindsight config at ${configPath}: ${error.message}`,
+        `Failed to parse Hindsight config at ${configPath}: invalid JSON syntax.`,
         2,
       );
     }
@@ -653,6 +653,9 @@ export function extractReferencedRepoPaths(text) {
       continue;
     }
     const segs = cleaned.split('/');
+    if (segs.some((seg) => !seg || seg === '.' || seg === '..')) {
+      continue;
+    }
     if (segs.length === 2 && !FILE_EXT_RE.test(cleaned) && !cleaned.startsWith('.')) {
       // Avoid mistaking GitHub owner/repo slugs or MIME-like pairs for paths.
       continue;
@@ -721,14 +724,26 @@ async function fetchPagesOverview(client) {
 }
 
 async function inspectGitlogDocuments(client, canonicalRepoName) {
-  const res = await client.get('/documents', {
-    query: { q: 'gitlog:', limit: 50 },
-  });
-  const gitlogs = (res?.items || []).filter((d) =>
-    String(d.id || '').startsWith('gitlog:'),
-  );
   const canonicalId = `gitlog:${canonicalRepoName}`;
-  const hasCanonical = gitlogs.some((d) => d.id === canonicalId);
+  const [res, canonicalDoc] = await Promise.all([
+    client.get('/documents', {
+      query: { q: 'gitlog:', limit: 50 },
+    }),
+    client.get(`/documents/${encodeURIComponent(canonicalId)}`, {
+      allow404: true,
+    }),
+  ]);
+  const byId = new Map();
+  for (const d of res?.items || []) {
+    if (String(d.id || '').startsWith('gitlog:')) {
+      byId.set(d.id, d);
+    }
+  }
+  if (canonicalDoc?.id) {
+    byId.set(canonicalDoc.id, canonicalDoc);
+  }
+  const gitlogs = [...byId.values()];
+  const hasCanonical = Boolean(canonicalDoc) || byId.has(canonicalId);
   const duplicateGitlogs = hasCanonical
     ? gitlogs.filter(
         (d) => d.id !== canonicalId && GENERIC_GITLOG_ALIAS_IDS.has(d.id),
@@ -740,7 +755,7 @@ async function inspectGitlogDocuments(client, canonicalRepoName) {
 async function cmdStatus(conn, client, opts) {
   const [stats, scopes, invalidated, failedCons, pendingCons, pages, gitlogInfo] =
     await Promise.all([
-      client.get('/stats'),
+      client.get('/stats', { query: { refresh: true } }),
       client.get('/observations/scopes', { allow404: true }),
       client.get('/memories/list', { query: { state: 'invalidated', limit: 1 } }),
       client.get('/memories/list', {
@@ -906,10 +921,14 @@ async function cmdCandidates(conn, client, opts) {
     const refs = extractReferencedRepoPaths(a.item.text);
     const issues = extractIssueNumbers(a.item.text);
     if (refs.length > 0 || issues.length > 0) {
+      const rootWithSep = conn.gitInfo.rootDir.endsWith(path.sep)
+        ? conn.gitInfo.rootDir
+        : `${conn.gitInfo.rootDir}${path.sep}`;
       const missingPaths = conn.gitInfo.isGit
-        ? refs.filter(
-            (rel) => !existsSync(path.join(conn.gitInfo.rootDir, rel)),
-          )
+        ? refs.filter((rel) => {
+            const full = path.resolve(conn.gitInfo.rootDir, rel);
+            return full.startsWith(rootWithSep) && !existsSync(full);
+          })
         : [];
       if (missingPaths.length > 0 || refs.length > 0) {
         verifiableClaims.push({
@@ -1234,7 +1253,7 @@ async function cmdRetainDoc(conn, client, opts) {
   ];
 
   const retainBody = {
-    async: false,
+    async: true,
     items: [
       {
         document_id: documentId,
@@ -1261,11 +1280,30 @@ async function cmdRetainDoc(conn, client, opts) {
   }
 
   const res = await client.post('/memories', { body: retainBody });
+  const waitSeconds = opts.waitSeconds ?? 300;
+  let operationStatus = null;
+  if (res?.operation_id && waitSeconds > 0) {
+    const { settled, details } = await waitOperations(
+      client,
+      [res.operation_id],
+      Date.now() + waitSeconds * 1000,
+    );
+    operationStatus = settled[res.operation_id] || null;
+    if (operationStatus === 'failed' || operationStatus === 'cancelled') {
+      const errDetail = details[res.operation_id]?.error
+        ? `: ${details[res.operation_id].error}`
+        : '';
+      throw new DreamError(
+        `retain-doc operation ${res.operation_id} ${operationStatus}${errDetail}`,
+      );
+    }
+  }
   console.log(
     JSON.stringify({
       action: 'retain-doc',
       documentId,
       tags,
+      ...(operationStatus ? { operationStatus } : {}),
       result: res,
     }),
   );
@@ -1393,14 +1431,25 @@ async function cmdRetirePage(_conn, client, opts) {
 
 async function waitOperations(client, opIds, deadlineMs) {
   const settled = {};
+  const details = {};
   const pending = new Set(opIds.filter(Boolean));
-  while (pending.size > 0 && Date.now() < deadlineMs) {
+  if (pending.size === 0) return { settled, details };
+  do {
     for (const id of [...pending]) {
       const statusRes = await client.get(`/operations/${encodeURIComponent(id)}`, {
         allow404: true,
       });
       const st = statusRes?.status || 'not_found';
       settled[id] = st;
+      if (statusRes?.error_message || statusRes?.result_metadata) {
+        details[id] = {
+          status: st,
+          ...(statusRes.error_message ? { error: statusRes.error_message } : {}),
+          ...(statusRes.result_metadata
+            ? { metadata: statusRes.result_metadata }
+            : {}),
+        };
+      }
       if (
         st === 'completed' ||
         st === 'failed' ||
@@ -1413,15 +1462,15 @@ async function waitOperations(client, opIds, deadlineMs) {
     if (pending.size > 0 && Date.now() < deadlineMs) {
       await new Promise((r) => setTimeout(r, Math.min(2000, deadlineMs - Date.now())));
     }
-  }
+  } while (pending.size > 0 && Date.now() < deadlineMs);
   for (const id of pending) {
     settled[id] = settled[id] || 'pending';
   }
-  return settled;
+  return { settled, details };
 }
 
 async function cmdReconcile(_conn, client, opts) {
-  const waitSeconds = Math.max(0, Number(opts.waitSeconds ?? 180));
+  const waitSeconds = Math.max(0, Number(opts.waitSeconds ?? 600));
   const maxRefreshes = Math.max(0, Number(opts.maxRefreshes ?? 3));
   const deadlineMs = Date.now() + waitSeconds * 1000;
   const actions = {
@@ -1430,6 +1479,7 @@ async function cmdReconcile(_conn, client, opts) {
     consolidationOperation: null,
     pageRefreshes: [],
     operationStatuses: {},
+    operationDetails: {},
   };
 
   if (opts.sessionId && !opts.dryRun) {
@@ -1441,7 +1491,7 @@ async function cmdReconcile(_conn, client, opts) {
     actions.selfSessionDeleted = deleted !== null;
   }
 
-  const statsBefore = await client.get('/stats');
+  const statsBefore = await client.get('/stats', { query: { refresh: true } });
   if ((statsBefore.failed_consolidation ?? 0) > 0) {
     if (!opts.dryRun) {
       actions.recoveredConsolidation = await client.post(
@@ -1461,13 +1511,14 @@ async function cmdReconcile(_conn, client, opts) {
     if (!opts.dryRun) {
       const cons = await client.post('/consolidate', { body: {} });
       actions.consolidationOperation = cons?.operation_id || null;
-      if (actions.consolidationOperation && waitSeconds > 0) {
-        const consStatus = await waitOperations(
+      if (actions.consolidationOperation) {
+        const { settled, details } = await waitOperations(
           client,
           [actions.consolidationOperation],
           deadlineMs,
         );
-        Object.assign(actions.operationStatuses, consStatus);
+        Object.assign(actions.operationStatuses, settled);
+        Object.assign(actions.operationDetails, details);
       }
     } else {
       actions.consolidationOperation = 'dry-run';
@@ -1543,12 +1594,19 @@ async function cmdReconcile(_conn, client, opts) {
     });
   }
 
-  if (refreshOpIds.length > 0 && Date.now() < deadlineMs) {
-    const refreshStatuses = await waitOperations(client, refreshOpIds, deadlineMs);
-    Object.assign(actions.operationStatuses, refreshStatuses);
+  if (refreshOpIds.length > 0) {
+    const { settled, details } = await waitOperations(
+      client,
+      refreshOpIds,
+      deadlineMs,
+    );
+    Object.assign(actions.operationStatuses, settled);
+    Object.assign(actions.operationDetails, details);
   }
 
-  const statsAfter = opts.dryRun ? statsBefore : await client.get('/stats');
+  const statsAfter = opts.dryRun
+    ? statsBefore
+    : await client.get('/stats', { query: { refresh: true } });
   const output = {
     dryRun: Boolean(opts.dryRun),
     actions,
@@ -1572,6 +1630,16 @@ async function cmdReconcile(_conn, client, opts) {
   return 0;
 }
 
+function resolveDefaultSessionId(env = process.env) {
+  const raw =
+    env.OPENCODE_SESSION_ID ||
+    env.CLAUDE_CODE_SESSION_ID ||
+    env.CODEX_THREAD_ID ||
+    env.ANTIGRAVITY_CONVERSATION_ID ||
+    '';
+  return String(raw).trim() || undefined;
+}
+
 function parseArgs(argv) {
   const args = [...argv];
   const command = args.shift();
@@ -1579,14 +1647,39 @@ function parseArgs(argv) {
     cwd: process.cwd(),
     fullRefresh: [],
   };
+  const takeValue = (flag) => {
+    if (args.length === 0) {
+      throw new DreamError(`Option ${flag} requires a value.`, 2);
+    }
+    const val = args.shift();
+    if (val === undefined || val === '') {
+      throw new DreamError(`Option ${flag} requires a non-empty value.`, 2);
+    }
+    return val;
+  };
+  const takeNumber = (flag, { min = 0, integer = false } = {}) => {
+    const raw = takeValue(flag);
+    const num = Number(raw);
+    if (
+      !Number.isFinite(num) ||
+      num < min ||
+      (integer && !Number.isInteger(num))
+    ) {
+      throw new DreamError(
+        `Invalid numeric value "${raw}" for ${flag} (expected ${integer ? 'integer' : 'number'} >= ${min}).`,
+        2,
+      );
+    }
+    return num;
+  };
   while (args.length > 0) {
     const flag = args.shift();
     switch (flag) {
       case '--cwd':
-        opts.cwd = path.resolve(args.shift() || '');
+        opts.cwd = path.resolve(takeValue(flag));
         break;
       case '--bank':
-        opts.bank = args.shift();
+        opts.bank = takeValue(flag);
         break;
       case '--json':
         opts.json = true;
@@ -1595,58 +1688,58 @@ function parseArgs(argv) {
         opts.dryRun = true;
         break;
       case '--since':
-        opts.since = args.shift();
+        opts.since = takeValue(flag);
         break;
       case '--days':
-        opts.days = args.shift();
+        opts.days = takeNumber(flag, { min: 0 });
         break;
       case '--limit':
-        opts.limit = args.shift();
+        opts.limit = takeNumber(flag, { min: 1, integer: true });
         break;
       case '--offset':
-        opts.offset = args.shift();
+        opts.offset = takeNumber(flag, { min: 0, integer: true });
         break;
       case '--id':
-        opts.id = args.shift();
+        opts.id = takeValue(flag);
         break;
       case '--type':
-        opts.type = args.shift();
+        opts.type = takeValue(flag);
         break;
       case '--q':
-        opts.q = args.shift();
+        opts.q = takeValue(flag);
         break;
       case '--state':
-        opts.state = args.shift();
+        opts.state = takeValue(flag);
         break;
       case '--tag':
-        opts.tag = args.shift();
+        opts.tag = takeValue(flag);
         break;
       case '--reason':
-        opts.reason = args.shift();
+        opts.reason = takeValue(flag);
         break;
       case '--text':
-        opts.text = args.shift();
+        opts.text = takeValue(flag);
         break;
       case '--text-file':
-        opts.textFile = args.shift();
+        opts.textFile = takeValue(flag);
         break;
       case '--context':
-        opts.context = args.shift();
+        opts.context = takeValue(flag);
         break;
       case '--kind':
-        opts.kind = args.shift();
+        opts.kind = takeValue(flag);
         break;
       case '--slug':
-        opts.slug = args.shift();
+        opts.slug = takeValue(flag);
         break;
       case '--title':
-        opts.title = args.shift();
+        opts.title = takeValue(flag);
         break;
       case '--knowledge-tag':
-        opts.knowledgeTag = args.shift();
+        opts.knowledgeTag = takeValue(flag);
         break;
       case '--session-id':
-        opts.sessionId = args.shift();
+        opts.sessionId = takeValue(flag);
         break;
       case '--allow-ephemeral-doc':
         opts.allowEphemeralDoc = true;
@@ -1661,13 +1754,13 @@ function parseArgs(argv) {
         opts.forceConsolidate = true;
         break;
       case '--full-refresh':
-        opts.fullRefresh.push(args.shift());
+        opts.fullRefresh.push(takeValue(flag));
         break;
       case '--max-refreshes':
-        opts.maxRefreshes = args.shift();
+        opts.maxRefreshes = takeNumber(flag, { min: 0, integer: true });
         break;
       case '--wait-seconds':
-        opts.waitSeconds = args.shift();
+        opts.waitSeconds = takeNumber(flag, { min: 0 });
         break;
       case '-h':
       case '--help':
@@ -1722,6 +1815,10 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
   ) {
     console.log(USAGE);
     return command || opts.help ? 0 : 2;
+  }
+
+  if (!opts.sessionId) {
+    opts.sessionId = resolveDefaultSessionId(env);
   }
 
   let conn;
