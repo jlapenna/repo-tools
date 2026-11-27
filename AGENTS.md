@@ -28,6 +28,7 @@ copying procedures into always-loaded context.
 | Authorized work while the user is unavailable | `plugins/repo-tools/skills/autonomous-work/SKILL.md` | task verification and an honest completion report |
 | Renovate maintenance | `plugins/repo-tools/skills/renovate-maintenance/SKILL.md` | skill-defined queue evidence |
 | Complexity, legacy, diagnostic or combined sweep | `plugins/repo-tools/skills/complexity-sweep/SKILL.md` | selected-lens evidence, preserved consumer contracts and concrete maintenance reduction |
+| Hindsight memory dreaming, compaction, or page upkeep | `plugins/repo-tools/skills/hindsight-dream/SKILL.md` | `bin/hindsight-dream.test.mjs` and verified bank state |
 | Eval, score or add evals to skills | `plugins/repo-tools/skills/skill-evals/SKILL.md` | runner results per skill and eval coverage |
 | Add or change a CLI | `ARCHITECTURE.md`, matching `bin/*.test.*` | focused test, then `pnpm test` |
 | Change plugin manifests | `ARCHITECTURE.md`, `plugins/manifests.test.mjs` | manifest and docs checks |

@@ -187,4 +187,19 @@ test('repo-tools plugin wires the autonomous-work stall hook across Claude Code,
 
   const mod = await import(opencodePlugin);
   assert.equal(typeof mod.default, 'function', 'OpenCode plugin must export a default plugin factory');
+
+  const dreamScript = join(pluginRoot, 'scripts/repo-hindsight-dream.mjs');
+  assert.ok(existsSync(dreamScript), `${dreamScript} must be bundled with the plugin`);
+  assert.doesNotThrow(() => accessSync(dreamScript, constants.X_OK), `${dreamScript} must remain executable`);
+  const dreamSkill = readFileSync(join(pluginRoot, 'skills/hindsight-dream/SKILL.md'), 'utf8');
+  assert.match(dreamSkill, /scripts\/repo-hindsight-dream\.mjs/);
+  assert.doesNotMatch(dreamSkill, /LCARS_SESSION_ID/);
+  const dreamEvals = readFileSync(join(pluginRoot, 'skills/hindsight-dream/evals/evals.json'), 'utf8');
+  assert.doesNotMatch(dreamEvals, /LCARS_SESSION_ID/);
+  const dreamHelp = spawnSync(process.execPath, [dreamScript, '--help'], {
+    cwd: pluginRoot,
+    encoding: 'utf8',
+  });
+  assert.equal(dreamHelp.status, 0, dreamHelp.stderr);
+  assert.match(dreamHelp.stdout, /^Usage: repo-hindsight-dream/m);
 });

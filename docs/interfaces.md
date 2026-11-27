@@ -19,6 +19,7 @@ Nx-inferred targets are intentionally not listed. Runtime status is not inferred
 | repo-doctor | [bin/doctor.mjs](../bin/doctor.mjs) |
 | repo-eval-history | [bin/eval-history.mjs](../bin/eval-history.mjs) |
 | repo-github-app-token | [bin/github-app-token.mjs](../bin/github-app-token.mjs) |
+| repo-hindsight-dream | [bin/hindsight-dream.mjs](../bin/hindsight-dream.mjs) |
 | repo-install-husky-hooks | [bin/install-husky-hooks.sh](../bin/install-husky-hooks.sh) |
 | repo-nx | [bin/nx.sh](../bin/nx.sh) |
 | repo-pr-status | [bin/pr-status.mjs](../bin/pr-status.mjs) |
@@ -40,6 +41,7 @@ Nx-inferred targets are intentionally not listed. Runtime status is not inferred
 | complexity-sweep | [plugins/repo-tools/skills/complexity-sweep/SKILL.md](../plugins/repo-tools/skills/complexity-sweep/SKILL.md) |
 | github-ci-monitor | [plugins/repo-tools/skills/github-ci-monitor/SKILL.md](../plugins/repo-tools/skills/github-ci-monitor/SKILL.md) |
 | harness-maintenance | [plugins/repo-tools/skills/harness-maintenance/SKILL.md](../plugins/repo-tools/skills/harness-maintenance/SKILL.md) |
+| hindsight-dream | [plugins/repo-tools/skills/hindsight-dream/SKILL.md](../plugins/repo-tools/skills/hindsight-dream/SKILL.md) |
 | land-pr | [plugins/repo-tools/skills/land-pr/SKILL.md](../plugins/repo-tools/skills/land-pr/SKILL.md) |
 | renovate-maintenance | [plugins/repo-tools/skills/renovate-maintenance/SKILL.md](../plugins/repo-tools/skills/renovate-maintenance/SKILL.md) |
 | skill-evals | [plugins/repo-tools/skills/skill-evals/SKILL.md](../plugins/repo-tools/skills/skill-evals/SKILL.md) |
