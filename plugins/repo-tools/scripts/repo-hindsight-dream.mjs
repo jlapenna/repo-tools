@@ -426,7 +426,7 @@ export function resolveHindsightConnection({
       effectiveUrl = parsed.url;
       effectiveOrigin = parsed.origin;
       effectiveHostname = parsed.hostname;
-      if (!hasMode && serverMode === 'daemon') {
+      if (!hasMode) {
         serverMode =
           parsed.origin === defaultCloud.origin ? 'cloud' : 'self-hosted';
       }
@@ -435,7 +435,11 @@ export function resolveHindsightConnection({
       effectiveUrl = parsed.url;
       effectiveOrigin = parsed.origin;
       effectiveHostname = parsed.hostname;
-    } else if (hasMode && serverMode === 'cloud' && prevMode !== 'cloud') {
+    } else if (
+      hasMode &&
+      serverMode === 'cloud' &&
+      (prevMode !== 'cloud' || effectiveOrigin !== defaultCloud.origin)
+    ) {
       effectiveUrl = defaultCloud.url;
       effectiveOrigin = defaultCloud.origin;
       effectiveHostname = defaultCloud.hostname;

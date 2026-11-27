@@ -807,6 +807,90 @@ test('resolveHindsightConnection and CLI support daemon mode, unauthenticated se
     assert.equal(apiUrlFlagRun.result, 2);
     assert.match(apiUrlFlagRun.stderr, /Unknown argument: --api-url/);
     assert.equal(seenAuthHeaders.length, 0);
+
+    // 7. Implicit self-hosted apiUrl overridden by serverMode: "cloud" resets to Cloud and never leaks Cloud token to self-hosted
+    const implicitSelfHostedToCloudCfg = path.join(tmp, 'self-hosted-to-cloud.json');
+    writeFileSync(
+      implicitSelfHostedToCloudCfg,
+      JSON.stringify({
+        apiUrl: `http://127.0.0.1:${port}`,
+        apiToken: 'self-hosted-secret-token',
+        paths: {
+          '~/work': { serverMode: 'cloud', apiToken: 'cloud-override-token' },
+          '~/oss': { serverMode: 'cloud' },
+        },
+      }),
+    );
+
+    const cloudWithTokenConn = resolveHindsightConnection({
+      cwd: workRepo,
+      env: { HINDSIGHT_CONFIG: implicitSelfHostedToCloudCfg },
+      home: tmp,
+    });
+    assert.equal(cloudWithTokenConn.serverMode, 'cloud');
+    assert.equal(cloudWithTokenConn.apiUrl, 'https://api.hindsight.vectorize.io');
+    assert.equal(cloudWithTokenConn.apiToken, 'cloud-override-token');
+
+    assert.throws(
+      () =>
+        resolveHindsightConnection({
+          cwd: ossRepo,
+          env: { HINDSIGHT_CONFIG: implicitSelfHostedToCloudCfg },
+          home: tmp,
+        }),
+      /No Hindsight API token found for Cloud/,
+    );
+
+    // Env HINDSIGHT_API_URL overridden by file { serverMode: "cloud" } without token resets to Cloud and fails closed
+    const envToCloudCfg = path.join(tmp, 'env-to-cloud.json');
+    writeFileSync(envToCloudCfg, JSON.stringify({ serverMode: 'cloud' }));
+    assert.throws(
+      () =>
+        resolveHindsightConnection({
+          cwd: workRepo,
+          env: {
+            HINDSIGHT_CONFIG: envToCloudCfg,
+            HINDSIGHT_API_URL: `http://127.0.0.1:${port}`,
+            HINDSIGHT_API_TOKEN: 'self-hosted-env-token',
+            HINDSIGHT_TOKEN_FILE: path.join(tmp, 'missing-token'),
+          },
+          home: tmp,
+        }),
+      /No Hindsight API token found for Cloud/,
+    );
+
+    // Lower layer pairing explicit serverMode: "cloud" with custom apiUrl still resets to Cloud on higher serverMode: "cloud"
+    const explicitCloudCustomUrlCfg = path.join(tmp, 'cloud-custom-url-reset.json');
+    writeFileSync(
+      explicitCloudCustomUrlCfg,
+      JSON.stringify({
+        serverMode: 'cloud',
+        apiUrl: `http://127.0.0.1:${port}`,
+        apiToken: 'custom-origin-token',
+        paths: {
+          '~/work': { serverMode: 'cloud', apiToken: 'cloud-override-token' },
+          '~/oss': { serverMode: 'cloud' },
+        },
+      }),
+    );
+    const resetWithTokenConn = resolveHindsightConnection({
+      cwd: workRepo,
+      env: { HINDSIGHT_CONFIG: explicitCloudCustomUrlCfg },
+      home: tmp,
+    });
+    assert.equal(resetWithTokenConn.serverMode, 'cloud');
+    assert.equal(resetWithTokenConn.apiUrl, 'https://api.hindsight.vectorize.io');
+    assert.equal(resetWithTokenConn.apiToken, 'cloud-override-token');
+
+    assert.throws(
+      () =>
+        resolveHindsightConnection({
+          cwd: ossRepo,
+          env: { HINDSIGHT_CONFIG: explicitCloudCustomUrlCfg },
+          home: tmp,
+        }),
+      /No Hindsight API token found for Cloud/,
+    );
   } finally {
     server.close();
     rmSync(tmp, { recursive: true, force: true });
