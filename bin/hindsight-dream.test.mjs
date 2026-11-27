@@ -504,3 +504,423 @@ test('CLI end-to-end against mock Hindsight API enforces curation guards and rec
     rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+test('resolveHindsightConnection enforces layered disabled precedence and optInOnly / optInPaths fail-closed', () => {
+  const tmp = mkdtempSync(path.join(tmpdir(), 'hindsight-dream-privacy-'));
+  try {
+    const allowedRepo = path.join(tmp, 'work', 'allowed-repo');
+    const blockedRepo = path.join(tmp, 'work', 'blocked-repo');
+    const privateRepo = path.join(tmp, 'private', 'secret-repo');
+    const mappedRepo = path.join(tmp, 'mapped', 'client-app');
+    for (const dir of [allowedRepo, blockedRepo, privateRepo, mappedRepo]) {
+      mkdirSync(dir, { recursive: true });
+      execFileSync('git', ['init', dir], { stdio: 'ignore' });
+    }
+
+    const cfgPath = path.join(tmp, 'coding-agent.json');
+    writeFileSync(
+      cfgPath,
+      JSON.stringify({
+        apiToken: 'cloud-token-123456',
+        disabled: true,
+        paths: {
+          '~/work': { disabled: false },
+          '~/private': { disabled: true },
+        },
+        banks: {
+          'coding-agent::blocked-repo': { disabled: true },
+          'coding-agent::secret-repo': { disabled: false },
+        },
+      }),
+    );
+
+    // Top-level disabled: true overridden by paths.<prefix>.disabled: false
+    const allowedConn = resolveHindsightConnection({
+      cwd: allowedRepo,
+      env: { HINDSIGHT_CONFIG: cfgPath },
+      home: tmp,
+    });
+    assert.equal(allowedConn.bankId, 'coding-agent::allowed-repo');
+
+    // banks.<id>.disabled: true overrides paths.<prefix>.disabled: false
+    assert.throws(
+      () =>
+        resolveHindsightConnection({
+          cwd: blockedRepo,
+          env: { HINDSIGHT_CONFIG: cfgPath },
+          home: tmp,
+        }),
+      /disabled/i,
+    );
+
+    // banks.<id>.disabled: false overrides paths.<prefix>.disabled: true
+    const secretOverride = resolveHindsightConnection({
+      cwd: privateRepo,
+      env: { HINDSIGHT_CONFIG: cfgPath },
+      home: tmp,
+    });
+    assert.equal(secretOverride.bankId, 'coding-agent::secret-repo');
+
+    // paths.<prefix>.disabled: true fails closed when top-level disabled is unset
+    const pathDisabledCfg = path.join(tmp, 'path-disabled.json');
+    writeFileSync(
+      pathDisabledCfg,
+      JSON.stringify({
+        apiToken: 'cloud-token-123456',
+        paths: {
+          '~/private': { disabled: true },
+        },
+      }),
+    );
+    assert.throws(
+      () =>
+        resolveHindsightConnection({
+          cwd: privateRepo,
+          env: { HINDSIGHT_CONFIG: pathDisabledCfg },
+          home: tmp,
+        }),
+      /disabled/i,
+    );
+
+    // File disabled: false overrides HINDSIGHT_DISABLED=true env fallback
+    const envFallbackCfg = path.join(tmp, 'env-fallback.json');
+    writeFileSync(
+      envFallbackCfg,
+      JSON.stringify({
+        apiToken: 'cloud-token-123456',
+        disabled: false,
+      }),
+    );
+    const envOverridden = resolveHindsightConnection({
+      cwd: allowedRepo,
+      env: { HINDSIGHT_CONFIG: envFallbackCfg, HINDSIGHT_DISABLED: 'true' },
+      home: tmp,
+    });
+    assert.equal(envOverridden.bankId, 'coding-agent::allowed-repo');
+
+    // optInOnly fails closed outside optInPaths and mapPathToBank (even with bare bankId or path section)
+    const optInCfg = path.join(tmp, 'opt-in.json');
+    writeFileSync(
+      optInCfg,
+      JSON.stringify({
+        apiToken: 'cloud-token-123456',
+        bankId: 'global-bank',
+        optInOnly: true,
+        optInPaths: ['~/work'],
+        mapPathToBank: {
+          '~/mapped': 'client-bank',
+        },
+        paths: {
+          '~/private': { optInOnly: false },
+        },
+      }),
+    );
+    assert.throws(
+      () =>
+        resolveHindsightConnection({
+          cwd: privateRepo,
+          env: { HINDSIGHT_CONFIG: optInCfg },
+          home: tmp,
+        }),
+      /optInOnly/,
+    );
+    const optedInWork = resolveHindsightConnection({
+      cwd: allowedRepo,
+      env: { HINDSIGHT_CONFIG: optInCfg },
+      home: tmp,
+    });
+    assert.equal(optedInWork.bankId, 'global-bank');
+    const optedInMapped = resolveHindsightConnection({
+      cwd: mappedRepo,
+      env: { HINDSIGHT_CONFIG: optInCfg },
+      home: tmp,
+    });
+    assert.equal(optedInMapped.bankId, 'client-bank');
+
+    // Env fallback for HINDSIGHT_OPT_IN_ONLY / HINDSIGHT_OPT_IN_PATHS
+    const emptyCfg = path.join(tmp, 'empty.json');
+    writeFileSync(emptyCfg, JSON.stringify({ apiToken: 'cloud-token-123456' }));
+    assert.throws(
+      () =>
+        resolveHindsightConnection({
+          cwd: privateRepo,
+          env: {
+            HINDSIGHT_CONFIG: emptyCfg,
+            HINDSIGHT_OPT_IN_ONLY: 'true',
+            HINDSIGHT_OPT_IN_PATHS: '~/work',
+          },
+          home: tmp,
+        }),
+      /optInOnly/,
+    );
+    const envOptedIn = resolveHindsightConnection({
+      cwd: allowedRepo,
+      env: {
+        HINDSIGHT_CONFIG: emptyCfg,
+        HINDSIGHT_OPT_IN_ONLY: '1',
+        HINDSIGHT_OPT_IN_PATHS: '~/other, ~/work',
+      },
+      home: tmp,
+    });
+    assert.equal(envOptedIn.bankId, 'coding-agent::allowed-repo');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('resolveHindsightConnection and CLI support daemon mode, unauthenticated self-hosted, and prevent cross-origin token leakage', async () => {
+  const tmp = mkdtempSync(path.join(tmpdir(), 'hindsight-dream-modes-'));
+  const ossRepo = path.join(tmp, 'oss', 'widgets');
+  const workRepo = path.join(tmp, 'work', 'widgets');
+  for (const dir of [ossRepo, workRepo]) {
+    mkdirSync(dir, { recursive: true });
+    execFileSync('git', ['init', dir], { stdio: 'ignore' });
+  }
+
+  const seenAuthHeaders = [];
+  const server = http.createServer((req, res) => {
+    seenAuthHeaders.push(req.headers.authorization ?? null);
+    const send = (code, data) => {
+      res.writeHead(code, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(data));
+    };
+    const url = new URL(req.url, 'http://127.0.0.1');
+    if (url.pathname.endsWith('/stats')) {
+      return send(200, { total_nodes: 0, total_documents: 0, total_links: 0 });
+    }
+    if (url.pathname.endsWith('/observations/scopes')) return send(200, { scopes: [] });
+    if (url.pathname.endsWith('/pages/tree')) return send(200, { roots: [] });
+    if (url.pathname.endsWith('/mental-models')) return send(200, { items: [] });
+    if (url.pathname.endsWith('/documents')) return send(200, { items: [], total: 0 });
+    if (url.pathname.endsWith('/memories/list')) return send(200, { items: [], total: 0 });
+    return send(404, {});
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address();
+
+  try {
+    // 1. Mixed Cloud + per-directory daemon config routes ~/oss to 127.0.0.1:<port> without inheriting Cloud token
+    const mixedCfg = path.join(tmp, 'mixed.json');
+    writeFileSync(
+      mixedCfg,
+      JSON.stringify({
+        apiToken: 'cloud-secret-token-999',
+        paths: {
+          '~/oss': { serverMode: 'daemon', apiPort: port },
+        },
+      }),
+    );
+
+    const ossConn = resolveHindsightConnection({
+      cwd: ossRepo,
+      env: { HINDSIGHT_CONFIG: mixedCfg },
+      home: tmp,
+    });
+    assert.equal(ossConn.serverMode, 'daemon');
+    assert.equal(ossConn.apiUrl, `http://127.0.0.1:${port}`);
+    assert.equal(ossConn.apiToken, '');
+
+    const workConn = resolveHindsightConnection({
+      cwd: workRepo,
+      env: { HINDSIGHT_CONFIG: mixedCfg },
+      home: tmp,
+    });
+    assert.equal(workConn.serverMode, 'cloud');
+    assert.equal(workConn.apiUrl, 'https://api.hindsight.vectorize.io');
+    assert.equal(workConn.apiToken, 'cloud-secret-token-999');
+
+    // Run status against local daemon port and verify zero Authorization headers sent
+    seenAuthHeaders.length = 0;
+    const daemonStatus = await captureLogs(() =>
+      main(['status', '--cwd', ossRepo, '--json'], { HINDSIGHT_CONFIG: mixedCfg, HOME: tmp }),
+    );
+    assert.equal(daemonStatus.result, 0, daemonStatus.stderr);
+    assert.ok(seenAuthHeaders.length > 0);
+    assert.ok(seenAuthHeaders.every((h) => h === null), `expected no Authorization header, got ${JSON.stringify(seenAuthHeaders)}`);
+
+    // 2. Unauthenticated self-hosted config (no serverMode, no apiToken) works and omits Authorization header
+    const selfHostedCfg = path.join(tmp, 'self-hosted.json');
+    writeFileSync(
+      selfHostedCfg,
+      JSON.stringify({
+        apiUrl: `http://127.0.0.1:${port}`,
+      }),
+    );
+    seenAuthHeaders.length = 0;
+    const selfHostedStatus = await captureLogs(() =>
+      main(['status', '--cwd', workRepo, '--json'], { HINDSIGHT_CONFIG: selfHostedCfg, HOME: tmp }),
+    );
+    assert.equal(selfHostedStatus.result, 0, selfHostedStatus.stderr);
+    assert.ok(seenAuthHeaders.length > 0);
+    assert.ok(seenAuthHeaders.every((h) => h === null));
+
+    // 3. Env fallback HINDSIGHT_SERVER_MODE=daemon defaults to port 9077
+    const defaultDaemonConn = resolveHindsightConnection({
+      cwd: workRepo,
+      env: { HINDSIGHT_CONFIG: path.join(tmp, 'missing.json'), HINDSIGHT_SERVER_MODE: 'daemon' },
+      home: tmp,
+    });
+    assert.equal(defaultDaemonConn.apiUrl, 'http://127.0.0.1:9077');
+    assert.equal(defaultDaemonConn.apiToken, '');
+
+    // 4. Cloud target with no token still fails with exit 2
+    assert.throws(
+      () =>
+        resolveHindsightConnection({
+          cwd: workRepo,
+          env: {
+            HINDSIGHT_CONFIG: path.join(tmp, 'missing.json'),
+            HINDSIGHT_TOKEN_FILE: path.join(tmp, 'missing-token'),
+          },
+          home: tmp,
+        }),
+      /No Hindsight API token found for Cloud/,
+    );
+
+    // 5. Cross-origin path apiUrl override clears inherited Cloud token instead of forwarding it
+    const crossOriginCfg = path.join(tmp, 'cross-origin.json');
+    writeFileSync(
+      crossOriginCfg,
+      JSON.stringify({
+        apiToken: 'cloud-secret-token-999',
+        paths: {
+          '~/oss': { apiUrl: `http://127.0.0.1:${port}` },
+        },
+      }),
+    );
+    const crossConn = resolveHindsightConnection({
+      cwd: ossRepo,
+      env: { HINDSIGHT_CONFIG: crossOriginCfg },
+      home: tmp,
+    });
+    assert.equal(crossConn.apiUrl, `http://127.0.0.1:${port}`);
+    assert.equal(crossConn.apiToken, '');
+
+    // 6. Removed --api-url CLI flag is rejected with exit 2 and makes zero HTTP requests
+    seenAuthHeaders.length = 0;
+    const apiUrlFlagRun = await captureLogs(() =>
+      main(['status', '--cwd', workRepo, '--api-url', `http://127.0.0.1:${port}`], {
+        HINDSIGHT_CONFIG: mixedCfg,
+        HOME: tmp,
+      }),
+    );
+    assert.equal(apiUrlFlagRun.result, 2);
+    assert.match(apiUrlFlagRun.stderr, /Unknown argument: --api-url/);
+    assert.equal(seenAuthHeaders.length, 0);
+  } finally {
+    server.close();
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('gitlog duplicate detection and delete-doc protect sibling repos on shared banks and sole gitlog:checkout seeds', async () => {
+  const tmp = mkdtempSync(path.join(tmpdir(), 'hindsight-dream-gitlog-'));
+  const repoDir = path.join(tmp, 'backend');
+  mkdirSync(repoDir, { recursive: true });
+  execFileSync('git', ['init', repoDir], { stdio: 'ignore' });
+
+  const docs = new Map([
+    ['gitlog:checkout', { id: 'gitlog:checkout', memory_unit_count: 8, updated_at: '2026-11-26T00:00:00Z' }],
+    ['gitlog:frontend', { id: 'gitlog:frontend', memory_unit_count: 15, updated_at: '2026-11-26T00:00:00Z' }],
+  ]);
+  const deletedDocs = [];
+
+  const server = http.createServer((req, res) => {
+    const send = (code, data) => {
+      res.writeHead(code, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(data));
+    };
+    const url = new URL(req.url, 'http://127.0.0.1');
+    const prefix = '/v1/default/banks/team%3A%3Ashared';
+    const sub = url.pathname.slice(prefix.length);
+    if (req.method === 'GET' && sub === '/stats') return send(200, { total_nodes: 2, total_documents: docs.size });
+    if (req.method === 'GET' && sub === '/observations/scopes') return send(200, { scopes: [] });
+    if (req.method === 'GET' && sub === '/pages/tree') return send(200, { roots: [] });
+    if (req.method === 'GET' && sub === '/mental-models') return send(200, { items: [] });
+    if (req.method === 'GET' && sub === '/memories/list') return send(200, { items: [], total: 0 });
+    if (req.method === 'GET' && sub === '/documents') {
+      const q = url.searchParams.get('q') || '';
+      const items = [...docs.values()].filter((d) => !q || d.id.includes(q));
+      return send(200, { items, total: items.length });
+    }
+    if (sub.startsWith('/documents/')) {
+      const docId = decodeURIComponent(sub.slice('/documents/'.length));
+      if (req.method === 'GET') {
+        const doc = docs.get(docId);
+        return doc ? send(200, doc) : send(404, {});
+      }
+      if (req.method === 'DELETE') {
+        if (!docs.has(docId)) return send(404, {});
+        docs.delete(docId);
+        deletedDocs.push(docId);
+        return send(200, { success: true });
+      }
+    }
+    return send(404, {});
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address();
+  const cfgPath = path.join(tmp, 'coding-agent.json');
+  writeFileSync(
+    cfgPath,
+    JSON.stringify({
+      apiUrl: `http://127.0.0.1:${port}`,
+      bankId: 'team::shared',
+    }),
+  );
+  const env = { HINDSIGHT_CONFIG: cfgPath, HOME: tmp };
+
+  try {
+    // 1. When canonical gitlog:backend is absent, even gitlog:checkout is NOT flagged or deletable
+    const candNoCanonical = await captureLogs(() =>
+      main(['candidates', '--cwd', repoDir, '--json'], env),
+    );
+    assert.equal(candNoCanonical.result, 0, candNoCanonical.stderr);
+    assert.deepEqual(JSON.parse(candNoCanonical.stdout).duplicateGitlogs, []);
+
+    const refuseSoleCheckout = await captureLogs(() =>
+      main(['delete-doc', '--cwd', repoDir, '--id', 'gitlog:checkout', '--reason', 'stale'], env),
+    );
+    assert.equal(refuseSoleCheckout.result, 2);
+    assert.match(refuseSoleCheckout.stderr, /while canonical "gitlog:backend" is absent/);
+    assert.equal(docs.has('gitlog:checkout'), true);
+
+    // 2. Once canonical gitlog:backend exists, ONLY generic checkout/workspace aliases are duplicates; sibling gitlog:frontend is protected
+    docs.set('gitlog:backend', { id: 'gitlog:backend', memory_unit_count: 20, updated_at: '2026-11-27T00:00:00Z' });
+    docs.set('gitlog:workspace', { id: 'gitlog:workspace', memory_unit_count: 5, updated_at: '2026-11-26T00:00:00Z' });
+
+    const candWithCanonical = await captureLogs(() =>
+      main(['candidates', '--cwd', repoDir, '--json'], env),
+    );
+    assert.equal(candWithCanonical.result, 0, candWithCanonical.stderr);
+    assert.deepEqual(
+      JSON.parse(candWithCanonical.stdout).duplicateGitlogs.map((d) => d.id).sort(),
+      ['gitlog:checkout', 'gitlog:workspace'],
+    );
+
+    const refuseSibling = await captureLogs(() =>
+      main(['delete-doc', '--cwd', repoDir, '--id', 'gitlog:frontend', '--reason', 'nope'], env),
+    );
+    assert.equal(refuseSibling.result, 2);
+    assert.equal(docs.has('gitlog:frontend'), true);
+
+    const allowAlias = await captureLogs(() =>
+      main(['delete-doc', '--cwd', repoDir, '--id', 'gitlog:workspace', '--reason', 'duplicate alias'], env),
+    );
+    assert.equal(allowAlias.result, 0, allowAlias.stderr);
+    assert.deepEqual(deletedDocs, ['gitlog:workspace']);
+
+    // Explicit --allow-other-gitlog permits confirmed non-alias deletion when canonical exists
+    const allowExplicitSibling = await captureLogs(() =>
+      main(
+        ['delete-doc', '--cwd', repoDir, '--id', 'gitlog:frontend', '--allow-other-gitlog', '--reason', 'retired repo'],
+        env,
+      ),
+    );
+    assert.equal(allowExplicitSibling.result, 0, allowExplicitSibling.stderr);
+    assert.deepEqual(deletedDocs, ['gitlog:workspace', 'gitlog:frontend']);
+  } finally {
+    server.close();
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});

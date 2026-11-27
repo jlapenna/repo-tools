@@ -12,9 +12,9 @@ it never edits repository files, commits, branches, issues, or pull requests.
 Use `repo-hindsight-dream` (on `PATH`, or bundled at
 `../../scripts/repo-hindsight-dream.mjs` relative to this `SKILL.md`) for all
 reads and mutations so bearer tokens stay out of command arguments and core
-taxonomy pages remain protected. Pass `--session-id "$LCARS_SESSION_ID"` when
-that environment variable is set so the dreaming session excludes and removes
-its own transcript from the bank.
+taxonomy pages remain protected. When the calling runtime or job provides a
+session identifier, pass `--session-id <current-session-id>` so the dreaming
+session excludes and removes its own transcript from the bank.
 
 Read [references/dream-rubric.md](references/dream-rubric.md) before mutating
 memories or retiring pages.
@@ -28,8 +28,10 @@ queues in one pass:
 dream_cli="$(command -v repo-hindsight-dream || true)"
 [ -n "$dream_cli" ] || dream_cli="node <plugin-root>/scripts/repo-hindsight-dream.mjs"
 
-$dream_cli status --json ${LCARS_SESSION_ID:+--session-id "$LCARS_SESSION_ID"}
-$dream_cli candidates --days 14 --limit 300 --json ${LCARS_SESSION_ID:+--session-id "$LCARS_SESSION_ID"}
+# Set session_id to the current session ID when provided by your runtime or job.
+session_id=""
+$dream_cli status --json ${session_id:+--session-id "$session_id"}
+$dream_cli candidates --days 14 --limit 300 --json ${session_id:+--session-id "$session_id"}
 ```
 
 When a prior dream report or watermark timestamp is supplied, pass
@@ -62,8 +64,11 @@ status instead of inventing changes.
 ## 3. Compact: remove duplicates, ephemeral noise, and finished initiatives
 
 1. **Duplicate gitlog seeds:** if `duplicateGitlogs` lists `gitlog:checkout`
-   (or another clone basename) alongside canonical `gitlog:<repo>`, remove the
+   or `gitlog:workspace` alongside canonical `gitlog:<repo>`, remove the
    duplicate with `delete-doc --id gitlog:checkout --reason "Duplicate of canonical gitlog:<repo>"`.
+   Leave `gitlog:checkout` intact when canonical `gitlog:<repo>` is absent, and
+   do not delete sibling repositories' `gitlog:<other-repo>` seeds on shared
+   multi-repo banks unless explicitly confirmed with `--allow-other-gitlog`.
 2. **Ephemeral dispatch chatter:** review `ephemeralFacts` (`read-memory` when
    context is unclear). Invalidate routine zero-finding review receipts,
    auto-merge queue notices, and transient status checkpoints that carry no
@@ -98,7 +103,7 @@ status instead of inventing changes.
 
 ```bash
 $dream_cli reconcile --refresh-stale --max-refreshes 3 --wait-seconds 180 \
-  ${LCARS_SESSION_ID:+--session-id "$LCARS_SESSION_ID"}
+  ${session_id:+--session-id "$session_id"}
 ```
 
    Pass `--full-refresh <mm-id>` (at most 1–2 core pages per night) when a

@@ -20,6 +20,15 @@ export const CORE_TAXONOMY_PAGES = new Set([
   'initiatives and enhancements',
 ]);
 
+export const GENERIC_GITLOG_ALIAS_IDS = new Set([
+  'gitlog:checkout',
+  'gitlog:workspace',
+]);
+
+const DEFAULT_CLOUD_API_URL = 'https://api.hindsight.vectorize.io';
+const DEFAULT_DAEMON_PORT = 9077;
+const VALID_SERVER_MODES = new Set(['cloud', 'self-hosted', 'daemon']);
+
 const VALID_DREAM_KINDS = new Set([
   'correction',
   'evolution',
@@ -126,12 +135,72 @@ export function resolveGitRepositoryInfo(cwd) {
   };
 }
 
+function parseEnvBool(value) {
+  if (value === undefined || value === null || value === '') return undefined;
+  const norm = String(value).trim().toLowerCase();
+  if (norm === 'true' || norm === '1') return true;
+  if (norm === 'false' || norm === '0') return false;
+  return undefined;
+}
+
+function parseApiPort(raw, sourceLabel) {
+  if (raw === undefined || raw === null || raw === '') return undefined;
+  const num = Number(raw);
+  if (!Number.isInteger(num) || num < 1 || num > 65535) {
+    throw new DreamError(
+      `Invalid Hindsight apiPort "${raw}" in ${sourceLabel} (expected integer 1-65535).`,
+      2,
+    );
+  }
+  return num;
+}
+
+function parseServerMode(raw, sourceLabel) {
+  if (raw === undefined || raw === null || raw === '') return undefined;
+  const norm = String(raw).trim().toLowerCase();
+  if (!VALID_SERVER_MODES.has(norm)) {
+    throw new DreamError(
+      `Invalid Hindsight serverMode "${raw}" in ${sourceLabel} (expected cloud, self-hosted, or daemon).`,
+      2,
+    );
+  }
+  return norm;
+}
+
+function pathMatchesPrefix(targetPath, rawPrefix, home) {
+  const prefix = path.resolve(expandHome(rawPrefix, home));
+  if (targetPath === prefix) return { matched: true, length: prefix.length };
+  const withSep = prefix.endsWith(path.sep) ? prefix : `${prefix}${path.sep}`;
+  if (targetPath.startsWith(withSep)) return { matched: true, length: prefix.length };
+  return { matched: false, length: -1 };
+}
+
+function normalizeUrl(rawUrl, sourceLabel) {
+  const cleaned = String(rawUrl || '').trim().replace(/\/+$/, '');
+  try {
+    const parsed = new URL(cleaned);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      throw new Error(`unsupported protocol "${parsed.protocol}"`);
+    }
+    return { url: cleaned, origin: parsed.origin, hostname: parsed.hostname };
+  } catch (error) {
+    throw new DreamError(
+      `Invalid Hindsight apiUrl "${rawUrl}" in ${sourceLabel}: ${error.message}`,
+      2,
+    );
+  }
+}
+
+function isLoopbackHostname(hostname) {
+  const host = String(hostname || '').toLowerCase();
+  return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]';
+}
+
 export function resolveHindsightConnection({
   cwd = process.cwd(),
   env = process.env,
-  home = homedir(),
+  home = env.HOME || homedir(),
   bankOverride,
-  apiUrlOverride,
 } = {}) {
   const configPath = expandHome(
     env.HINDSIGHT_CONFIG || path.join(home, '.hindsight', 'coding-agent.json'),
@@ -140,7 +209,10 @@ export function resolveHindsightConnection({
   let fileCfg = {};
   if (existsSync(configPath)) {
     try {
-      fileCfg = JSON.parse(readFileSync(configPath, 'utf8'));
+      const parsed = JSON.parse(readFileSync(configPath, 'utf8'));
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        fileCfg = parsed;
+      }
     } catch (error) {
       throw new DreamError(
         `Failed to parse Hindsight config at ${configPath}: ${error.message}`,
@@ -149,31 +221,25 @@ export function resolveHindsightConnection({
     }
   }
 
-  if (
-    env.HINDSIGHT_DISABLED === 'true' ||
-    env.HINDSIGHT_DISABLED === '1' ||
-    fileCfg.disabled === true
-  ) {
-    throw new DreamError(
-      `Hindsight is disabled in configuration (${configPath} or HINDSIGHT_DISABLED).`,
-      2,
-    );
-  }
-
   const gitInfo = resolveGitRepositoryInfo(cwd);
-  const matchTarget = gitInfo.mainCheckoutDir;
+  let resolveWorktrees = true;
+  const envResolveWorktrees = parseEnvBool(env.HINDSIGHT_RESOLVE_WORKTREES);
+  if (envResolveWorktrees !== undefined) resolveWorktrees = envResolveWorktrees;
+  if (typeof fileCfg.resolveWorktrees === 'boolean') {
+    resolveWorktrees = fileCfg.resolveWorktrees;
+  }
+  const matchTarget = resolveWorktrees
+    ? gitInfo.mainCheckoutDir
+    : path.resolve(cwd);
 
   let mappedBank = '';
   if (fileCfg.mapPathToBank && typeof fileCfg.mapPathToBank === 'object') {
     let bestLen = -1;
     for (const [rawPrefix, targetBank] of Object.entries(fileCfg.mapPathToBank)) {
       if (typeof targetBank !== 'string' || !targetBank) continue;
-      const prefix = path.resolve(expandHome(rawPrefix, home));
-      if (
-        (matchTarget === prefix || matchTarget.startsWith(`${prefix}${path.sep}`)) &&
-        prefix.length > bestLen
-      ) {
-        bestLen = prefix.length;
+      const match = pathMatchesPrefix(matchTarget, rawPrefix, home);
+      if (match.matched && match.length > bestLen) {
+        bestLen = match.length;
         mappedBank = targetBank;
       }
     }
@@ -190,24 +256,26 @@ export function resolveHindsightConnection({
       .replaceAll('{channel}', env.HINDSIGHT_CHANNEL_ID || '')
       .replaceAll('{user}', env.HINDSIGHT_USER_ID || '');
 
+  const dynamicBankId =
+    typeof fileCfg.dynamicBankId === 'boolean'
+      ? fileCfg.dynamicBankId
+      : parseEnvBool(env.HINDSIGHT_DYNAMIC_BANK_ID);
+
   let resolvedBank =
     bankOverride ||
     mappedBank ||
-    fileCfg.bankId ||
-    env.HINDSIGHT_BANK_ID ||
-    expandTemplate(template);
+    (dynamicBankId === true
+      ? expandTemplate(template)
+      : fileCfg.bankId || env.HINDSIGHT_BANK_ID || expandTemplate(template));
 
   let pathOverrides = {};
   if (fileCfg.paths && typeof fileCfg.paths === 'object') {
     let bestLen = -1;
     for (const [rawPrefix, section] of Object.entries(fileCfg.paths)) {
-      if (!section || typeof section !== 'object') continue;
-      const prefix = path.resolve(expandHome(rawPrefix, home));
-      if (
-        (matchTarget === prefix || matchTarget.startsWith(`${prefix}${path.sep}`)) &&
-        prefix.length > bestLen
-      ) {
-        bestLen = prefix.length;
+      if (!section || typeof section !== 'object' || Array.isArray(section)) continue;
+      const match = pathMatchesPrefix(matchTarget, rawPrefix, home);
+      if (match.matched && match.length > bestLen) {
+        bestLen = match.length;
         pathOverrides = section;
       }
     }
@@ -217,46 +285,216 @@ export function resolveHindsightConnection({
     fileCfg.banks && typeof fileCfg.banks === 'object'
       ? fileCfg.banks[resolvedBank] || {}
       : {};
-  if (bankSection.disabled === true && !bankOverride) {
-    throw new DreamError(`Hindsight bank "${resolvedBank}" is disabled in config.`, 2);
+
+  // Evaluate disabled across the full precedence chain:
+  // defaults < env < file < paths.<prefix> < banks.<resolvedBankId>
+  let disabled = false;
+  const envDisabled = parseEnvBool(env.HINDSIGHT_DISABLED);
+  if (envDisabled !== undefined) disabled = envDisabled;
+  if (typeof fileCfg.disabled === 'boolean') disabled = fileCfg.disabled;
+  if (typeof pathOverrides.disabled === 'boolean') disabled = pathOverrides.disabled;
+  if (typeof bankSection.disabled === 'boolean') disabled = bankSection.disabled;
+  if (disabled) {
+    throw new DreamError(
+      `Hindsight is disabled for "${resolvedBank}" in configuration (${configPath} or HINDSIGHT_DISABLED).`,
+      2,
+    );
   }
+
+  // Enforce optInOnly / optInPaths fail-closed (paths.<prefix> does not override approval).
+  let optInOnly = false;
+  const envOptInOnly = parseEnvBool(env.HINDSIGHT_OPT_IN_ONLY);
+  if (envOptInOnly !== undefined) optInOnly = envOptInOnly;
+  if (typeof fileCfg.optInOnly === 'boolean') optInOnly = fileCfg.optInOnly;
+  if (optInOnly) {
+    const envOptInPaths = env.HINDSIGHT_OPT_IN_PATHS
+      ? String(env.HINDSIGHT_OPT_IN_PATHS)
+          .split(',')
+          .map((entry) => entry.trim())
+          .filter(Boolean)
+      : undefined;
+    const optInPaths = Array.isArray(fileCfg.optInPaths)
+      ? fileCfg.optInPaths.filter((entry) => typeof entry === 'string' && entry.trim())
+      : envOptInPaths || [];
+    const optedInByPath = optInPaths.some(
+      (rawPrefix) => pathMatchesPrefix(matchTarget, rawPrefix, home).matched,
+    );
+    if (!mappedBank && !optedInByPath) {
+      throw new DreamError(
+        `Hindsight optInOnly is enabled and "${matchTarget}" does not match optInPaths or mapPathToBank.`,
+        2,
+      );
+    }
+  }
+
   if (typeof bankSection.bank === 'string' && bankSection.bank && !bankOverride) {
     resolvedBank = bankSection.bank;
   }
 
-  const apiUrl = String(
-    apiUrlOverride ||
-      bankSection.apiUrl ||
-      pathOverrides.apiUrl ||
-      fileCfg.apiUrl ||
-      env.HINDSIGHT_API_URL ||
-      'https://api.hindsight.vectorize.io',
-  ).replace(/\/+$/, '');
+  // Resolve serverMode, apiPort, apiUrl, and apiToken across the same layered precedence
+  // without leaking credentials across origins or into local daemon mode.
+  const layers = [
+    {
+      label: 'environment',
+      serverMode: parseServerMode(env.HINDSIGHT_SERVER_MODE, 'HINDSIGHT_SERVER_MODE'),
+      apiPort: parseApiPort(env.HINDSIGHT_API_PORT, 'HINDSIGHT_API_PORT'),
+      apiUrl: env.HINDSIGHT_API_URL ? String(env.HINDSIGHT_API_URL).trim() : undefined,
+      apiToken:
+        env.HINDSIGHT_API_TOKEN !== undefined && env.HINDSIGHT_API_TOKEN !== ''
+          ? String(env.HINDSIGHT_API_TOKEN)
+          : undefined,
+      isEnvFallback: true,
+      isSubSection: false,
+    },
+    {
+      label: configPath,
+      serverMode: parseServerMode(fileCfg.serverMode, `${configPath} (serverMode)`),
+      apiPort: parseApiPort(fileCfg.apiPort, `${configPath} (apiPort)`),
+      apiUrl:
+        typeof fileCfg.apiUrl === 'string' && fileCfg.apiUrl.trim()
+          ? fileCfg.apiUrl.trim()
+          : undefined,
+      apiToken: typeof fileCfg.apiToken === 'string' ? fileCfg.apiToken : undefined,
+      isEnvFallback: false,
+      isSubSection: false,
+    },
+    {
+      label: `${configPath} (paths override)`,
+      serverMode: parseServerMode(
+        pathOverrides.serverMode,
+        `${configPath} (paths.serverMode)`,
+      ),
+      apiPort: parseApiPort(pathOverrides.apiPort, `${configPath} (paths.apiPort)`),
+      apiUrl:
+        typeof pathOverrides.apiUrl === 'string' && pathOverrides.apiUrl.trim()
+          ? pathOverrides.apiUrl.trim()
+          : undefined,
+      apiToken:
+        typeof pathOverrides.apiToken === 'string'
+          ? pathOverrides.apiToken
+          : undefined,
+      isEnvFallback: false,
+      isSubSection: true,
+    },
+    {
+      label: `${configPath} (banks override)`,
+      serverMode: parseServerMode(
+        bankSection.serverMode,
+        `${configPath} (banks.serverMode)`,
+      ),
+      apiPort: parseApiPort(bankSection.apiPort, `${configPath} (banks.apiPort)`),
+      apiUrl:
+        typeof bankSection.apiUrl === 'string' && bankSection.apiUrl.trim()
+          ? bankSection.apiUrl.trim()
+          : undefined,
+      apiToken:
+        typeof bankSection.apiToken === 'string' ? bankSection.apiToken : undefined,
+      isEnvFallback: false,
+      isSubSection: true,
+    },
+  ];
 
-  let apiToken =
-    bankSection.apiToken ||
-    pathOverrides.apiToken ||
-    fileCfg.apiToken ||
-    env.HINDSIGHT_API_TOKEN ||
-    '';
+  const defaultCloud = normalizeUrl(DEFAULT_CLOUD_API_URL, 'default');
+  let serverMode = 'cloud';
+  let apiPort = DEFAULT_DAEMON_PORT;
+  let effectiveUrl = defaultCloud.url;
+  let effectiveOrigin = defaultCloud.origin;
+  let effectiveHostname = defaultCloud.hostname;
+  let apiToken = '';
+  let tokenBoundToOrigin = false;
+  let explicitlyClearedToken = false;
+  let endpointOverriddenInSubSection = false;
 
-  if (!apiToken) {
-    const tokenFile = env.HINDSIGHT_TOKEN_FILE || '/run/hindsight/hindsight-api-token';
+  for (const layer of layers) {
+    const prevOrigin = effectiveOrigin;
+    const prevMode = serverMode;
+    const hasUrl = layer.apiUrl !== undefined;
+    const hasMode = layer.serverMode !== undefined;
+    const hasPort = layer.apiPort !== undefined;
+    const hasToken = layer.apiToken !== undefined;
+
+    if (hasPort) apiPort = layer.apiPort;
+    if (hasMode) serverMode = layer.serverMode;
+
+    if (hasMode && serverMode === 'daemon') {
+      const parsed = normalizeUrl(`http://127.0.0.1:${apiPort}`, layer.label);
+      effectiveUrl = parsed.url;
+      effectiveOrigin = parsed.origin;
+      effectiveHostname = parsed.hostname;
+    } else if (hasUrl) {
+      const parsed = normalizeUrl(layer.apiUrl, layer.label);
+      effectiveUrl = parsed.url;
+      effectiveOrigin = parsed.origin;
+      effectiveHostname = parsed.hostname;
+      if (!hasMode && serverMode === 'daemon') {
+        serverMode =
+          parsed.origin === defaultCloud.origin ? 'cloud' : 'self-hosted';
+      }
+    } else if (serverMode === 'daemon' && hasPort) {
+      const parsed = normalizeUrl(`http://127.0.0.1:${apiPort}`, layer.label);
+      effectiveUrl = parsed.url;
+      effectiveOrigin = parsed.origin;
+      effectiveHostname = parsed.hostname;
+    } else if (hasMode && serverMode === 'cloud' && prevMode !== 'cloud') {
+      effectiveUrl = defaultCloud.url;
+      effectiveOrigin = defaultCloud.origin;
+      effectiveHostname = defaultCloud.hostname;
+    }
+
+    const originChanged = effectiveOrigin !== prevOrigin;
+    const switchedToDaemon = serverMode === 'daemon' && prevMode !== 'daemon';
+
+    if (serverMode === 'daemon') {
+      apiToken = '';
+      tokenBoundToOrigin = false;
+    } else if (hasToken) {
+      apiToken = layer.apiToken;
+      explicitlyClearedToken = layer.apiToken === '';
+      tokenBoundToOrigin = !(layer.isEnvFallback && !hasUrl && !hasMode);
+    } else if (
+      originChanged &&
+      (tokenBoundToOrigin || layer.isSubSection)
+    ) {
+      apiToken = '';
+      tokenBoundToOrigin = false;
+    }
+
+    if (layer.isSubSection && (originChanged || switchedToDaemon)) {
+      endpointOverriddenInSubSection = true;
+    }
+  }
+
+  const isCloudTarget =
+    serverMode === 'cloud' && effectiveOrigin === defaultCloud.origin;
+
+  if (
+    !apiToken &&
+    !explicitlyClearedToken &&
+    serverMode !== 'daemon' &&
+    !endpointOverriddenInSubSection
+  ) {
+    const explicitTokenFile = env.HINDSIGHT_TOKEN_FILE;
+    const tokenFile =
+      explicitTokenFile ||
+      (!isLoopbackHostname(effectiveHostname)
+        ? '/run/hindsight/hindsight-api-token'
+        : '');
     if (tokenFile && existsSync(tokenFile)) {
       apiToken = readFileSync(tokenFile, 'utf8').replace(/[\r\n]+/g, '');
     }
   }
 
-  if (!apiToken) {
+  if (!apiToken && isCloudTarget) {
     throw new DreamError(
-      `No Hindsight API token found in ${configPath}, HINDSIGHT_API_TOKEN, or HINDSIGHT_TOKEN_FILE.`,
+      `No Hindsight API token found for Cloud (${effectiveUrl}) in ${configPath}, HINDSIGHT_API_TOKEN, or HINDSIGHT_TOKEN_FILE.`,
       2,
     );
   }
 
   return {
-    apiUrl,
+    apiUrl: effectiveUrl,
     apiToken,
+    serverMode,
     bankId: resolvedBank,
     configPath,
     gitInfo,
@@ -280,9 +518,11 @@ function createHindsightClient({ apiUrl, apiToken, bankId, timeoutMs = 45000 }) 
       }
     }
     const headers = {
-      Authorization: `Bearer ${apiToken}`,
       Accept: 'application/json',
     };
+    if (apiToken) {
+      headers.Authorization = `Bearer ${apiToken}`;
+    }
     let payload;
     if (body !== undefined) {
       headers['Content-Type'] = 'application/json';
@@ -485,9 +725,11 @@ async function inspectGitlogDocuments(client, canonicalRepoName) {
   );
   const canonicalId = `gitlog:${canonicalRepoName}`;
   const hasCanonical = gitlogs.some((d) => d.id === canonicalId);
-  const duplicateGitlogs = gitlogs.filter(
-    (d) => d.id !== canonicalId && (hasCanonical || d.id === 'gitlog:checkout'),
-  );
+  const duplicateGitlogs = hasCanonical
+    ? gitlogs.filter(
+        (d) => d.id !== canonicalId && GENERIC_GITLOG_ALIAS_IDS.has(d.id),
+      )
+    : [];
   return { canonicalId, hasCanonical, allGitlogs: gitlogs, duplicateGitlogs };
 }
 
@@ -1043,23 +1285,34 @@ async function cmdDeleteDoc(conn, client, opts) {
   const isSelfSession =
     Boolean(opts.sessionId) && docId === `conversation:${opts.sessionId}`;
   const isDreamDoc = docId.startsWith('dream:');
-  const isDuplicateGitlog = docId.startsWith('gitlog:') && docId !== canonicalGitlog;
+  const isGenericDuplicateGitlog =
+    docId !== canonicalGitlog && GENERIC_GITLOG_ALIAS_IDS.has(docId);
+  const isAllowedOtherGitlog =
+    Boolean(opts.allowOtherGitlog) &&
+    docId.startsWith('gitlog:') &&
+    docId !== canonicalGitlog;
   const isAllowedEphemeral =
     Boolean(opts.allowEphemeralDoc) && docId.startsWith('conversation:');
 
-  if (!isSelfSession && !isDreamDoc && !isDuplicateGitlog && !isAllowedEphemeral) {
+  if (
+    !isSelfSession &&
+    !isDreamDoc &&
+    !isGenericDuplicateGitlog &&
+    !isAllowedOtherGitlog &&
+    !isAllowedEphemeral
+  ) {
     throw new DreamError(
-      `Refusing to delete document "${docId}": only duplicate non-canonical gitlog:* seeds, dream:* notes, self-session transcripts (--session-id), or explicitly confirmed ephemeral conversation:* documents (--allow-ephemeral-doc) may be deleted. Use invalidate-memory for individual stale facts.`,
+      `Refusing to delete document "${docId}": only generic duplicate gitlog aliases (gitlog:checkout, gitlog:workspace — or another non-canonical gitlog:* with --allow-other-gitlog) alongside canonical "${canonicalGitlog}", dream:* notes, self-session transcripts (--session-id), or explicitly confirmed ephemeral conversation:* documents (--allow-ephemeral-doc) may be deleted. Use invalidate-memory for individual stale facts.`,
       2,
     );
   }
 
-  if (isDuplicateGitlog) {
+  if (isGenericDuplicateGitlog || isAllowedOtherGitlog) {
     const canonical = await client.get(
       `/documents/${encodeURIComponent(canonicalGitlog)}`,
       { allow404: true },
     );
-    if (!canonical && docId !== 'gitlog:checkout') {
+    if (!canonical) {
       throw new DreamError(
         `Refusing to delete "${docId}" while canonical "${canonicalGitlog}" is absent.`,
         2,
@@ -1331,9 +1584,6 @@ function parseArgs(argv) {
       case '--bank':
         opts.bank = args.shift();
         break;
-      case '--api-url':
-        opts.apiUrl = args.shift();
-        break;
       case '--json':
         opts.json = true;
         break;
@@ -1396,6 +1646,9 @@ function parseArgs(argv) {
         break;
       case '--allow-ephemeral-doc':
         opts.allowEphemeralDoc = true;
+        break;
+      case '--allow-other-gitlog':
+        opts.allowOtherGitlog = true;
         break;
       case '--refresh-stale':
         opts.refreshStale = true;
@@ -1473,7 +1726,6 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
       cwd: opts.cwd,
       env,
       bankOverride: opts.bank,
-      apiUrlOverride: opts.apiUrl,
     });
     const client = createHindsightClient(conn);
     switch (command) {
