@@ -33,6 +33,7 @@ repository policy, check names, deployment rules, and product behavior.
 | Harness context and skill maintenance | `harness-maintenance` skill | native documentation checks and outcome evidence from consumers |
 | Autonomous execution within granted scope | `autonomous-work` skill, `repo-autonomous-work-hook`, and `opencode/autonomous-work.mjs` | `bin/autonomous-work-hook.test.mjs`, task-native verification, and observed agent use |
 | Complexity, legacy and diagnostic sweeps | `complexity-sweep` skill with optional lens references | current-source findings, consumer retirement and live-route evidence, preserved contracts and maintenance reduction |
+| Hindsight memory dreaming and bank curation | `hindsight-dream` skill, `repo-hindsight-dream`, and `plugins/repo-tools/scripts/repo-hindsight-dream.mjs` | `bin/hindsight-dream.test.mjs` and bank reconciliation evidence |
 | Skill eval coverage and scoring | `skill-evals` skill and `repo-skill-evals` | wrapper and case generation tests, runner results per skill |
 | Durable evaluation provenance | `repo-eval-history` and `docs/evaluation-history.md` | artifact retention, lookup and runner integration tests |
 | Plugin topology | `.claude-plugin/`, `.agents/`, `plugins/` manifests and hooks | `plugins/manifests.test.mjs` |
