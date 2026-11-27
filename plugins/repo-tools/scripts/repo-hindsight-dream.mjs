@@ -403,7 +403,8 @@ export function resolveHindsightConnection({
   let apiToken = '';
   let tokenBoundToOrigin = false;
   let explicitlyClearedToken = false;
-  let endpointOverriddenInSubSection = false;
+  let envConfiguredEndpoint = false;
+  let suppressEnvTokenFileFallback = false;
 
   for (const layer of layers) {
     const prevOrigin = effectiveOrigin;
@@ -412,6 +413,10 @@ export function resolveHindsightConnection({
     const hasMode = layer.serverMode !== undefined;
     const hasPort = layer.apiPort !== undefined;
     const hasToken = layer.apiToken !== undefined;
+
+    if (layer.isEnvFallback && (hasUrl || hasMode)) {
+      envConfiguredEndpoint = true;
+    }
 
     if (hasPort) apiPort = layer.apiPort;
     if (hasMode) serverMode = layer.serverMode;
@@ -463,8 +468,11 @@ export function resolveHindsightConnection({
       tokenBoundToOrigin = false;
     }
 
-    if (layer.isSubSection && (originChanged || switchedToDaemon)) {
-      endpointOverriddenInSubSection = true;
+    if (
+      (layer.isSubSection || (!layer.isEnvFallback && envConfiguredEndpoint)) &&
+      (originChanged || switchedToDaemon)
+    ) {
+      suppressEnvTokenFileFallback = true;
     }
   }
 
@@ -475,7 +483,7 @@ export function resolveHindsightConnection({
     !apiToken &&
     !explicitlyClearedToken &&
     serverMode !== 'daemon' &&
-    !endpointOverriddenInSubSection
+    !suppressEnvTokenFileFallback
   ) {
     const explicitTokenFile = env.HINDSIGHT_TOKEN_FILE;
     const tokenFile =
@@ -1474,6 +1482,7 @@ async function cmdReconcile(_conn, client, opts) {
   const maxRefreshes = Math.max(0, Number(opts.maxRefreshes ?? 3));
   const deadlineMs = Date.now() + waitSeconds * 1000;
   const actions = {
+    selfSessionDocument: null,
     selfSessionDeleted: false,
     recoveredConsolidation: null,
     consolidationOperation: null,
@@ -1482,13 +1491,21 @@ async function cmdReconcile(_conn, client, opts) {
     operationDetails: {},
   };
 
-  if (opts.sessionId && !opts.dryRun) {
+  const shouldDeleteSelfSession =
+    Boolean(opts.sessionId) &&
+    (Boolean(opts.explicitSessionId) || Boolean(opts.deleteSelfSession));
+  if (shouldDeleteSelfSession) {
     const selfDocId = `conversation:${opts.sessionId}`;
-    const deleted = await client.del(
-      `/documents/${encodeURIComponent(selfDocId)}`,
-      { allow404: true },
-    );
-    actions.selfSessionDeleted = deleted !== null;
+    actions.selfSessionDocument = selfDocId;
+    if (opts.dryRun) {
+      actions.selfSessionDeleted = 'dry-run';
+    } else {
+      const deleted = await client.del(
+        `/documents/${encodeURIComponent(selfDocId)}`,
+        { allow404: true },
+      );
+      actions.selfSessionDeleted = deleted !== null;
+    }
   }
 
   const statsBefore = await client.get('/stats', { query: { refresh: true } });
@@ -1631,13 +1648,18 @@ async function cmdReconcile(_conn, client, opts) {
 }
 
 function resolveDefaultSessionId(env = process.env) {
-  const raw =
-    env.OPENCODE_SESSION_ID ||
-    env.CLAUDE_CODE_SESSION_ID ||
-    env.CODEX_THREAD_ID ||
-    env.ANTIGRAVITY_CONVERSATION_ID ||
-    '';
-  return String(raw).trim() || undefined;
+  const distinct = new Set(
+    [
+      env.OPENCODE_SESSION_ID,
+      env.CLAUDE_CODE_SESSION_ID,
+      env.CODEX_THREAD_ID,
+      env.ANTIGRAVITY_CONVERSATION_ID,
+    ]
+      .map((val) => String(val || '').trim())
+      .filter(Boolean),
+  );
+  if (distinct.size !== 1) return undefined;
+  return [...distinct][0];
 }
 
 function parseArgs(argv) {
@@ -1740,6 +1762,10 @@ function parseArgs(argv) {
         break;
       case '--session-id':
         opts.sessionId = takeValue(flag);
+        opts.explicitSessionId = true;
+        break;
+      case '--delete-self-session':
+        opts.deleteSelfSession = true;
         break;
       case '--allow-ephemeral-doc':
         opts.allowEphemeralDoc = true;

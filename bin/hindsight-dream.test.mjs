@@ -1113,18 +1113,92 @@ test('hardening: config parse error redaction, path traversal rejection, CLI fla
     try {
       const cfg = path.join(tmp, 'cfg.json');
       writeFileSync(cfg, JSON.stringify({ apiUrl: `http://127.0.0.1:${port}` }));
-      const rec = await captureLogs(() =>
+
+      // Ambient OPENCODE_SESSION_ID alone does NOT delete conversation:<id> in reconcile
+      const ambientRec = await captureLogs(() =>
         main(['reconcile', '--cwd', repoDir, '--refresh-stale', '--wait-seconds', '0'], {
           HINDSIGHT_CONFIG: cfg,
           HOME: tmp,
           OPENCODE_SESSION_ID: 'ses_opencode_auto_1',
         }),
       );
-      assert.equal(rec.result, 0, rec.stderr);
-      const parsed = JSON.parse(rec.stdout);
-      assert.deepEqual(deletedSelfDocs, ['conversation:ses_opencode_auto_1']);
+      assert.equal(ambientRec.result, 0, ambientRec.stderr);
+      const parsed = JSON.parse(ambientRec.stdout);
+      assert.deepEqual(deletedSelfDocs, []);
+      assert.equal(parsed.actions.selfSessionDeleted, false);
       assert.deepEqual(statsRefreshParams, ['true', 'true']);
       assert.equal(parsed.actions.operationStatuses['op-refresh-zero-wait'], 'processing');
+
+      // --dry-run with --delete-self-session previews selfSessionDocument without issuing DELETE
+      const dryRec = await captureLogs(() =>
+        main(['reconcile', '--cwd', repoDir, '--delete-self-session', '--dry-run'], {
+          HINDSIGHT_CONFIG: cfg,
+          HOME: tmp,
+          OPENCODE_SESSION_ID: 'ses_opencode_auto_1',
+        }),
+      );
+      assert.equal(dryRec.result, 0, dryRec.stderr);
+      const dryParsed = JSON.parse(dryRec.stdout);
+      assert.equal(dryParsed.actions.selfSessionDocument, 'conversation:ses_opencode_auto_1');
+      assert.equal(dryParsed.actions.selfSessionDeleted, 'dry-run');
+      assert.deepEqual(deletedSelfDocs, []);
+
+      // Nested distinct ambient session env vars refuse to pick an ambiguous target
+      const nestedRec = await captureLogs(() =>
+        main(['reconcile', '--cwd', repoDir, '--delete-self-session', '--wait-seconds', '0'], {
+          HINDSIGHT_CONFIG: cfg,
+          HOME: tmp,
+          OPENCODE_SESSION_ID: 'ses_child_1',
+          CLAUDE_CODE_SESSION_ID: 'ses_parent_1',
+        }),
+      );
+      assert.equal(nestedRec.result, 0, nestedRec.stderr);
+      assert.deepEqual(deletedSelfDocs, []);
+
+      // Explicit --delete-self-session with a single unambiguous env var deletes conversation:<id>
+      const explicitDelRec = await captureLogs(() =>
+        main(['reconcile', '--cwd', repoDir, '--delete-self-session', '--wait-seconds', '0'], {
+          HINDSIGHT_CONFIG: cfg,
+          HOME: tmp,
+          OPENCODE_SESSION_ID: 'ses_opencode_auto_1',
+        }),
+      );
+      assert.equal(explicitDelRec.result, 0, explicitDelRec.stderr);
+      assert.deepEqual(deletedSelfDocs, ['conversation:ses_opencode_auto_1']);
+
+      // 5. HINDSIGHT_TOKEN_FILE is NOT forwarded cross-origin when coding-agent.json overrides env endpoint
+      const tokenFile = path.join(tmp, 'env-token');
+      writeFileSync(tokenFile, 'self-hosted-file-secret-999\n');
+
+      const cloudFileCfg = path.join(tmp, 'cloud-only.json');
+      writeFileSync(cloudFileCfg, JSON.stringify({ serverMode: 'cloud' }));
+      assert.throws(
+        () =>
+          resolveHindsightConnection({
+            cwd: repoDir,
+            env: {
+              HINDSIGHT_CONFIG: cloudFileCfg,
+              HINDSIGHT_API_URL: `http://127.0.0.1:${port}`,
+              HINDSIGHT_TOKEN_FILE: tokenFile,
+            },
+            home: tmp,
+          }),
+        /No Hindsight API token found for Cloud/,
+      );
+
+      const otherSelfHostedCfg = path.join(tmp, 'other-self-hosted.json');
+      writeFileSync(otherSelfHostedCfg, JSON.stringify({ apiUrl: `http://127.0.0.1:${port}` }));
+      const otherConn = resolveHindsightConnection({
+        cwd: repoDir,
+        env: {
+          HINDSIGHT_CONFIG: otherSelfHostedCfg,
+          HINDSIGHT_API_URL: 'https://memory.example.test',
+          HINDSIGHT_TOKEN_FILE: tokenFile,
+        },
+        home: tmp,
+      });
+      assert.equal(otherConn.apiUrl, `http://127.0.0.1:${port}`);
+      assert.equal(otherConn.apiToken, '');
     } finally {
       server.close();
     }

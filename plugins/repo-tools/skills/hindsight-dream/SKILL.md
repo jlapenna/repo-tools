@@ -12,12 +12,13 @@ it never edits repository files, commits, branches, issues, or pull requests.
 Use `repo-hindsight-dream` (on `PATH`, or bundled at
 `../../scripts/repo-hindsight-dream.mjs` relative to this `SKILL.md`) for all
 reads and mutations so bearer tokens stay out of command arguments and core
-taxonomy pages remain protected. `repo-hindsight-dream` auto-detects standard
-coding-agent session variables (`OPENCODE_SESSION_ID`, `CLAUDE_CODE_SESSION_ID`,
-`CODEX_THREAD_ID`, `ANTIGRAVITY_CONVERSATION_ID`); pass
-`--session-id <current-session-id>` explicitly when another runtime or job
-provides a session identifier so the dreaming session excludes and removes its
-own transcript from the bank.
+taxonomy pages remain protected. `repo-hindsight-dream` auto-detects a single
+unambiguous coding-agent session variable (`OPENCODE_SESSION_ID`,
+`CLAUDE_CODE_SESSION_ID`, `CODEX_THREAD_ID`, `ANTIGRAVITY_CONVERSATION_ID`) for
+read-only exclusion in `status` and `candidates`; pass
+`--session-id <current-session-id>` (or `--delete-self-session` on `reconcile`)
+when you also want `reconcile` to delete the dreaming session's own transcript
+from the bank.
 
 Read [references/dream-rubric.md](references/dream-rubric.md) before mutating
 memories or retiring pages.
